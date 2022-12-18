@@ -6,51 +6,35 @@ use super::*;
 
 impl<P: Debug, T: Debug> Debug for PrefixMap<P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        self.root.fmt(f)
+        DebugPrefixMap(self, 0).fmt(f)
     }
 }
 
-impl<P: Debug, T: Debug> Debug for Node<P, T> {
+struct DebugPrefixMap<'a, P, T>(&'a PrefixMap<P, T>, usize);
+
+impl<'a, P: Debug, T: Debug> Debug for DebugPrefixMap<'a, P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        match self {
-            Self::Leaf {
-                prefix,
-                value: Some(value),
-            } => f.debug_map().entry(prefix, value).finish(),
-            Self::Leaf {
-                prefix,
-                value: None,
-            } => f.debug_set().entry(prefix).finish(),
-            Self::Single {
-                prefix,
-                value: Some(value),
-                child,
-            } => f
+        let map = self.0;
+        let idx = self.1;
+        let node = &map.table[idx];
+        match (node.value.as_ref(), node.left, node.right) {
+            (None, None, None) => node.prefix.fmt(f),
+            (None, None, Some(child)) | (None, Some(child), None) => f
                 .debug_map()
-                .entry(prefix, &(value, child.as_ref()))
+                .entry(&node.prefix, &Self(map, child))
                 .finish(),
-            Self::Single {
-                prefix,
-                value: None,
-                child,
-            } => f.debug_map().entry(prefix, child.as_ref()).finish(),
-            Self::Branch {
-                prefix,
-                value: Some(value),
-                left,
-                right,
-            } => f
+            (None, Some(left), Some(right)) => f
                 .debug_map()
-                .entry(prefix, &(value, left.as_ref(), right.as_ref()))
+                .entry(&node.prefix, &(Self(map, left), Self(map, right)))
                 .finish(),
-            Self::Branch {
-                prefix,
-                value: None,
-                left,
-                right,
-            } => f
+            (Some(v), None, None) => f.debug_map().entry(&node.prefix, v).finish(),
+            (Some(v), None, Some(child)) | (Some(v), Some(child), None) => f
                 .debug_map()
-                .entry(prefix, &(left.as_ref(), right.as_ref()))
+                .entry(&node.prefix, &(v, Self(map, child)))
+                .finish(),
+            (Some(v), Some(left), Some(right)) => f
+                .debug_map()
+                .entry(&node.prefix, &(v, Self(map, left), Self(map, right)))
                 .finish(),
         }
     }

@@ -3,9 +3,10 @@
 use crate::*;
 
 /// An iterator over all entries of a [`PrefixMap`] in lexicographic order.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Iter<'a, P, T> {
-    nodes: Vec<&'a Node<P, T>>,
+    map: &'a PrefixMap<P, T>,
+    nodes: Vec<usize>,
 }
 
 impl<'a, P, T> Iterator for Iter<'a, P, T> {
@@ -13,34 +14,15 @@ impl<'a, P, T> Iterator for Iter<'a, P, T> {
 
     fn next(&mut self) -> Option<(&'a P, &'a T)> {
         while let Some(cur) = self.nodes.pop() {
-            match cur {
-                Node::Leaf { prefix, value } => {
-                    if let Some(v) = value {
-                        return Some((prefix, v));
-                    }
-                }
-                Node::Single {
-                    prefix,
-                    value,
-                    child,
-                } => {
-                    self.nodes.push(child.as_ref());
-                    if let Some(v) = value {
-                        return Some((prefix, v));
-                    }
-                }
-                Node::Branch {
-                    prefix,
-                    value,
-                    left,
-                    right,
-                } => {
-                    self.nodes.push(right.as_ref());
-                    self.nodes.push(left.as_ref());
-                    if let Some(v) = value {
-                        return Some((prefix, v));
-                    }
-                }
+            let node = &self.map.table[cur];
+            if let Some(right) = node.right {
+                self.nodes.push(right);
+            }
+            if let Some(left) = node.left {
+                self.nodes.push(left);
+            }
+            if let Some(v) = &node.value {
+                return Some((&node.prefix, v));
             }
         }
         None
@@ -48,127 +30,81 @@ impl<'a, P, T> Iterator for Iter<'a, P, T> {
 }
 
 /// An iterator over all prefixes of a [`PrefixMap`] in lexicographic order.
-#[derive(Clone, Debug)]
-pub struct Keys<'a, P, T>(Iter<'a, P, T>);
+#[derive(Clone)]
+pub struct Keys<'a, P, T> {
+    map: &'a PrefixMap<P, T>,
+    nodes: Vec<usize>,
+}
 
 impl<'a, P, T> Iterator for Keys<'a, P, T> {
     type Item = &'a P;
 
     fn next(&mut self) -> Option<&'a P> {
-        self.0.next().map(|(p, _)| p)
-    }
-}
-
-/// An iterator over all values of a [`PrefixMap`] in lexicographic order of their associated
-/// prefixes.
-#[derive(Clone, Debug)]
-pub struct Values<'a, P, T>(Iter<'a, P, T>);
-
-impl<'a, P, T> Iterator for Values<'a, P, T> {
-    type Item = &'a T;
-
-    fn next(&mut self) -> Option<&'a T> {
-        self.0.next().map(|(_, t)| t)
-    }
-}
-
-/// An iterator over all mutable entries of a [`PrefixMap`] in lexicographic order.
-#[derive(Debug)]
-pub struct IterMut<'a, P, T> {
-    nodes: Vec<&'a mut Node<P, T>>,
-}
-
-impl<'a, P, T> Iterator for IterMut<'a, P, T> {
-    type Item = (&'a mut P, &'a mut T);
-
-    fn next(&mut self) -> Option<(&'a mut P, &'a mut T)> {
         while let Some(cur) = self.nodes.pop() {
-            match cur {
-                Node::Leaf { prefix, value } => {
-                    if let Some(v) = value {
-                        return Some((prefix, v));
-                    }
-                }
-                Node::Single {
-                    prefix,
-                    value,
-                    child,
-                } => {
-                    self.nodes.push(child.as_mut());
-                    if let Some(v) = value {
-                        return Some((prefix, v));
-                    }
-                }
-                Node::Branch {
-                    prefix,
-                    value,
-                    left,
-                    right,
-                } => {
-                    self.nodes.push(right.as_mut());
-                    self.nodes.push(left.as_mut());
-                    if let Some(v) = value {
-                        return Some((prefix, v));
-                    }
-                }
+            let node = &self.map.table[cur];
+            if let Some(right) = node.right {
+                self.nodes.push(right);
+            }
+            if let Some(left) = node.left {
+                self.nodes.push(left);
+            }
+            if node.value.is_some() {
+                return Some(&node.prefix);
             }
         }
         None
     }
 }
 
-/// An iterator over all mutable values of a [`PrefixMap`] in lexicographic order of their
-/// associated prefixes.
-#[derive(Debug)]
-pub struct ValuesMut<'a, P, T>(IterMut<'a, P, T>);
+/// An iterator over all values of a [`PrefixMap`] in lexicographic order of their associated
+/// prefixes.
+#[derive(Clone)]
+pub struct Values<'a, P, T> {
+    map: &'a PrefixMap<P, T>,
+    nodes: Vec<usize>,
+}
 
-impl<'a, P, T> Iterator for ValuesMut<'a, P, T> {
-    type Item = &'a mut T;
+impl<'a, P, T> Iterator for Values<'a, P, T> {
+    type Item = &'a T;
 
-    fn next(&mut self) -> Option<&'a mut T> {
-        self.0.next().map(|(_, t)| t)
+    fn next(&mut self) -> Option<&'a T> {
+        while let Some(cur) = self.nodes.pop() {
+            let node = &self.map.table[cur];
+            if let Some(right) = node.right {
+                self.nodes.push(right);
+            }
+            if let Some(left) = node.left {
+                self.nodes.push(left);
+            }
+            if let Some(v) = node.value.as_ref() {
+                return Some(v);
+            }
+        }
+        None
     }
 }
 
 /// An iterator over all owned entries of a [`PrefixMap`] in lexicographic order.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct IntoIter<P, T> {
-    nodes: Vec<Node<P, T>>,
+    map: PrefixMap<P, T>,
+    nodes: Vec<usize>,
 }
 
-impl<P, T> Iterator for IntoIter<P, T> {
+impl<P: Prefix, T> Iterator for IntoIter<P, T> {
     type Item = (P, T);
 
     fn next(&mut self) -> Option<(P, T)> {
         while let Some(cur) = self.nodes.pop() {
-            match cur {
-                Node::Leaf { prefix, value } => {
-                    if let Some(v) = value {
-                        return Some((prefix, v));
-                    }
-                }
-                Node::Single {
-                    prefix,
-                    value,
-                    child,
-                } => {
-                    self.nodes.push(*child);
-                    if let Some(v) = value {
-                        return Some((prefix, v));
-                    }
-                }
-                Node::Branch {
-                    prefix,
-                    value,
-                    left,
-                    right,
-                } => {
-                    self.nodes.push(*right);
-                    self.nodes.push(*left);
-                    if let Some(v) = value {
-                        return Some((prefix, v));
-                    }
-                }
+            let node = &mut self.map.table[cur];
+            if let Some(right) = node.right {
+                self.nodes.push(right);
+            }
+            if let Some(left) = node.left {
+                self.nodes.push(left);
+            }
+            if let Some(v) = node.value.take() {
+                return Some((std::mem::replace(&mut node.prefix, P::zero()), v));
             }
         }
         None
@@ -177,37 +113,68 @@ impl<P, T> Iterator for IntoIter<P, T> {
 
 /// An iterator over all prefixes of a [`PrefixMap`] in lexicographic order.
 #[derive(Clone, Debug)]
-pub struct IntoKeys<P, T>(IntoIter<P, T>);
+pub struct IntoKeys<P, T> {
+    map: PrefixMap<P, T>,
+    nodes: Vec<usize>,
+}
 
-impl<P, T> Iterator for IntoKeys<P, T> {
+impl<P: Prefix, T> Iterator for IntoKeys<P, T> {
     type Item = P;
 
     fn next(&mut self) -> Option<P> {
-        self.0.next().map(|(p, _)| p)
+        while let Some(cur) = self.nodes.pop() {
+            let node = &mut self.map.table[cur];
+            if let Some(right) = node.right {
+                self.nodes.push(right);
+            }
+            if let Some(left) = node.left {
+                self.nodes.push(left);
+            }
+            if node.value.is_some() {
+                return Some(std::mem::replace(&mut node.prefix, P::zero()));
+            }
+        }
+        None
     }
 }
 
 /// An iterator over all values of a [`PrefixMap`] in lexicographic order of their associated
 /// prefix.
-#[derive(Clone, Debug)]
-pub struct IntoValues<P, T>(IntoIter<P, T>);
+#[derive(Clone)]
+pub struct IntoValues<P, T> {
+    map: PrefixMap<P, T>,
+    nodes: Vec<usize>,
+}
 
 impl<P, T> Iterator for IntoValues<P, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
-        self.0.next().map(|(_, t)| t)
+        while let Some(cur) = self.nodes.pop() {
+            let node = &mut self.map.table[cur];
+            if let Some(right) = node.right {
+                self.nodes.push(right);
+            }
+            if let Some(left) = node.left {
+                self.nodes.push(left);
+            }
+            if let Some(v) = node.value.take() {
+                return Some(v);
+            }
+        }
+        None
     }
 }
 
-impl<P, T> IntoIterator for PrefixMap<P, T> {
+impl<P: Prefix, T> IntoIterator for PrefixMap<P, T> {
     type Item = (P, T);
 
     type IntoIter = IntoIter<P, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
-            nodes: vec![self.root],
+            map: self,
+            nodes: vec![0],
         }
     }
 }
@@ -219,7 +186,8 @@ impl<'a, P, T> IntoIterator for &'a PrefixMap<P, T> {
 
     fn into_iter(self) -> Self::IntoIter {
         Iter {
-            nodes: vec![&self.root],
+            map: self,
+            nodes: vec![0],
         }
     }
 }
@@ -232,46 +200,42 @@ impl<P, T> PrefixMap<P, T> {
         self.into_iter()
     }
 
-    /// An iterator visiting all key-value pairs mutably in lexicographic order. The iterator
-    /// element type is `(&mut P, &mut T)`.
-    #[inline(always)]
-    pub fn iter_mut(&mut self) -> IterMut<'_, P, T> {
-        IterMut {
-            nodes: vec![&mut self.root],
-        }
-    }
-
     /// An iterator visiting all keys in lexicographic order. The iterator element type is `&P`.
     #[inline(always)]
     pub fn keys(&self) -> Keys<'_, P, T> {
-        Keys(self.iter())
+        Keys {
+            map: self,
+            nodes: vec![0],
+        }
     }
 
     /// Creates a consuming iterator visiting all keys in lexicographic order. The iterator element
     /// type is `P`.
     #[inline(always)]
     pub fn into_keys(self) -> IntoKeys<P, T> {
-        IntoKeys(self.into_iter())
+        IntoKeys {
+            map: self,
+            nodes: vec![0],
+        }
     }
 
     /// An iterator visiting all values in lexicographic order. The iterator element type is `&P`.
     #[inline(always)]
     pub fn values(&self) -> Values<'_, P, T> {
-        Values(self.iter())
-    }
-
-    /// An iterator visiting all values mutably in lexicographic order. The iterator element type is
-    /// `&mut P`.
-    #[inline(always)]
-    pub fn values_mut(&mut self) -> ValuesMut<'_, P, T> {
-        ValuesMut(self.iter_mut())
+        Values {
+            map: self,
+            nodes: vec![0],
+        }
     }
 
     /// Creates a consuming iterator visiting all values in lexicographic order. The iterator
     /// element type is `P`.
     #[inline(always)]
     pub fn into_values(self) -> IntoValues<P, T> {
-        IntoValues(self.into_iter())
+        IntoValues {
+            map: self,
+            nodes: vec![0],
+        }
     }
 }
 
