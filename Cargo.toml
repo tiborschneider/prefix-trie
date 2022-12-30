@@ -2,6 +2,14 @@
 name = "prefix-trie"
 version = "0.2.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tiborschneider/prefix-trie"
+homepage = "https://github.com/tiborschneider/prefix-trie"
+documentation = "https://docs.rs/prefix-trie"
+readme = "README.md"
+categories = ["network-programming"]
+keywords = ["IP", "prefix", "trie", "collection"]
+description = "Prefix trie datastructure (both a set and a map) that provides exact and longest-prefix matches."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
