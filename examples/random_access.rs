@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 
-use prefixmap::*;
+use prefix_trie::*;
 
 use ipnet::Ipv4Net;
 use rand::prelude::*;
@@ -10,7 +10,7 @@ fn main() {
 
     let mut rng = thread_rng();
 
-    for _ in 0..10_000_000 {
+    for _ in 0..1_000_000 {
         let prefix = Ipv4Net::new(Ipv4Addr::new(rng.gen(), 0, 0, 0), rng.gen_range(1..=8)).unwrap();
         let prefix = Ipv4Net::new(prefix.mask().into(), prefix.prefix_len()).unwrap();
 
