@@ -1,11 +1,16 @@
-use std::{collections::BTreeMap, net::Ipv4Addr};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    net::Ipv4Addr,
+};
 
 use ipnet::Ipv4Net;
 
+use super::map::Node;
 use super::*;
 use rand::prelude::*;
 
 type Map = PrefixMap<Ipv4Net, u32>;
+type Set = PrefixSet<Ipv4Net>;
 
 fn ip(s: &str) -> Ipv4Net {
     s.parse().unwrap()
@@ -226,12 +231,38 @@ macro_rules! assert_iter {
         let own_v: Vec<u32> = $exp.iter().map(|(_, v)| *v).collect();
         let ref_v: Vec<&u32> = own_v.iter().collect();
 
+        let mut duplicate_a = $map.clone();
+        let mut duplicate_b = $map.clone();
+        let double: Vec<(Ipv4Net, u32)> = $exp.iter().map(|(p, v)| (*p, v * 2)).collect();
+
         pretty_assertions::assert_eq!($map.iter().collect::<Vec<_>>(), ref_i);
         pretty_assertions::assert_eq!($map.keys().collect::<Vec<_>>(), ref_p);
         pretty_assertions::assert_eq!($map.values().collect::<Vec<_>>(), ref_v);
         pretty_assertions::assert_eq!($map.clone().into_iter().collect::<Vec<_>>(), own_i);
         pretty_assertions::assert_eq!($map.clone().into_keys().collect::<Vec<_>>(), own_p);
         pretty_assertions::assert_eq!($map.clone().into_values().collect::<Vec<_>>(), own_v);
+
+        duplicate_a.iter_mut().for_each(|(_, v)| *v *= 2);
+        duplicate_b.values_mut().for_each(|v| *v *= 2);
+        pretty_assertions::assert_eq!(duplicate_a.into_iter().collect::<Vec<_>>(), double);
+        pretty_assertions::assert_eq!(duplicate_b.into_iter().collect::<Vec<_>>(), double);
+    };
+}
+
+macro_rules! assert_iter_set {
+    ($map:expr) => {
+        assert_iter!($map,)
+    };
+    ($map:expr, $(($ip:literal, $val:literal)),*) => {
+        let exp: Vec<(Ipv4Net, u32)> = vec![$((ip($ip), $val)),*];
+        assert_iter!($map, exp);
+    };
+    ($map:expr, $exp:expr) => {
+        let own_i: Vec<Ipv4Net> = $exp.clone();
+        let ref_i: Vec<&Ipv4Net> = own_i.iter().collect();
+
+        pretty_assertions::assert_eq!($map.iter().collect::<Vec<_>>(), ref_i);
+        pretty_assertions::assert_eq!($map.clone().into_iter().collect::<Vec<_>>(), own_i);
     };
 }
 
@@ -562,17 +593,44 @@ fn fuzzing(n: usize) {
         if rng.gen_bool(0.7) {
             // insert
             let value: u32 = rng.gen::<u16>() as u32;
-
-            // insert and make sure the result is the same
-            assert_eq!(reference.insert(prefix, value), pm.insert(prefix, value));
+            // insert either with entry syntax or with regular insert
+            if rng.gen_bool(0.5) {
+                let exp = reference.insert(prefix, value);
+                let entry = pm.entry(prefix);
+                assert_eq!(exp.as_ref(), entry.get());
+                match rng.gen_range(1..=3) {
+                    1 => {
+                        *entry.or_default() = value;
+                    }
+                    2 => {
+                        *entry.or_insert(1) = value;
+                    }
+                    _ => {
+                        *entry.or_insert_with(|| 2) = value;
+                    }
+                }
+            } else {
+                // regular syntax
+                assert_eq!(reference.insert(prefix, value), pm.insert(prefix, value));
+            }
         } else {
             // remove anc compare the result
             assert_eq!(reference.remove(&prefix), pm.remove_keep_tree(&prefix));
         }
 
         let sorted = reference.iter().map(|(p, v)| (*p, *v)).collect::<Vec<_>>();
-
         assert_iter!(pm, sorted);
+
+        // select a random prefix and check the iterator of children
+        let prefix = Ipv4Net::new(Ipv4Addr::new(rng.gen(), 0, 0, 0), rng.gen_range(1..=6)).unwrap();
+        let prefix = Ipv4Net::new(prefix.mask().into(), prefix.prefix_len()).unwrap();
+        assert_eq!(
+            pm.children(&prefix).collect::<Vec<_>>(),
+            reference
+                .iter()
+                .filter(|(p, _)| prefix.contains(*p))
+                .collect::<Vec<_>>()
+        );
     }
 }
 
@@ -582,8 +640,7 @@ fn fuzzing_check_removal(n: usize) {
 
     let mut rng = thread_rng();
 
-    for i in 0..n {
-        eprintln!("{i}");
+    for _ in 0..n {
         let prefix = Ipv4Net::new(Ipv4Addr::new(rng.gen(), 0, 0, 0), rng.gen_range(1..=8)).unwrap();
         let prefix = Ipv4Net::new(prefix.mask().into(), prefix.prefix_len()).unwrap();
 
@@ -611,6 +668,17 @@ fn fuzzing_check_removal(n: usize) {
         let sorted = reference.iter().map(|(p, v)| (*p, *v)).collect::<Vec<_>>();
 
         assert_iter!(pm, sorted);
+
+        // select a random prefix and check the iterator of children
+        let prefix = Ipv4Net::new(Ipv4Addr::new(rng.gen(), 0, 0, 0), rng.gen_range(1..=6)).unwrap();
+        let prefix = Ipv4Net::new(prefix.mask().into(), prefix.prefix_len()).unwrap();
+        assert_eq!(
+            pm.children(&prefix).collect::<Vec<_>>(),
+            reference
+                .iter()
+                .filter(|(p, _)| prefix.contains(*p))
+                .collect::<Vec<_>>()
+        );
     }
 }
 
@@ -620,7 +688,7 @@ fn fuzzing_remove_children(n: usize) {
 
     let mut rng = thread_rng();
 
-    for i in 0..n {
+    for _ in 0..n {
         let insert = rng.gen_bool(0.9);
         let prefix_len = if insert {
             rng.gen_range(1..=8)
@@ -632,14 +700,107 @@ fn fuzzing_remove_children(n: usize) {
         let prefix = Ipv4Net::new(prefix.mask().into(), prefix.prefix_len()).unwrap();
 
         if insert {
-            eprintln!("{i} insert {}", prefix);
             let value: u32 = rng.gen::<u8>() as u32;
             assert_eq!(reference.insert(prefix, value), pm.insert(prefix, value));
         } else {
-            eprintln!("{i} remove {}", prefix);
             reference.retain(|p, _| !prefix.contains(p));
             pm.remove_children(&prefix);
         }
+        let sorted = reference.iter().map(|(p, v)| (*p, *v)).collect::<Vec<_>>();
+        assert_iter!(pm, sorted);
+
+        // select a random prefix and check the iterator of children
+        let prefix = Ipv4Net::new(Ipv4Addr::new(rng.gen(), 0, 0, 0), rng.gen_range(1..=6)).unwrap();
+        let prefix = Ipv4Net::new(prefix.mask().into(), prefix.prefix_len()).unwrap();
+        assert_eq!(
+            pm.children(&prefix).collect::<Vec<_>>(),
+            reference
+                .iter()
+                .filter(|(p, _)| prefix.contains(*p))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+fn fuzzing_set_union(n: usize) {
+    let mut ref1 = BTreeSet::new();
+    let mut ref2 = BTreeSet::new();
+    let mut set1 = Set::new();
+    let mut set2 = Set::new();
+
+    let mut rng = thread_rng();
+
+    fn mutate(set: &mut Set, reference: &mut BTreeSet<Ipv4Net>, rng: &mut ThreadRng) {
+        let prefix = Ipv4Net::new(Ipv4Addr::new(rng.gen(), 0, 0, 0), rng.gen_range(1..=8)).unwrap();
+        let prefix = Ipv4Net::new(prefix.mask().into(), prefix.prefix_len()).unwrap();
+        if rng.gen_bool(0.7) {
+            // insert either with entry syntax or with regular insert
+            assert_eq!(reference.insert(prefix), set.insert(prefix));
+        } else {
+            // remove anc compare the result
+            if rng.gen_bool(0.3) {
+                assert_eq!(reference.remove(&prefix), set.remove_keep_tree(&prefix));
+            } else {
+                assert_eq!(reference.remove(&prefix), set.remove(&prefix));
+            }
+        }
+    }
+
+    for _ in 0..n {
+        mutate(&mut set1, &mut ref1, &mut rng);
+        mutate(&mut set2, &mut ref2, &mut rng);
+
+        // check
+        let sort1 = ref1.iter().copied().collect::<Vec<_>>();
+        let sort2 = ref2.iter().copied().collect::<Vec<_>>();
+        assert_iter_set!(set1, sort1);
+        assert_iter_set!(set2, sort2);
+
+        // check the union
+        let ref_union = ref1.union(&ref2).copied().collect::<Vec<_>>();
+        let union = set1.union(&set2).copied().collect::<Vec<_>>();
+        assert_eq!(union, ref_union, "with\nset1: {set1:?}\nset2: {set2:?}");
+
+        // check the intersection
+        let ref_intr = ref1.intersection(&ref2).copied().collect::<Vec<_>>();
+        let intr = set1.intersection(&set2).copied().collect::<Vec<_>>();
+        assert_eq!(intr, ref_intr, "with\nset1: {set1:?}\nset2: {set2:?}");
+
+        // check the difference
+        let ref_diff = ref1.difference(&ref2).copied().collect::<Vec<_>>();
+        let diff = set1.difference(&set2).copied().collect::<Vec<_>>();
+        assert_eq!(diff, ref_diff, "with\nset1: {set1:?}\nset2: {set2:?}");
+    }
+}
+
+fn fuzzing_retain(n: usize, m: usize) {
+    let mut reference = BTreeMap::new();
+    let mut pm = Map::new();
+
+    let mut rng = thread_rng();
+
+    for _ in 0..n {
+        // insert m elements
+        for _ in 0..m {
+            let prefix =
+                Ipv4Net::new(Ipv4Addr::new(rng.gen(), 0, 0, 0), rng.gen_range(1..=8)).unwrap();
+            let prefix = Ipv4Net::new(prefix.mask().into(), prefix.prefix_len()).unwrap();
+            let value: u32 = rng.gen::<u16>() as u32;
+            pm.insert(prefix, value);
+            reference.insert(prefix, value);
+        }
+
+        // retain elements randomly
+        let mut choices: HashMap<(Ipv4Net, u32), bool> = HashMap::new();
+        pm.retain(|p, v| {
+            let choice = rng.gen_bool(0.9);
+            choices.insert((*p, *v), choice);
+            choice
+        });
+
+        reference.retain(|p, v| choices.remove(&(*p, *v)).unwrap());
+        assert!(choices.is_empty());
+
         let sorted = reference.iter().map(|(p, v)| (*p, *v)).collect::<Vec<_>>();
         assert_iter!(pm, sorted);
     }
@@ -679,3 +840,5 @@ macro_rules! repeat_same {
 repeat_same!(fuzzing_build, fuzzing(500), 100);
 repeat_same!(fuzzing_remove, fuzzing_check_removal(500), 100);
 repeat_same!(fuzzing_remove_children, fuzzing_remove_children(2000), 100);
+repeat_same!(fuzzing_set, fuzzing_set_union(500), 100);
+repeat_same!(fuzzing_retain, fuzzing_retain(100, 10), 100);

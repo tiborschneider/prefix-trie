@@ -1,6 +1,6 @@
 [package]
-name = "prefixmap"
-version = "0.1.0"
+name = "prefix-trie"
+version = "0.2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -9,10 +9,14 @@ edition = "2021"
 name = "benchmark"
 harness = false
 
+[features]
+serde = ["dep:serde"]
+
 [dependencies]
 ipnet = "2.6.0"
 num-traits = "0.2.15"
 take_mut = "0.2.2"
+serde = { version = "1", optional = true}
 
 [dev-dependencies]
 criterion = "0.4.0"

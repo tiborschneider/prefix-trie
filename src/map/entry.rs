@@ -4,11 +4,14 @@ use super::*;
 
 /// A mutable view into a single entry in a map, which may either be vacant or occupied.
 pub enum Entry<'a, P, T> {
+    /// The entry is not present in the tree.
     Vacant(VacantEntry<'a, P, T>),
+    /// The entry is already present in the tree.
     Occupied(OccupiedEntry<'a, P, T>),
 }
 
-/// A mutable view into a missing entry.
+/// A mutable view into a missing entry. The information within this structure describes a path
+/// towards that missing node, and how to insert it.
 pub struct VacantEntry<'a, P, T> {
     pub(super) map: &'a mut PrefixMap<P, T>,
     pub(super) prefix: P,
@@ -16,7 +19,8 @@ pub struct VacantEntry<'a, P, T> {
     pub(super) direction: DirectionForInsert<P>,
 }
 
-/// A mutable view into an occupied entry.
+/// A mutable view into an occupied entry. An occupied entry represents a node that is already
+/// present on the tree.
 pub struct OccupiedEntry<'a, P, T> {
     pub(super) node: &'a mut Node<P, T>,
 }
@@ -56,7 +60,7 @@ where
     pub fn insert(self, v: T) -> Option<T> {
         match self {
             Entry::Vacant(e) => {
-                e.insert(v);
+                e._insert(v);
                 None
             }
             Entry::Occupied(e) => e.node.value.replace(v),
@@ -68,7 +72,7 @@ where
     #[inline(always)]
     pub fn or_insert(self, default: T) -> &'a mut T {
         match self {
-            Entry::Vacant(e) => e.insert(default).value.as_mut().unwrap(),
+            Entry::Vacant(e) => e._insert(default).value.as_mut().unwrap(),
             Entry::Occupied(e) => e.node.value.get_or_insert(default),
         }
     }
@@ -78,7 +82,7 @@ where
     #[inline(always)]
     pub fn or_insert_with<F: FnOnce() -> T>(self, default: F) -> &'a mut T {
         match self {
-            Entry::Vacant(e) => e.insert(default()).value.as_mut().unwrap(),
+            Entry::Vacant(e) => e._insert(default()).value.as_mut().unwrap(),
             Entry::Occupied(e) => e.node.value.get_or_insert_with(default),
         }
     }
@@ -114,7 +118,7 @@ impl<'a, P, T> VacantEntry<'a, P, T>
 where
     P: Prefix,
 {
-    fn insert(self, v: T) -> &'a mut Node<P, T> {
+    fn _insert(self, v: T) -> &'a mut Node<P, T> {
         match self.direction {
             DirectionForInsert::Reached => {
                 let node = &mut self.map.table[self.idx];
@@ -146,5 +150,71 @@ where
             }
             DirectionForInsert::Enter { .. } => unreachable!(),
         }
+    }
+}
+
+impl<'a, P, T> OccupiedEntry<'a, P, T> {
+    /// Gets a reference to the key in the entry.
+    pub fn key(&self) -> &P {
+        &self.node.prefix
+    }
+
+    /// Gets a reference to the value in the entry.
+    pub fn get(&self) -> &T {
+        self.node.value.as_ref().unwrap()
+    }
+
+    /// Gets a mutable reference to the value in the entry.
+    pub fn get_mut(&mut self) -> &mut T {
+        self.node.value.as_mut().unwrap()
+    }
+
+    /// Insert a new value into the entry, returning the old value.
+    pub fn insert(&mut self, value: T) -> T {
+        self.node.value.replace(value).unwrap()
+    }
+
+    /// Remove the current value and return it.
+    pub fn remove(&mut self) -> T {
+        self.node.value.take().unwrap()
+    }
+}
+
+impl<'a, P, T> VacantEntry<'a, P, T> {
+    /// Gets a reference to the key in the entry.
+    pub fn key(&self) -> &P {
+        &self.prefix
+    }
+}
+
+impl<'a, P, T> VacantEntry<'a, P, T>
+where
+    P: Prefix,
+{
+    /// Get a mutable reference to the value. If the value is yet empty, set it to the given default
+    /// value.
+    pub fn insert(self, default: T) -> &'a mut T {
+        let node = self._insert(default);
+        node.value.as_mut().unwrap()
+    }
+
+    /// Get a mutable reference to the value. If the value is yet empty, set it to the return value
+    /// from the given function.
+    pub fn insert_with<F: FnOnce() -> T>(self, default: F) -> &'a mut T {
+        let node = self._insert(default());
+        node.value.as_mut().unwrap()
+    }
+}
+
+impl<'a, P, T> VacantEntry<'a, P, T>
+where
+    P: Prefix,
+    T: Default,
+{
+    /// Get a mutable reference to the value. If the value is yet empty, set it to the default value
+    /// using `Default::default()`.
+    pub fn default(self) -> &'a mut T {
+        let node = self._insert(Default::default());
+        node.value.as_mut().unwrap()
     }
 }

@@ -39,3 +39,9 @@ impl<'a, P: Debug, T: Debug> Debug for DebugPrefixMap<'a, P, T> {
         }
     }
 }
+
+impl<P: Debug> Debug for PrefixSet<P> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        DebugPrefixMap(&self.0, 0).fmt(f)
+    }
+}
