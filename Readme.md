@@ -1,3 +1,6 @@
+![CI test](https://github.com/tiborschneider/prefix-trie/actions/workflows/test.yml/badge.svg)
+[![codecov](https://codecov.io/gh/tiborschneider/prefix-trie/branch/main/graph/badge.svg?token=EEJXNNURMW)](https://codecov.io/gh/tiborschneider/prefix-trie)
+
 # Prefix-Trie
 
 This crate provides a simple prefix tree for IP prefixes. The structure allows exact matches, as
