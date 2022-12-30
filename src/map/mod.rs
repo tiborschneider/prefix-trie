@@ -326,7 +326,7 @@ where
     /// map. In contrast to [`Self::remove_keep_tree`], this operation will modify the tree
     /// structure. As a result, this operation takes longer than `remove_keep_tree`, as does
     /// inserting the same element again. However, future reads may be faster as less nodes need to
-    /// be traversed. Further, it minimally reduces the memory footprint.
+    /// be traversed. Further, it reduces the memory footprint to its minimum.
     ///
     /// ```
     /// # use prefix_trie::*;
