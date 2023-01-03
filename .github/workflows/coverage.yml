@@ -18,12 +18,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-      - name: Install latest nightly
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: nightly
-            override: true
-            components: rustfmt, clippy, llvm-tools-preview
+    - name: Install latest nightly
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        override: true
+        components: rustfmt, clippy, llvm-tools-preview
     - name: install grcov
       run: cargo install grcov
     - name: run tests
