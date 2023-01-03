@@ -1,12 +1,12 @@
 //! Description of the generic type `Prefix`.
 
 use ipnet::{Ipv4Net, Ipv6Net};
-use num_traits::{PrimInt, Unsigned, Zero};
+use num_traits::{CheckedShr, PrimInt, Unsigned, Zero};
 
 /// Trait for defining prefixes.
 pub trait Prefix: Sized {
     /// How can the prefix be represented. This must be one of `u8`, `u16`, `u32`, `u64`, or `u128`.
-    type R: Unsigned + PrimInt + Zero;
+    type R: Unsigned + PrimInt + Zero + CheckedShr;
 
     /// Get raw representation of the address, ignoring the prefix length. This function must return
     /// the representation with the mask already applied.
@@ -52,8 +52,12 @@ pub trait Prefix: Sized {
     /// Check if a specific bit is set (counted from the left, where 0 is the first bit from the
     /// left).
     fn is_bit_set(&self, bit: u8) -> bool {
-        let mask =
-            ((!Self::R::zero()) >> bit as usize) ^ ((!Self::R::zero()) >> (1usize + bit as usize));
+        let mask = (!Self::R::zero())
+            .checked_shr(bit as u32)
+            .unwrap_or_else(Self::R::zero)
+            ^ (!Self::R::zero())
+                .checked_shr(1u32 + bit as u32)
+                .unwrap_or_else(Self::R::zero);
         mask & self.mask() != Self::R::zero()
     }
 
@@ -162,7 +166,7 @@ impl Prefix for Ipv6Net {
 
 impl<R> Prefix for (R, u8)
 where
-    R: Unsigned + PrimInt + Zero,
+    R: Unsigned + PrimInt + Zero + CheckedShr,
 {
     type R = R;
 
@@ -254,5 +258,98 @@ mod test {
         assert!(pfx!("255.0.0.0/8").is_bit_set(7));
         assert!(!pfx!("255.0.0.0/8").is_bit_set(8));
         assert!(!pfx!("255.255.0.0/8").is_bit_set(8));
+    }
+
+    #[generic_tests::define]
+    mod t {
+        use num_traits::NumCast;
+
+        use super::*;
+
+        fn new<P: Prefix>(repr: u32, len: u8) -> P {
+            let repr = <<P as Prefix>::R as NumCast>::from(repr).unwrap();
+            let num_zeros = <<P as Prefix>::R as Zero>::zero().count_zeros() as u8;
+            let len = len + (num_zeros - 32);
+            P::from_repr_len(repr, len)
+        }
+
+        #[test]
+        fn repr_len<P: Prefix>() {
+            for x in [0x01000000u32, 0x010f0000u32, 0xffff0000u32] {
+                let repr = <<P as Prefix>::R as NumCast>::from(x).unwrap();
+                let num_zeros = <<P as Prefix>::R as Zero>::zero().count_zeros() as u8;
+                let len = 16 + (num_zeros - 32);
+                let prefix = P::from_repr_len(repr, len);
+                assert!(prefix.repr() == repr);
+                assert!(prefix.prefix_len() == len);
+            }
+        }
+
+        #[test]
+        fn mask<P: Prefix>() {
+            let mask = 0xffff0000u32;
+            for x in [0x01001234u32, 0x010fabcdu32, 0xffff5678u32] {
+                let prefix: P = new(x, 16);
+                assert_eq!(<u32 as NumCast>::from(prefix.mask()), Some(x & mask));
+            }
+        }
+
+        #[test]
+        fn zero<P: Prefix>() {
+            let prefix = P::from_repr_len(P::R::zero(), 0);
+            assert!(P::zero().eq(&prefix));
+        }
+
+        #[test]
+        fn longest_common_prefix<P: Prefix>() {
+            for ((a, al), (b, bl), (c, cl)) in [
+                ((0x01020304, 24), (0x01030304, 24), (0x01020000, 15)),
+                ((0x12345678, 24), (0x12345678, 16), (0x12340000, 16)),
+            ] {
+                let a: P = new(a, al);
+                let b: P = new(b, bl);
+                let c: P = new(c, cl);
+                let lcp = a.longest_common_prefix(&b);
+                assert!(lcp.repr() == c.repr());
+                assert!(lcp.prefix_len() == c.prefix_len());
+            }
+        }
+
+        #[test]
+        fn contains<P: Prefix>() {
+            assert!(new::<P>(0x01020000, 16).contains(&new(0x0102ffff, 24)));
+            assert!(new::<P>(0x01020304, 16).contains(&new(0x0102ffff, 24)));
+            assert!(new::<P>(0x01020304, 16).contains(&new(0x0102ffff, 16)));
+            assert!(!new::<P>(0x01020304, 24).contains(&new(0x0102ffff, 16)));
+        }
+
+        #[test]
+        fn is_bit_set<P: Prefix>() {
+            let x = 0x12345678u32;
+            let num_zeros = <<P as Prefix>::R as Zero>::zero().count_zeros() as u8;
+            let offset = num_zeros - 32;
+            let p: P = new(x, 16);
+            for i in 0..64 {
+                let j = i + offset;
+                if i >= 16 {
+                    assert!(!p.is_bit_set(j))
+                } else {
+                    let mask = 0x80000000u32 >> i;
+                    assert_eq!(p.is_bit_set(j), x & mask != 0)
+                }
+            }
+        }
+
+        #[instantiate_tests(<Ipv4Net>)]
+        mod ipv4net {}
+
+        #[instantiate_tests(<Ipv6Net>)]
+        mod ipv6net {}
+
+        #[instantiate_tests(<(u32, u8)>)]
+        mod u32_u8 {}
+
+        #[instantiate_tests(<(u64, u8)>)]
+        mod u64_u8 {}
     }
 }
