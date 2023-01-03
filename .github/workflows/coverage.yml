@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Cinstrument-coverage"
+  RUSTDOCFLAGS: "-Cinstrument-coverage -Z unstable-options --persist-doctests target/debug/doctestbins"
 
 jobs:
   build:
@@ -17,14 +18,18 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: install llvm-tools
-      run: rustup component add llvm-tools-preview
+      - name: Install latest nightly
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: nightly
+            override: true
+            components: rustfmt, clippy, llvm-tools-preview
     - name: install grcov
       run: cargo install grcov
     - name: run tests
       run: LLVM_PROFILE_FILE="your_name-%p-%m.profraw" cargo test --verbose
     - name: Generate coverage report
-      run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "/*" -o lcov.info
+      run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "examples" --ignore "/*" -o lcov.info
     - name: Upload coverage
       run: bash <(curl -s https://codecov.io/bash) -f lcov.info
 
