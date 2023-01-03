@@ -471,6 +471,24 @@ where
     }
 
     /// Keep only the elements in the map that satisfy the given condition `f`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # use ipnet::Ipv4Net;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.0.0/24".parse()?, 1);
+    /// pm.insert("192.168.1.0/24".parse()?, 2);
+    /// pm.insert("192.168.2.0/24".parse()?, 3);
+    /// pm.insert("192.168.2.0/25".parse()?, 4);
+    /// pm.retain(|_, t| *t % 2 == 0);
+    /// assert_eq!(pm.get(&"192.168.0.0/24".parse()?), None);
+    /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&2));
+    /// assert_eq!(pm.get(&"192.168.2.0/24".parse()?), None);
+    /// assert_eq!(pm.get(&"192.168.2.0/25".parse()?), Some(&4));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn retain<F>(&mut self, f: F)
     where
         F: FnMut(&P, &T) -> bool,

@@ -174,6 +174,24 @@ impl<P: Prefix> PrefixSet<P> {
     }
 
     /// Keep only the elements in the map that satisfy the given condition `f`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # use ipnet::Ipv4Net;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// set.insert("192.168.0.0/24".parse()?);
+    /// set.insert("192.168.1.0/24".parse()?);
+    /// set.insert("192.168.2.0/24".parse()?);
+    /// set.insert("192.168.2.0/25".parse()?);
+    /// set.retain(|p| p.prefix_len() == 24);
+    /// assert!(set.contains(&"192.168.0.0/24".parse()?));
+    /// assert!(set.contains(&"192.168.1.0/24".parse()?));
+    /// assert!(set.contains(&"192.168.2.0/24".parse()?));
+    /// assert!(!set.contains(&"192.168.2.0/25".parse()?));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn retain<F>(&mut self, mut f: F)
     where
         F: FnMut(&P) -> bool,
