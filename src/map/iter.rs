@@ -421,6 +421,57 @@ where
         };
         Iter { map: self, nodes }
     }
+
+    /// Get an iterator over the node itself and all children with a value. All elements returned
+    /// have a prefix that is contained within `prefix` itself (or are the same). This function will
+    /// consume `self`, returning an iterator over all owned children.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # use ipnet::Ipv4Net;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// assert_eq!(
+    ///     pm.into_children(&"192.168.0.0/23".parse()?).collect::<Vec<_>>(),
+    ///     vec![
+    ///         ("192.168.0.0/23".parse()?, 2),
+    ///         ("192.168.0.0/24".parse()?, 4),
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn into_children(self, prefix: &P) -> IntoIter<P, T> {
+        // first, find the longest prefix containing `prefix`.
+        let mut idx = 0;
+        let mut cur_p = &self.table[idx].prefix;
+        let nodes = loop {
+            if cur_p.eq(prefix) {
+                break vec![idx];
+            }
+            let right = to_right(cur_p, prefix);
+            match self.get_child(idx, right) {
+                Some(c) => {
+                    cur_p = &self.table[c].prefix;
+                    if cur_p.contains(prefix) {
+                        // continue traversal
+                        idx = c;
+                    } else if prefix.contains(cur_p) {
+                        break vec![c];
+                    } else {
+                        break vec![];
+                    }
+                }
+                None => break vec![],
+            }
+        };
+        IntoIter { map: self, nodes }
+    }
 }
 
 impl<P, T> FromIterator<(P, T)> for PrefixMap<P, T>
