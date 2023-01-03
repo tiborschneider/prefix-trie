@@ -24,7 +24,7 @@ jobs:
     - name: run tests
       run: LLVM_PROFILE_FILE="your_name-%p-%m.profraw" cargo test --verbose
     - name: Generate coverage report
-      run: ./grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "/*" -o lcov.info
+      run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "/*" -o lcov.info
     - name: Upload coverage
       run: bash <(curl -s https://codecov.io/bash) -f lcov.info
 
