@@ -1,5 +1,9 @@
 ![CI test](https://github.com/tiborschneider/prefix-trie/actions/workflows/test.yml/badge.svg)
 [![codecov](https://codecov.io/gh/tiborschneider/prefix-trie/branch/main/graph/badge.svg?token=EEJXNNURMW)](https://codecov.io/gh/tiborschneider/prefix-trie)
+![version](https://img.shields.io/crates/v/prefix-trie)
+![downloads](https://img.shields.io/crates/d/prefix-trie)
+![docs.rs](https://img.shields.io/docsrs/prefix-trie/latest)
+![license](https://img.shields.io/crates/l/prefix-trie/0.2.2)
 
 # Prefix-Trie
 
