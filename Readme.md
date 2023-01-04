@@ -1,9 +1,9 @@
-![CI test](https://img.shields.io/github/actions/workflow/status/tiborschneider/prefix-trie/test.yml)
-![codecov](https://codecov.io/gh/tiborschneider/prefix-trie/branch/main/graph/badge.svg?token=EEJXNNURMW)
-![version](https://img.shields.io/crates/v/prefix-trie)
-![downloads](https://img.shields.io/crates/d/prefix-trie)
-![docs.rs](https://img.shields.io/docsrs/prefix-trie/latest)
-![license](https://img.shields.io/crates/l/prefix-trie/0.2.2)
+[![CI test](https://img.shields.io/github/actions/workflow/status/tiborschneider/prefix-trie/test.yml)](https://github.com/tiborschneider/prefix-trie/actions)
+[![codecov](https://codecov.io/gh/tiborschneider/prefix-trie/branch/main/graph/badge.svg?token=EEJXNNURMW)](https://codecov.io/gh/tiborschneider/prefix-trie)
+[![version](https://img.shields.io/crates/v/prefix-trie)](https://crates.io/crates/prefix-trie)
+[![downloads](https://img.shields.io/crates/d/prefix-trie)](https://crates.io/crates/prefix-trie)
+[![docs.rs](https://img.shields.io/docsrs/prefix-trie/latest)](https://docs.rs/prefix-trie/latest/prefix_trie/)
+[![license](https://img.shields.io/crates/l/prefix-trie/0.2.2)](https://crates.io/crates/prefix-trie)
 
 # Prefix-Trie
 
