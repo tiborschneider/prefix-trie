@@ -1,5 +1,24 @@
 //! This crate provides a simple prefix tree for IP prefixes. Any lookup performs longest-prefix
 //! match.
+//! 
+//! # TODO
+//!
+//! Migrate to a TreeBitMap, described by 
+//! [W. Eatherton, Z. Dittia, G. Varghes](https://doi.org/10.1145/997150.997160).
+//!
+//! # Comparison with related projects
+//!
+//! [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap)
+//! provides an IP lookup table, similar to [`PrefixMap`]. In general, `prefix-trie` is around 2
+//! times slower than `IpLookupTable`, but provides more ergonomic accesss.
+//! - `prefix-trie` also includes a set of prefixes.
+//! - `prefix-trie` offers the ability to iterate over children or remove all children.
+//! - `prefix-trie` allows longest-prefix matching on a prefix, and not just on an address.
+//! - `prefix-trie` has an interface very similar to `std::collections`, including the `Entry`
+//!   pattern, iterators over keys and values, etc.
+//! - `prefix-trie` offers efficient tree traversal algorithms for computing the union,
+//!   difference, and intersection of sets.
+//! - `prefix-trie` supports serialization and deserialization.
 //!
 //! # Description of the Tree
 //!
