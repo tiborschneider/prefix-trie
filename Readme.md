@@ -7,8 +7,27 @@
 
 # Prefix-Trie
 
-This crate provides a simple prefix tree for IP prefixes. The structure allows exact matches, as
-well as longest-prefix matches. It contains several (simultaneous) tree traversals.
+This crate provides a simple prefix tree for IP prefixes. Any lookup performs longest-prefix
+match.
+
+## Comparison with related projects
+
+[`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap)
+provides an IP lookup table, similar to `PrefixMap`. In general, `prefix-trie` is around 2
+times slower than `IpLookupTable`, but provides more ergonomic accesss.
+- `prefix-trie` also includes a set of prefixes.
+- `prefix-trie` offers the ability to iterate over children or remove all children.
+- `prefix-trie` allows longest-prefix matching on a prefix, and not just on an address.
+- `prefix-trie` has an interface very similar to `std::collections`, including the `Entry`
+  pattern, iterators over keys and values, etc.
+- `prefix-trie` offers efficient tree traversal algorithms for computing the union,
+  difference, and intersection of sets.
+- `prefix-trie` supports serialization and deserialization.
+
+## TODO
+
+Migrate to a TreeBitMap, described by [W. Eatherton, Z. Dittia, G. Varghes](https://doi.org/10.1145/997150.997160).
+
 ## Description of the Tree
 
 The tree is structured as follows: Each node consists of a prefix, a container for a potential
@@ -20,8 +39,8 @@ itself. If it is not set, then we take the left branch, and otherwise, we take t
 
 Any iteration over all elements in the tree is implemented as a graph traversal that will yield
 elements in lexicographic order (with the exception of mutable iteration of the
-[`PrefixMap`]). This also includes the iteration over the union, intersection, or difference of
-two [`PrefixSet`]s, which are implemented as simultaneous tree traversals. Further, calling
+`PrefixMap`). This also includes the iteration over the union, intersection, or difference of
+two `PrefixSet`s, which are implemented as simultaneous tree traversals. Further, calling
 `retain` will also traverse the tree only once, removing elements during the traversal.
 
 ## Operations on the tree
@@ -41,18 +60,18 @@ elements in the tree.
 | `get`, `get_lpm`, `get_mut`               | `O(log n)` |
 | `retain`                                  | `O(n)`     |
 | `clear` (calling `drop` on `T`)           | `O(n)`     |
-| Operations on [`map::Entry`]              | `O(1)`     |
+| Operations on `map::Entry`              | `O(1)`     |
 
 There are three kinds of removals you! can do:
 
-- [`PrefixMap::remove`] will remove an entry from the tree and modify the tree structure as if
-  the value was never inserted before. [`PrefixMap::remove`] will always exactly revert the
-  operation of [`PrefixMap::insert`]. When only calling this function to remove elements, you
+- `PrefixMap::remove` will remove an entry from the tree and modify the tree structure as if
+  the value was never inserted before. `PrefixMap::remove` will always exactly revert the
+  operation of `PrefixMap::insert`. When only calling this function to remove elements, you
   are guaranteed that the tree structure is indistinguishable to a different tree where you
   only inserted elements.
-- [`PrefixMap::remove_children`] will remove all entries that are contained within the given
+- `PrefixMap::remove_children` will remove all entries that are contained within the given
   prefix. This operation will search for the node with the shortest prefix length that is
   contained within the given prefix and remove it, including all of its children.
-- [`PrefixMap::remove_keep_tree`] will not change anything in the tree structure. It will only
+- `PrefixMap::remove_keep_tree` will not change anything in the tree structure. It will only
   remove a value from a node. As soon as you call `remove_keep_tree` once on a tree structure,
   the tree will no longer be optimal.
