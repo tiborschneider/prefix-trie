@@ -23,6 +23,7 @@ times slower than `IpLookupTable`, but provides more ergonomic accesss.
 - `prefix-trie` offers efficient tree traversal algorithms for computing the union,
   difference, and intersection of sets.
 - `prefix-trie` supports serialization and deserialization.
+- `prefix-trie` is slower!
 
 ## TODO
 
@@ -60,7 +61,7 @@ elements in the tree.
 | `get`, `get_lpm`, `get_mut`               | `O(log n)` |
 | `retain`                                  | `O(n)`     |
 | `clear` (calling `drop` on `T`)           | `O(n)`     |
-| Operations on `map::Entry`              | `O(1)`     |
+| Operations on `map::Entry`                | `O(1)`     |
 
 There are three kinds of removals you! can do:
 
