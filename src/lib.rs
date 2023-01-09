@@ -1,9 +1,9 @@
 //! This crate provides a simple prefix tree for IP prefixes. Any lookup performs longest-prefix
 //! match.
-//! 
+//!
 //! # TODO
 //!
-//! Migrate to a TreeBitMap, described by 
+//! Migrate to a TreeBitMap, described by
 //! [W. Eatherton, Z. Dittia, G. Varghes](https://doi.org/10.1145/997150.997160).
 //!
 //! # Comparison with related projects
