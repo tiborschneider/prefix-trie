@@ -13,12 +13,12 @@ match.
 ## Comparison with related projects
 
 [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap)
-provides an IP lookup table, similar to [`PrefixMap`]. According to our benchmark, `prefix-trie`
-has **slower lookups** for for dense maps, but **faster inserts** in sparse maps.
+provides an IP lookup table, similar to [`PrefixMap`].
 
 The following compares the two approaches in case of *dense* or *sparse* maps. Each test case
 performs 100'000 modifications or lookups. However, the dense cases randomly pick any IPv4
-address, while the sparse case only pick 20 different IPv4 addresses.
+address, while the sparse case only pick 20 different IPv4 addresses. See `benches/benchmark.rs` 
+for more details.
 
 | Operation       | Mode   | `PrefixMap` | `treebitmap` | factor |
 |-----------------|--------|-------------|--------------|--------|
@@ -27,16 +27,11 @@ address, while the sparse case only pick 20 different IPv4 addresses.
 | Insert & Remove | sparse | **6.645ms** | 7.329ms      | ~1.1x  |
 | Lookup          | sparse | **8.394ms** | 12.30ms      | ~1.5x  |
 
-
 In addition, `prefix-trie` includes a `PrefixSet` analogeous to `std::collections::HashSet`,
 including union, intersection and difference operations that are implemented as simultaneous
 tree traversals. Further, `prefix-trie` has an interface similar to `std::collections`, and
 includes methods for accessing all children of a node. Finally, it offers a general
 longest-prefix match that is not limited to individual addresses.
-
-## TODO
-
-Migrate to a TreeBitMap, described by [W. Eatherton, Z. Dittia, G. Varghes](https://doi.org/10.1145/997150.997160).
 
 ## Description of the Tree
 
@@ -85,3 +80,7 @@ There are three kinds of removals you! can do:
 - `PrefixMap::remove_keep_tree` will not change anything in the tree structure. It will only
   remove a value from a node. As soon as you call `remove_keep_tree` once on a tree structure,
   the tree will no longer be optimal.
+
+## TODO
+
+Migrate to a TreeBitMap, described by [W. Eatherton, Z. Dittia, G. Varghes](https://doi.org/10.1145/997150.997160).

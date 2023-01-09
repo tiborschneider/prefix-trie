@@ -1,20 +1,15 @@
 //! This crate provides a simple prefix tree for IP prefixes. Any lookup performs longest-prefix
 //! match.
 //!
-//! # TODO
-//!
-//! Migrate to a TreeBitMap, described by
-//! [W. Eatherton, Z. Dittia, G. Varghes](https://doi.org/10.1145/997150.997160).
-//!
 //! # Comparison with related projects
 //!
 //! [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap)
-//! provides an IP lookup table, similar to [`PrefixMap`]. According to our benchmark, `prefix-trie`
-//! has **slower lookups** for for dense maps, but **faster inserts** in sparse maps.
+//! provides an IP lookup table, similar to [`PrefixMap`].
 //!
 //! The following compares the two approaches in case of *dense* or *sparse* maps. Each test case
 //! performs 100'000 modifications or lookups. However, the dense cases randomly pick any IPv4
-//! address, while the sparse case only pick 20 different IPv4 addresses.
+//! address, while the sparse case only pick 20 different IPv4 addresses. See
+//! `benches/benchmark.rs` for more details.
 //!
 //! | Operation       | Mode   | `PrefixMap` | `treebitmap` | factor |
 //! |-----------------|--------|-------------|--------------|--------|
@@ -77,6 +72,11 @@
 //! - [`PrefixMap::remove_keep_tree`] will not change anything in the tree structure. It will only
 //!   remove a value from a node. As soon as you call `remove_keep_tree` once on a tree structure,
 //!   the tree will no longer be optimal.
+//!
+//! # TODO
+//!
+//! Migrate to a TreeBitMap, described by
+//! [W. Eatherton, Z. Dittia, G. Varghes](https://doi.org/10.1145/997150.997160).
 
 #![allow(clippy::collapsible_else_if)]
 #![deny(missing_docs)]
