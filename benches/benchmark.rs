@@ -6,9 +6,8 @@ use rand::prelude::*;
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 
-const SPARSE_MASK: u32 = 0xffffffff;
-const DENSE_MASK: u32 = 0x00000fff;
-const ITERS: usize = 10_000;
+const ITERS: usize = 100_000;
+const NUM_SPARSE_ADDR: usize = 20;
 
 enum Insn {
     Insert(Ipv4Addr, u8, u32),
@@ -27,15 +26,15 @@ fn min_prefix_len(addr: u32) -> u8 {
     len
 }
 
-fn random_addr(mask: u32, rng: &mut ThreadRng) -> (Ipv4Addr, u8) {
-    let addr: u32 = rng.gen::<u32>() & mask;
-    let max_len = min_prefix_len(mask);
+fn random_addr(rng: &mut ThreadRng) -> (Ipv4Addr, u8) {
+    let addr: u32 = rng.gen::<u32>();
+    let max_len = 32;
     let min_len = min_prefix_len(addr);
     let len = rng.gen_range(min_len..=max_len);
     (addr.into(), len)
 }
 
-fn generate_random_mods(mask: u32) -> (Vec<Insn>, HashSet<(Ipv4Addr, u8)>) {
+fn generate_random_mods_dense() -> (Vec<Insn>, HashSet<(Ipv4Addr, u8)>) {
     let mut rng = thread_rng();
     let mut result = Vec::new();
 
@@ -43,7 +42,7 @@ fn generate_random_mods(mask: u32) -> (Vec<Insn>, HashSet<(Ipv4Addr, u8)>) {
 
     for _ in 0..ITERS {
         if addresses.is_empty() || rng.gen_bool(0.8) {
-            let (addr, len) = random_addr(mask, &mut rng);
+            let (addr, len) = random_addr(&mut rng);
             let val = rng.gen::<u32>();
             result.push(Insn::Insert(addr, len, val));
             addresses.insert((addr, len));
@@ -60,14 +59,14 @@ fn generate_random_mods(mask: u32) -> (Vec<Insn>, HashSet<(Ipv4Addr, u8)>) {
     (result, addresses)
 }
 
-fn generate_random_lookups(mask: u32, addresses: &HashSet<(Ipv4Addr, u8)>) -> Vec<Insn> {
+fn generate_random_lookups_dense(addresses: &HashSet<(Ipv4Addr, u8)>) -> Vec<Insn> {
     let mut rng = thread_rng();
     let mut result = Vec::new();
 
     for _ in 0..ITERS {
         if rng.gen_bool(0.5) {
             let (addr, len) = if addresses.is_empty() || rng.gen_bool(0.5) {
-                random_addr(mask, &mut rng)
+                random_addr(&mut rng)
             } else {
                 addresses
                     .iter()
@@ -77,11 +76,47 @@ fn generate_random_lookups(mask: u32, addresses: &HashSet<(Ipv4Addr, u8)>) -> Ve
             };
             result.push(Insn::ExactMatch(addr, len));
         } else {
-            let (addr, len) = random_addr(mask, &mut rng);
+            let (addr, len) = random_addr(&mut rng);
             result.push(Insn::LongestPrefixMatch(addr, len));
         }
     }
     result
+}
+
+fn sparse_addresses() -> Vec<(Ipv4Addr, u8)> {
+    let mut rng = thread_rng();
+    (0..NUM_SPARSE_ADDR)
+        .map(|_| random_addr(&mut rng))
+        .collect()
+}
+
+fn generate_random_mods_sparse(addresses: &[(Ipv4Addr, u8)]) -> Vec<Insn> {
+    let mut rng = thread_rng();
+    (0..ITERS)
+        .map(|_| {
+            let (addr, len) = addresses.iter().choose(&mut rng).unwrap();
+            if rng.gen_bool(0.7) {
+                let val = rng.gen::<u32>();
+                Insn::Insert(*addr, *len, val)
+            } else {
+                Insn::Remove(*addr, *len)
+            }
+        })
+        .collect()
+}
+
+fn generate_random_lookups_sparse(addresses: &[(Ipv4Addr, u8)]) -> Vec<Insn> {
+    let mut rng = thread_rng();
+    (0..ITERS)
+        .map(|_| {
+            let (addr, len) = addresses.iter().choose(&mut rng).unwrap();
+            if rng.gen_bool(0.5) {
+                Insn::ExactMatch(*addr, *len)
+            } else {
+                Insn::LongestPrefixMatch(*addr, *len)
+            }
+        })
+        .collect()
 }
 
 fn execute_prefix_map(map: &mut PrefixMap<Ipv4Net, u32>, insns: &Vec<Insn>) {
@@ -142,84 +177,10 @@ fn lookup_treebitmap(map: &IpLookupTable<Ipv4Addr, u32>, insns: &Vec<Insn>) {
     }
 }
 
-pub fn compare_mods(c: &mut Criterion) {
-    let mut group = c.benchmark_group("random modifications");
+pub fn dense_mods(c: &mut Criterion) {
+    let mut group = c.benchmark_group("dense modification");
 
-    let (insn_dense, _) = generate_random_mods(DENSE_MASK);
-    let (insn_sparse, _) = generate_random_mods(SPARSE_MASK);
-
-    group.bench_function("PrefixMap dense", |b| {
-        b.iter(|| {
-            let mut map = PrefixMap::new();
-            execute_prefix_map(&mut map, &insn_dense);
-        })
-    });
-    group.bench_function("TreeBitMap dense", |b| {
-        b.iter(|| {
-            let mut map = IpLookupTable::new();
-            execute_treebitmap(&mut map, &insn_dense);
-        })
-    });
-    group.bench_function("PrefixMap sparse", |b| {
-        b.iter(|| {
-            let mut map = PrefixMap::new();
-            execute_prefix_map(&mut map, &insn_sparse);
-        })
-    });
-    group.bench_function("TreeBitMap sparse", |b| {
-        b.iter(|| {
-            let mut map = IpLookupTable::new();
-            execute_treebitmap(&mut map, &insn_sparse);
-        })
-    });
-
-    group.finish();
-}
-
-pub fn compare_lookup(c: &mut Criterion) {
-    let (mods_dense, addrs) = generate_random_mods(DENSE_MASK);
-    let lookups_dense = generate_random_lookups(DENSE_MASK, &addrs);
-    let (mods_sparse, addrs) = generate_random_mods(SPARSE_MASK);
-    let lookups_sparse = generate_random_lookups(SPARSE_MASK, &addrs);
-
-    let mut prefix_map_dense = PrefixMap::new();
-    let mut treebitmap_dense = IpLookupTable::new();
-    let mut prefix_map_sparse = PrefixMap::new();
-    let mut treebitmap_sparse = IpLookupTable::new();
-    execute_prefix_map(&mut prefix_map_dense, &mods_dense);
-    execute_treebitmap(&mut treebitmap_dense, &mods_dense);
-    execute_prefix_map(&mut prefix_map_sparse, &mods_sparse);
-    execute_treebitmap(&mut treebitmap_sparse, &mods_sparse);
-
-    let mut group = c.benchmark_group("random lookups");
-
-    group.bench_function("PrefixMap dense", |b| {
-        b.iter(|| {
-            lookup_prefix_map(&prefix_map_dense, &lookups_dense);
-        })
-    });
-    group.bench_function("TreeBitMap dense", |b| {
-        b.iter(|| {
-            lookup_treebitmap(&treebitmap_dense, &lookups_dense);
-        })
-    });
-    group.bench_function("PrefixMap sparse", |b| {
-        b.iter(|| {
-            lookup_prefix_map(&prefix_map_sparse, &lookups_sparse);
-        })
-    });
-    group.bench_function("TreeBitMap sparse", |b| {
-        b.iter(|| {
-            lookup_treebitmap(&treebitmap_sparse, &lookups_sparse);
-        })
-    });
-
-    group.finish();
-}
-
-pub fn compare_mods_sparse(c: &mut Criterion) {
-    let (insn, _) = generate_random_mods(SPARSE_MASK);
-    let mut group = c.benchmark_group("random sparse modifications");
+    let (insn, _) = generate_random_mods_dense();
 
     group.bench_function("PrefixMap", |b| {
         b.iter(|| {
@@ -227,7 +188,7 @@ pub fn compare_mods_sparse(c: &mut Criterion) {
             execute_prefix_map(&mut map, &insn);
         })
     });
-    group.bench_function("TreeBitMap", |b| {
+    group.bench_function("TreeBitMap dense", |b| {
         b.iter(|| {
             let mut map = IpLookupTable::new();
             execute_treebitmap(&mut map, &insn);
@@ -237,16 +198,16 @@ pub fn compare_mods_sparse(c: &mut Criterion) {
     group.finish();
 }
 
-pub fn compare_lookup_sparse(c: &mut Criterion) {
-    let (mods, addrs) = generate_random_mods(SPARSE_MASK);
-    let lookups = generate_random_lookups(SPARSE_MASK, &addrs);
+pub fn dense_lookup(c: &mut Criterion) {
+    let (mods, addrs) = generate_random_mods_dense();
+    let lookups = generate_random_lookups_dense(&addrs);
 
     let mut prefix_map = PrefixMap::new();
     let mut treebitmap = IpLookupTable::new();
     execute_prefix_map(&mut prefix_map, &mods);
     execute_treebitmap(&mut treebitmap, &mods);
 
-    let mut group = c.benchmark_group("random sparse lookups");
+    let mut group = c.benchmark_group("dense lookups");
 
     group.bench_function("PrefixMap", |b| {
         b.iter(|| {
@@ -262,5 +223,59 @@ pub fn compare_lookup_sparse(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, compare_lookup, compare_mods);
+pub fn sparse_mods(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sparse modification");
+
+    let addrs = sparse_addresses();
+    let insn = generate_random_mods_sparse(&addrs);
+
+    group.bench_function("PrefixMap", |b| {
+        b.iter(|| {
+            let mut map = PrefixMap::new();
+            execute_prefix_map(&mut map, &insn);
+        })
+    });
+    group.bench_function("TreeBitMap sparse", |b| {
+        b.iter(|| {
+            let mut map = IpLookupTable::new();
+            execute_treebitmap(&mut map, &insn);
+        })
+    });
+
+    group.finish();
+}
+
+pub fn sparse_lookup(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sparse lookups");
+
+    let addrs = sparse_addresses();
+    let mods = generate_random_mods_sparse(&addrs);
+    let lookups = generate_random_lookups_sparse(&addrs);
+
+    let mut prefix_map = PrefixMap::new();
+    let mut treebitmap = IpLookupTable::new();
+    execute_prefix_map(&mut prefix_map, &mods);
+    execute_treebitmap(&mut treebitmap, &mods);
+
+    group.bench_function("PrefixMap", |b| {
+        b.iter(|| {
+            lookup_prefix_map(&prefix_map, &lookups);
+        })
+    });
+    group.bench_function("TreeBitMap", |b| {
+        b.iter(|| {
+            lookup_treebitmap(&treebitmap, &lookups);
+        })
+    });
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    dense_lookup,
+    dense_mods,
+    sparse_lookup,
+    sparse_mods
+);
 criterion_main!(benches);

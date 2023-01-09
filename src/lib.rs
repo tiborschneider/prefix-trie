@@ -9,16 +9,26 @@
 //! # Comparison with related projects
 //!
 //! [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap)
-//! provides an IP lookup table, similar to [`PrefixMap`]. In general, `prefix-trie` is around 2
-//! times slower than `IpLookupTable`, but provides more ergonomic accesss.
-//! - `prefix-trie` also includes a set of prefixes.
-//! - `prefix-trie` offers the ability to iterate over children or remove all children.
-//! - `prefix-trie` allows longest-prefix matching on a prefix, and not just on an address.
-//! - `prefix-trie` has an interface very similar to `std::collections`, including the `Entry`
-//!   pattern, iterators over keys and values, etc.
-//! - `prefix-trie` offers efficient tree traversal algorithms for computing the union,
-//!   difference, and intersection of sets.
-//! - `prefix-trie` supports serialization and deserialization.
+//! provides an IP lookup table, similar to [`PrefixMap`]. According to our benchmark, `prefix-trie`
+//! has **slower lookups** for for dense maps, but **faster inserts** in sparse maps.
+//!
+//! The following compares the two approaches in case of *dense* or *sparse* maps. Each test case
+//! performs 100'000 modifications or lookups. However, the dense cases randomly pick any IPv4
+//! address, while the sparse case only pick 20 different IPv4 addresses.
+//!
+//! | Operation       | Mode   | `PrefixMap` | `treebitmap` | factor |
+//! |-----------------|--------|-------------|--------------|--------|
+//! | Insert & Remove | dense  | **31.78ms** | 47.52ms      | ~1.5x  |
+//! | Lookup          | dense  | 32.36ms     | **8.409ms**  | ~0.25x |
+//! | Insert & Remove | sparse | **6.645ms** | 7.329ms      | ~1.1x  |
+//! | Lookup          | sparse | **8.394ms** | 12.30ms      | ~1.5x  |
+//!
+//!
+//! In addition, `prefix-trie` includes a [`PrefixSet`] analogeous to `std::collections::HashSet`,
+//! including union, intersection and difference operations that are implemented as simultaneous
+//! tree traversals. Further, `prefix-trie` has an interface similar to `std::collections`, and
+//! includes methods for accessing all children of a node. Finally, it offers a general
+//! longest-prefix match that is not limited to individual addresses.
 //!
 //! # Description of the Tree
 //!
