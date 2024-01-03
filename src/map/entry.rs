@@ -222,6 +222,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
+    #[allow(clippy::unwrap_or_default)]
     #[inline(always)]
     pub fn or_default(self) -> &'a mut T {
         self.or_insert_with(Default::default)

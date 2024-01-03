@@ -133,7 +133,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_lpm<'a, 'b>(&'a self, prefix: &'b P) -> Option<(&'a P, &'a T)> {
+    pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<(&'a P, &'a T)> {
         let mut idx = 0;
         let mut best_match: Option<(&P, &T)> = None;
         loop {

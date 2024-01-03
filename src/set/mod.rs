@@ -55,7 +55,7 @@ impl<P: Prefix> PrefixSet<P> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_lpm<'a, 'b>(&'a self, prefix: &'b P) -> Option<&'a P> {
+    pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<&'a P> {
         self.0.get_lpm(prefix).map(|(p, _)| p)
     }
 
