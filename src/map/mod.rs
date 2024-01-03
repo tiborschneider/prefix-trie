@@ -238,6 +238,57 @@ where
         }
     }
 
+    /// Get a value of an element by using shortest prefix matching.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # use ipnet::Ipv4Net;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.1.0/24".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// assert_eq!(pm.get_spm(&"192.168.1.1/32".parse()?), Some((&"192.168.0.0/23".parse()?, &2)));
+    /// assert_eq!(pm.get_spm(&"192.168.1.0/24".parse()?), Some((&"192.168.0.0/23".parse()?, &2)));
+    /// assert_eq!(pm.get_spm(&"192.168.0.0/23".parse()?), Some((&"192.168.0.0/23".parse()?, &2)));
+    /// assert_eq!(pm.get_spm(&"192.168.2.0/24".parse()?), None);
+    /// # Ok(())
+    /// # }
+    pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(&'a P, &'a T)> {
+        let mut idx = 0;
+        loop {
+            match self.get_direction(idx, prefix) {
+                Direction::Reached => return self.table[idx].prefix_value(),
+                Direction::Enter { next, .. } => {
+                    // Go until the first node with a value
+                    match self.table[next].prefix_value() {
+                        Some(x) => return Some(x),
+                        None => idx = next,
+                    }
+                }
+                Direction::Missing => return None,
+            }
+        }
+    }
+
+    /// Get the shortest prefix in the datastructure that contains the given `prefix`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # use ipnet::Ipv4Net;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.1.1/24".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// assert_eq!(pm.get_spm_prefix(&"192.168.1.1/32".parse()?), Some(&"192.168.0.0/23".parse()?));
+    /// assert_eq!(pm.get_spm_prefix(&"192.168.1.0/24".parse()?), Some(&"192.168.0.0/23".parse()?));
+    /// assert_eq!(pm.get_spm_prefix(&"192.168.0.0/23".parse()?), Some(&"192.168.0.0/23".parse()?));
+    /// assert_eq!(pm.get_spm_prefix(&"192.168.2.0/24".parse()?), None);
+    /// # Ok(())
+    /// # }
+    pub fn get_spm_prefix(&self, prefix: &P) -> Option<&P> {
+        self.get_spm(prefix).map(|(p, _)| p)
+    }
+
     /// Insert a new item into the prefix-map. This function may return any value that existed
     /// before.
     ///
