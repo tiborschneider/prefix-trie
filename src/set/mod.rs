@@ -55,8 +55,28 @@ impl<P: Prefix> PrefixSet<P> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_lpm<'a, 'b>(&'a self, prefix: &'b P) -> Option<&'a P> {
+    pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<&'a P> {
         self.0.get_lpm(prefix).map(|(p, _)| p)
+    }
+
+    /// Get the shortest prefix in the set that contains the given preifx.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # use ipnet::Ipv4Net;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// set.insert("192.168.1.0/24".parse()?);
+    /// set.insert("192.168.0.0/23".parse()?);
+    /// assert_eq!(set.get_spm(&"192.168.1.1/32".parse()?), Some(&"192.168.0.0/23".parse()?));
+    /// assert_eq!(set.get_spm(&"192.168.1.0/24".parse()?), Some(&"192.168.0.0/23".parse()?));
+    /// assert_eq!(set.get_spm(&"192.168.0.0/23".parse()?), Some(&"192.168.0.0/23".parse()?));
+    /// assert_eq!(set.get_spm(&"192.168.2.0/24".parse()?), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<&'a P> {
+        self.0.get_spm_prefix(prefix)
     }
 
     /// Adds a value to the set.
