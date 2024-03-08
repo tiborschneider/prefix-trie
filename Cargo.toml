@@ -19,9 +19,11 @@ harness = false
 
 [features]
 serde = ["dep:serde"]
+ipnetwork = ["dep:ipnetwork"]
 
 [dependencies]
 ipnet = "2"
+ipnetwork = { version = "0.20", optional = true }
 num-traits = "0.2"
 serde = { version = "1", optional = true}
 

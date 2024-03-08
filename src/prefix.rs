@@ -1,6 +1,8 @@
 //! Description of the generic type `Prefix`.
 
 use ipnet::{Ipv4Net, Ipv6Net};
+#[cfg(feature = "ipnetwork")]
+use ipnetwork::{Ipv4Network, Ipv6Network};
 use num_traits::{CheckedShr, PrimInt, Unsigned, Zero};
 
 /// Trait for defining prefixes.
@@ -161,6 +163,56 @@ impl Prefix for Ipv6Net {
 
     fn contains(&self, other: &Self) -> bool {
         self.contains(other)
+    }
+}
+
+#[cfg(feature = "ipnetwork")]
+impl Prefix for Ipv4Network {
+    type R = u32;
+
+    fn repr(&self) -> u32 {
+        self.ip().into()
+    }
+
+    fn prefix_len(&self) -> u8 {
+        self.prefix()
+    }
+
+    fn from_repr_len(repr: u32, len: u8) -> Self {
+        Ipv4Network::new(repr.into(), len).unwrap()
+    }
+
+    fn eq(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn mask(&self) -> u32 {
+        self.network().into()
+    }
+}
+
+#[cfg(feature = "ipnetwork")]
+impl Prefix for Ipv6Network {
+    type R = u128;
+
+    fn repr(&self) -> u128 {
+        self.ip().into()
+    }
+
+    fn prefix_len(&self) -> u8 {
+        self.prefix()
+    }
+
+    fn from_repr_len(repr: u128, len: u8) -> Self {
+        Ipv6Network::new(repr.into(), len).unwrap()
+    }
+
+    fn eq(&self, other: &Self) -> bool {
+        self == other
+    }
+
+    fn mask(&self) -> u128 {
+        self.network().into()
     }
 }
 
