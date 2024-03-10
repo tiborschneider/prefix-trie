@@ -24,9 +24,9 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// set.insert("192.168.1.0/24".parse()?);
     /// assert!(set.contains(&"192.168.1.0/24".parse()?));
     /// assert!(!set.contains(&"192.168.2.0/24".parse()?));
@@ -34,6 +34,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// assert!(!set.contains(&"192.168.1.128/25".parse()?));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn contains(&self, prefix: &P) -> bool {
         self.0.contains_key(prefix)
@@ -43,9 +45,9 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// set.insert("192.168.1.0/24".parse()?);
     /// set.insert("192.168.0.0/23".parse()?);
     /// assert_eq!(set.get_lpm(&"192.168.1.1/32".parse()?), Some(&"192.168.1.0/24".parse()?));
@@ -54,6 +56,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// assert_eq!(set.get_lpm(&"192.168.2.0/24".parse()?), None);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<&'a P> {
         self.0.get_lpm(prefix).map(|(p, _)| p)
@@ -63,9 +67,9 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// set.insert("192.168.1.0/24".parse()?);
     /// set.insert("192.168.0.0/23".parse()?);
     /// assert_eq!(set.get_spm(&"192.168.1.1/32".parse()?), Some(&"192.168.0.0/23".parse()?));
@@ -74,6 +78,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// assert_eq!(set.get_spm(&"192.168.2.0/24".parse()?), None);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<&'a P> {
         self.0.get_spm_prefix(prefix)
@@ -87,14 +93,16 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// assert!(set.insert("192.168.0.0/23".parse()?));
     /// assert!(set.insert("192.168.1.0/24".parse()?));
     /// assert!(!set.insert("192.168.1.0/24".parse()?));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn insert(&mut self, prefix: P) -> bool {
         self.0.insert(prefix, ()).is_none()
@@ -104,9 +112,9 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// let prefix = "192.168.1.0/24".parse()?;
     /// set.insert(prefix);
     /// assert!(set.contains(&prefix));
@@ -114,6 +122,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// assert!(!set.contains(&prefix));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn remove(&mut self, prefix: &P) -> bool {
         self.0.remove(prefix).is_some()
@@ -126,9 +136,9 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// let prefix = "192.168.1.0/24".parse()?;
     /// set.insert(prefix);
     /// assert!(set.contains(&prefix));
@@ -139,6 +149,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// set.insert(prefix);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn remove_keep_tree(&mut self, prefix: &P) -> bool {
         self.0.remove_keep_tree(prefix).is_some()
@@ -149,9 +161,9 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// set.insert("192.168.0.0/22".parse()?);
     /// set.insert("192.168.0.0/23".parse()?);
     /// set.insert("192.168.0.0/24".parse()?);
@@ -164,6 +176,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// assert!(set.contains(&"192.168.2.0/24".parse()?));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn remove_children(&mut self, prefix: &P) {
         self.0.remove_children(prefix)
@@ -173,9 +187,9 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// set.insert("192.168.0.0/24".parse()?);
     /// set.insert("192.168.1.0/24".parse()?);
     /// set.clear();
@@ -183,6 +197,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// assert!(!set.contains(&"192.168.1.0/24".parse()?));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn clear(&mut self) {
         self.0.clear()
@@ -197,9 +213,9 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<Ipv4Net> = PrefixSet::new();
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// set.insert("192.168.0.0/24".parse()?);
     /// set.insert("192.168.1.0/24".parse()?);
     /// set.insert("192.168.2.0/24".parse()?);
@@ -211,6 +227,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// assert!(!set.contains(&"192.168.2.0/25".parse()?));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn retain<F>(&mut self, mut f: F)
     where
@@ -224,14 +242,14 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set_a: PrefixSet<Ipv4Net> = PrefixSet::from_iter([
+    /// let mut set_a: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
     ///     "192.168.0.0/22".parse()?,
     ///     "192.168.0.0/24".parse()?,
     ///     "192.168.2.0/23".parse()?,
     /// ]);
-    /// let mut set_b: PrefixSet<Ipv4Net> = PrefixSet::from_iter([
+    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
     ///     "192.168.0.0/22".parse()?,
     ///     "192.168.0.0/23".parse()?,
     ///     "192.168.2.0/24".parse()?,
@@ -248,6 +266,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// );
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn union<'a>(&'a self, other: &'a Self) -> Union<'a, P> {
         Union {
@@ -262,14 +282,14 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set_a: PrefixSet<Ipv4Net> = PrefixSet::from_iter([
+    /// let mut set_a: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
     ///     "192.168.0.0/22".parse()?,
     ///     "192.168.0.0/24".parse()?,
     ///     "192.168.2.0/23".parse()?,
     /// ]);
-    /// let mut set_b: PrefixSet<Ipv4Net> = PrefixSet::from_iter([
+    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
     ///     "192.168.0.0/22".parse()?,
     ///     "192.168.0.0/24".parse()?,
     ///     "192.168.2.0/24".parse()?,
@@ -280,6 +300,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// );
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn intersection<'a>(&'a self, other: &'a Self) -> Intersection<'a, P> {
         Intersection {
@@ -294,14 +316,14 @@ impl<P: Prefix> PrefixSet<P> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set_a: PrefixSet<Ipv4Net> = PrefixSet::from_iter([
+    /// let mut set_a: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
     ///     "192.168.0.0/22".parse()?,
     ///     "192.168.0.0/24".parse()?,
     ///     "192.168.2.0/23".parse()?,
     /// ]);
-    /// let mut set_b: PrefixSet<Ipv4Net> = PrefixSet::from_iter([
+    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
     ///     "192.168.0.0/22".parse()?,
     ///     "192.168.0.0/24".parse()?,
     ///     "192.168.2.0/24".parse()?,
@@ -312,6 +334,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// );
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn difference<'a>(&'a self, other: &'a Self) -> Difference<'a, P> {
         Difference {

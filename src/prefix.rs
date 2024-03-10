@@ -1,5 +1,6 @@
 //! Description of the generic type `Prefix`.
 
+#[cfg(feature = "ipnet")]
 use ipnet::{Ipv4Net, Ipv6Net};
 #[cfg(feature = "ipnetwork")]
 use ipnetwork::{Ipv4Network, Ipv6Network};
@@ -82,6 +83,7 @@ where
     }
 }
 
+#[cfg(feature = "ipnet")]
 impl Prefix for Ipv4Net {
     type R = u32;
 
@@ -124,6 +126,7 @@ impl Prefix for Ipv4Net {
     }
 }
 
+#[cfg(feature = "ipnet")]
 impl Prefix for Ipv6Net {
     type R = u128;
 
@@ -240,6 +243,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg(feature = "ipnet")]
 mod test {
     use super::*;
 

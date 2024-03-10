@@ -1,6 +1,6 @@
 [package]
 name = "prefix-trie"
-version = "0.2.5"
+version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/tiborschneider/prefix-trie"
@@ -16,13 +16,20 @@ description = "Prefix trie datastructure (both a set and a map) that provides ex
 [[bench]]
 name = "benchmark"
 harness = false
+required-features = ["ipnet"]
+
+[[example]]
+name = "random_access"
+required-features = ["ipnet"]
 
 [features]
+default = ["ipnet"]
 serde = ["dep:serde"]
 ipnetwork = ["dep:ipnetwork"]
+ipnet = ["dep:ipnet"]
 
 [dependencies]
-ipnet = "2"
+ipnet = { version = "2", optional = true}
 ipnetwork = { version = "0.20", optional = true }
 num-traits = "0.2"
 serde = { version = "1", optional = true}

@@ -45,9 +45,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&1));
     /// assert_eq!(pm.get(&"192.168.2.0/24".parse()?), None);
@@ -55,6 +55,8 @@ where
     /// assert_eq!(pm.get(&"192.168.1.128/25".parse()?), None);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn get(&self, prefix: &P) -> Option<&T> {
         let mut idx = 0;
@@ -71,9 +73,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// let prefix = "192.168.1.0/24".parse()?;
     /// pm.insert(prefix, 1);
     /// assert_eq!(pm.get(&prefix), Some(&1));
@@ -81,6 +83,8 @@ where
     /// assert_eq!(pm.get(&prefix), Some(&2));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn get_mut(&mut self, prefix: &P) -> Option<&mut T> {
         let mut idx = 0;
@@ -97,14 +101,16 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// let prefix = "192.168.1.0/24".parse()?;
     /// pm.insert(prefix, 1);
     /// assert_eq!(pm.get_key_value(&prefix), Some((&prefix, &1)));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn get_key_value(&self, prefix: &P) -> Option<(&P, &T)> {
         let mut idx = 0;
@@ -121,9 +127,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// assert_eq!(pm.get_lpm(&"192.168.1.1/32".parse()?), Some((&"192.168.1.0/24".parse()?, &1)));
@@ -132,6 +138,8 @@ where
     /// assert_eq!(pm.get_lpm(&"192.168.2.0/24".parse()?), None);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<(&'a P, &'a T)> {
         let mut idx = 0;
@@ -149,9 +157,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// assert_eq!(pm.get_lpm(&"192.168.1.1/32".parse()?), Some((&"192.168.1.0/24".parse()?, &1)));
@@ -159,6 +167,8 @@ where
     /// assert_eq!(pm.get_lpm(&"192.168.1.1/32".parse()?), Some((&"192.168.1.0/24".parse()?, &2)));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn get_lpm_mut(&mut self, prefix: &P) -> Option<(&P, &mut T)> {
         let mut idx = 0;
@@ -185,9 +195,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// assert!(pm.contains_key(&"192.168.1.0/24".parse()?));
     /// assert!(!pm.contains_key(&"192.168.2.0/24".parse()?));
@@ -195,6 +205,8 @@ where
     /// assert!(!pm.contains_key(&"192.168.1.128/25".parse()?));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn contains_key(&self, prefix: &P) -> bool {
         let mut idx = 0;
@@ -211,9 +223,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// assert_eq!(pm.get_lpm_prefix(&"192.168.1.1/32".parse()?), Some(&"192.168.1.0/24".parse()?));
@@ -222,6 +234,8 @@ where
     /// assert_eq!(pm.get_lpm_prefix(&"192.168.2.0/24".parse()?), None);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn get_lpm_prefix(&self, prefix: &P) -> Option<&P> {
         let mut idx = 0;
@@ -242,9 +256,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// assert_eq!(pm.get_spm(&"192.168.1.1/32".parse()?), Some((&"192.168.0.0/23".parse()?, &2)));
@@ -253,6 +267,8 @@ where
     /// assert_eq!(pm.get_spm(&"192.168.2.0/24".parse()?), None);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(&'a P, &'a T)> {
         let mut idx = 0;
         loop {
@@ -274,9 +290,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.1.1/24".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// assert_eq!(pm.get_spm_prefix(&"192.168.1.1/32".parse()?), Some(&"192.168.0.0/23".parse()?));
@@ -285,6 +301,8 @@ where
     /// assert_eq!(pm.get_spm_prefix(&"192.168.2.0/24".parse()?), None);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     pub fn get_spm_prefix(&self, prefix: &P) -> Option<&P> {
         self.get_spm(prefix).map(|(p, _)| p)
     }
@@ -294,14 +312,16 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// assert_eq!(pm.insert("192.168.0.0/23".parse()?, 1), None);
     /// assert_eq!(pm.insert("192.168.1.0/24".parse()?, 2), None);
     /// assert_eq!(pm.insert("192.168.1.0/24".parse()?, 3), Some(2));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn insert(&mut self, prefix: P, value: T) -> Option<T> {
         let mut idx = 0;
@@ -340,9 +360,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.0.0/23".parse()?, vec![1]);
     /// pm.entry("192.168.0.0/23".parse()?).or_default().push(2);
     /// pm.entry("192.168.0.0/24".parse()?).or_default().push(3);
@@ -350,6 +370,8 @@ where
     /// assert_eq!(pm.get(&"192.168.0.0/24".parse()?), Some(&vec![3]));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn entry(&mut self, prefix: P) -> Entry<'_, P, T> {
         let mut idx = 0;
@@ -381,9 +403,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// let prefix = "192.168.1.0/24".parse()?;
     /// pm.insert(prefix, 1);
     /// assert_eq!(pm.get(&prefix), Some(&1));
@@ -391,6 +413,8 @@ where
     /// assert_eq!(pm.get(&prefix), None);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn remove(&mut self, prefix: &P) -> Option<T> {
         let mut idx = 0;
@@ -424,9 +448,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// let prefix = "192.168.1.0/24".parse()?;
     /// pm.insert(prefix, 1);
     /// assert_eq!(pm.get(&prefix), Some(&1));
@@ -437,6 +461,8 @@ where
     /// pm.insert(prefix, 1);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn remove_keep_tree(&mut self, prefix: &P) -> Option<T> {
         let mut idx = 0;
@@ -454,9 +480,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.0.0/22".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// pm.insert("192.168.0.0/24".parse()?, 3);
@@ -469,6 +495,8 @@ where
     /// assert_eq!(pm.get(&"192.168.2.0/24".parse()?), Some(&5));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn remove_children(&mut self, prefix: &P) {
         if prefix.prefix_len() == 0 {
@@ -499,9 +527,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.0.0/24".parse()?, 1);
     /// pm.insert("192.168.1.0/24".parse()?, 2);
     /// pm.clear();
@@ -509,6 +537,8 @@ where
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), None);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn clear(&mut self) {
         self.table.clear();
@@ -525,9 +555,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.0.0/24".parse()?, 1);
     /// pm.insert("192.168.1.0/24".parse()?, 2);
     /// pm.insert("192.168.2.0/24".parse()?, 3);
@@ -539,6 +569,8 @@ where
     /// assert_eq!(pm.get(&"192.168.2.0/25".parse()?), Some(&4));
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn retain<F>(&mut self, f: F)
     where

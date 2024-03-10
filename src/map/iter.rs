@@ -248,9 +248,9 @@ impl<P, T> PrefixMap<P, T> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.0.0/22".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// pm.insert("192.168.2.0/23".parse()?, 3);
@@ -268,6 +268,8 @@ impl<P, T> PrefixMap<P, T> {
     /// );
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     #[inline(always)]
     pub fn iter(&self) -> Iter<'_, P, T> {
@@ -286,9 +288,9 @@ impl<P, T> PrefixMap<P, T> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.0.0/22".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// pm.insert("192.168.2.0/23".parse()?, 3);
@@ -306,6 +308,8 @@ impl<P, T> PrefixMap<P, T> {
     /// );
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     #[inline(always)]
     pub fn keys(&self) -> Keys<'_, P, T> {
@@ -329,9 +333,9 @@ impl<P, T> PrefixMap<P, T> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.0.0/22".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// pm.insert("192.168.2.0/23".parse()?, 3);
@@ -340,6 +344,8 @@ impl<P, T> PrefixMap<P, T> {
     /// assert_eq!(pm.values().collect::<Vec<_>>(), vec![&1, &2, &4, &3, &5]);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     #[inline(always)]
     pub fn values(&self) -> Values<'_, P, T> {
@@ -377,9 +383,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.0.0/22".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// pm.insert("192.168.2.0/23".parse()?, 3);
@@ -394,6 +400,8 @@ where
     /// );
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn children(&self, prefix: &P) -> Iter<'_, P, T> {
         // first, find the longest prefix containing `prefix`.
@@ -428,9 +436,9 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use ipnet::Ipv4Net;
+    /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.0.0/22".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// pm.insert("192.168.2.0/23".parse()?, 3);
@@ -445,6 +453,8 @@ where
     /// );
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
     /// ```
     pub fn into_children(self, prefix: &P) -> IntoIter<P, T> {
         // first, find the longest prefix containing `prefix`.
