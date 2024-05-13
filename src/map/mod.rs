@@ -252,6 +252,39 @@ where
         }
     }
 
+    /// Returns a Vec of all nodes that are covered by the given `prefix`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("10.0.0.0/8".parse()?, 0);
+    /// pm.insert("10.1.0.0/16".parse()?, 1);
+    /// pm.insert("10.1.1.0/24".parse()?, 2);
+    /// pm.insert("10.1.2.0/24".parse()?, 4);
+    /// assert_eq!(pm.search_covering(&"10.1.1.1/32".parse()?), vec![&0, &1, &2]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn search_covering<'a>(&'a self, prefix: &P) -> Vec<&'a T> {
+        let mut idx = 0;
+        let mut result = Vec::new();
+        loop {
+            match self.get_direction(idx, prefix) {
+                Direction::Enter { next, .. } => {
+                    if let Some(value) = self.table[next].value.as_ref() {
+                        result.push(value);
+                    }
+                    idx = next
+                },
+                _ => return result,
+            }
+        }
+    }
+
     /// Get a value of an element by using shortest prefix matching.
     ///
     /// ```
