@@ -582,6 +582,9 @@ where
     /// Iterate over all entries in the map that covers the given `prefix` (including `prefix`
     /// itself if that is present in the map). The returned iterator yields `(&'a P, &'a T)`.
     ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
     /// ```
     /// # use prefix_trie::*;
     /// # #[cfg(feature = "ipnet")]
@@ -632,6 +635,9 @@ where
     /// Iterate over all keys (prefixes) in the map that covers the given `prefix` (including
     /// `prefix` itself if that is present in the map). The returned iterator yields `&'a P`.
     ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
     /// ```
     /// # use prefix_trie::*;
     /// # #[cfg(feature = "ipnet")]
@@ -662,6 +668,9 @@ where
 
     /// Iterate over all values in the map that covers the given `prefix` (including `prefix`
     /// itself if that is present in the map). The returned iterator yields `&'a T`.
+    ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
     ///
     /// ```
     /// # use prefix_trie::*;

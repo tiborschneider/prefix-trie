@@ -348,6 +348,9 @@ impl<P: Prefix> PrefixSet<P> {
     /// Iterate over all prefixes in the set that covers the given `prefix` (including `prefix`
     /// itself if that is present in the set). The returned iterator yields `&'a P`.
     ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
     /// ```
     /// # use prefix_trie::*;
     /// # #[cfg(feature = "ipnet")]
