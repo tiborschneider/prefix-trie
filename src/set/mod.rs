@@ -1,6 +1,6 @@
 //! PrefixSet, that is implemened as a simple binary tree, based on the [`PrefixMap`].
 
-use crate::{Prefix, PrefixMap};
+use crate::{map::CoverKeys, Prefix, PrefixMap};
 
 mod difference;
 mod intersection;
@@ -343,6 +343,33 @@ impl<P: Prefix> PrefixSet<P> {
             set_b: &other.0,
             nodes: vec![difference::DifferenceIndex::Both(0, 0)],
         }
+    }
+
+    /// Iterate over all prefixes in the set that covers the given `prefix` (including `prefix`
+    /// itself if that is present in the set). The returned iterator yields `&'a P`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// let p0 = "10.0.0.0/8".parse()?;
+    /// let p1 = "10.1.0.0/16".parse()?;
+    /// let p2 = "10.1.1.0/24".parse()?;
+    /// set.insert(p0);
+    /// set.insert(p1);
+    /// set.insert(p2);
+    /// set.insert("10.1.2.0/24".parse()?); // disjoint prefixes are not covered
+    /// set.insert("10.1.1.0/25".parse()?); // more specific prefixes are not covered
+    /// set.insert("11.0.0.0/8".parse()?);  // Branch points that don't contain values are skipped
+    /// assert_eq!(set.cover(&p2).collect::<Vec<_>>(), vec![&p0, &p1, &p2]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn cover<'a>(&'a self, prefix: &'a P) -> CoverKeys<'a, P, ()> {
+        self.0.cover_keys(prefix)
     }
 }
 

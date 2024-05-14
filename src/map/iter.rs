@@ -496,3 +496,75 @@ where
         map
     }
 }
+
+/// An iterator that yields all items in a `PrefixMap` that covers a given prefix (including the
+/// prefix itself if preseint). See [`PrefixMap::cover`] for how to create this iterator.
+pub struct Cover<'a, P, T> {
+    pub(super) map: &'a PrefixMap<P, T>,
+    pub(super) idx: Option<usize>,
+    pub(super) prefix: &'a P,
+}
+
+impl<'a, P, T> Iterator for Cover<'a, P, T>
+where
+    P: Prefix,
+{
+    type Item = (&'a P, &'a T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // check if self.idx is None. If so, then check if the first branch is present in the map
+        if self.idx.is_none() {
+            self.idx = Some(0);
+            let entry = &self.map.table[0];
+            if let Some(value) = entry.value.as_ref() {
+                return Some((&entry.prefix, value));
+            }
+        }
+
+        // if we reach here, then self.idx is not None!
+
+        loop {
+            let map::Direction::Enter { next, .. } =
+                self.map.get_direction(self.idx.unwrap(), self.prefix)
+            else {
+                return None;
+            };
+            self.idx = Some(next);
+            let entry = &self.map.table[next];
+            if let Some(value) = entry.value.as_ref() {
+                return Some((&entry.prefix, value));
+            }
+        }
+    }
+}
+
+/// An iterator that yields all keys (prefixes) in a `PrefixMap` that covers a given prefix
+/// (including the prefix itself if preseint). See [`PrefixMap::cover_keys`] for how to create this
+/// iterator.
+pub struct CoverKeys<'a, P, T>(pub(super) Cover<'a, P, T>);
+
+impl<'a, P, T> Iterator for CoverKeys<'a, P, T>
+where
+    P: Prefix,
+{
+    type Item = &'a P;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(p, _)| p)
+    }
+}
+
+/// An iterator that yields all values in a `PrefixMap` that covers a given prefix (including the
+/// prefix itself if preseint). See [`PrefixMap::cover_values`] for how to create this iterator.
+pub struct CoverValues<'a, P, T>(pub(super) Cover<'a, P, T>);
+
+impl<'a, P, T> Iterator for CoverValues<'a, P, T>
+where
+    P: Prefix,
+{
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(_, t)| t)
+    }
+}

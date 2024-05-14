@@ -578,6 +578,118 @@ where
     {
         self._retain(0, None, false, None, false, f);
     }
+
+    /// Iterate over all entries in the map that covers the given `prefix` (including `prefix`
+    /// itself if that is present in the map). The returned iterator yields `(&'a P, &'a T)`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let p0 = "10.0.0.0/8".parse()?;
+    /// let p1 = "10.1.0.0/16".parse()?;
+    /// let p2 = "10.1.1.0/24".parse()?;
+    /// pm.insert(p0, 0);
+    /// pm.insert(p1, 1);
+    /// pm.insert(p2, 2);
+    /// pm.insert("10.1.2.0/24".parse()?, 3); // disjoint prefixes are not covered
+    /// pm.insert("10.1.1.0/25".parse()?, 4); // more specific prefixes are not covered
+    /// pm.insert("11.0.0.0/8".parse()?, 5);  // Branch points that don't contain values are skipped
+    /// assert_eq!(
+    ///     pm.cover(&p2).collect::<Vec<_>>(),
+    ///     vec![(&p0, &0), (&p1, &1), (&p2, &2)]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    ///
+    /// This function also yields the root note *if* it is part of the map:
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let root = "0.0.0.0/0".parse()?;
+    /// pm.insert(root, 0);
+    /// assert_eq!(pm.cover(&"10.0.0.0/8".parse()?).collect::<Vec<_>>(), vec![(&root, &0)]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn cover<'a>(&'a self, prefix: &'a P) -> Cover<'a, P, T> {
+        Cover {
+            map: self,
+            idx: None,
+            prefix,
+        }
+    }
+
+    /// Iterate over all keys (prefixes) in the map that covers the given `prefix` (including
+    /// `prefix` itself if that is present in the map). The returned iterator yields `&'a P`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let p0 = "10.0.0.0/8".parse()?;
+    /// let p1 = "10.1.0.0/16".parse()?;
+    /// let p2 = "10.1.1.0/24".parse()?;
+    /// pm.insert(p0, 0);
+    /// pm.insert(p1, 1);
+    /// pm.insert(p2, 2);
+    /// pm.insert("10.1.2.0/24".parse()?, 3); // disjoint prefixes are not covered
+    /// pm.insert("10.1.1.0/25".parse()?, 4); // more specific prefixes are not covered
+    /// pm.insert("11.0.0.0/8".parse()?, 5);  // Branch points that don't contain values are skipped
+    /// assert_eq!(pm.cover_keys(&p2).collect::<Vec<_>>(), vec![&p0, &p1, &p2]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn cover_keys<'a>(&'a self, prefix: &'a P) -> CoverKeys<'a, P, T> {
+        CoverKeys(Cover {
+            map: self,
+            idx: None,
+            prefix,
+        })
+    }
+
+    /// Iterate over all values in the map that covers the given `prefix` (including `prefix`
+    /// itself if that is present in the map). The returned iterator yields `&'a T`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let p0 = "10.0.0.0/8".parse()?;
+    /// let p1 = "10.1.0.0/16".parse()?;
+    /// let p2 = "10.1.1.0/24".parse()?;
+    /// pm.insert(p0, 0);
+    /// pm.insert(p1, 1);
+    /// pm.insert(p2, 2);
+    /// pm.insert("10.1.2.0/24".parse()?, 3); // disjoint prefixes are not covered
+    /// pm.insert("10.1.1.0/25".parse()?, 4); // more specific prefixes are not covered
+    /// pm.insert("11.0.0.0/8".parse()?, 5);  // Branch points that don't contain values are skipped
+    /// assert_eq!(pm.cover_values(&p2).collect::<Vec<_>>(), vec![&0, &1, &2]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn cover_values<'a>(&'a self, prefix: &'a P) -> CoverValues<'a, P, T> {
+        CoverValues(Cover {
+            map: self,
+            idx: None,
+            prefix,
+        })
+    }
 }
 
 /// Private function implementations
