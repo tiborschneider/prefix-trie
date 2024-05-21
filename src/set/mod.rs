@@ -20,6 +20,18 @@ impl<P: Prefix> PrefixSet<P> {
         Self(Default::default())
     }
 
+    /// Returns the number of elements stored in `self`.
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns `true` if the set contains no elements.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     /// Check wether some prefix is present in the set, without using longest prefix match.
     ///
     /// ```
