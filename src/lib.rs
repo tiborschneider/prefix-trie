@@ -58,6 +58,7 @@
 //! | `retain`                                  | `O(n)`     |
 //! | `clear` (calling `drop` on `T`)           | `O(n)`     |
 //! | Operations on [`map::Entry`]              | `O(1)`     |
+//! | `len` and `is_empty`                      | `O(1)`     |
 //!
 //! There are three kinds of removals you! can do:
 //!
