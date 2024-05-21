@@ -6,10 +6,10 @@
 //! [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap)
 //! provides an IP lookup table, similar to [`PrefixMap`].
 //!
-//! The following compares the two approaches in case of *dense* or *sparse* maps. Each test case
-//! performs 100'000 modifications or lookups. However, the dense cases randomly pick any IPv4
-//! address, while the sparse case only pick 20 different IPv4 addresses. See
-//! `benches/benchmark.rs` for more details.
+//! The following compares the two approaches in the case of *dense* or *sparse* maps. Each test
+//! case performs 100'000 modifications or lookups. However, the dense cases randomly picks any IPv4
+//! address, while the sparse case only pick 20 different IPv4 addresses. See `benches/benchmark.rs`
+//! for more details.
 //!
 //! | Operation       | Mode   | `PrefixMap` | `treebitmap` | factor |
 //! |-----------------|--------|-------------|--------------|--------|
@@ -19,7 +19,7 @@
 //! | Lookup          | sparse | **8.394ms** | 12.30ms      | ~1.5x  |
 //!
 //!
-//! In addition, `prefix-trie` includes a [`PrefixSet`] analogeous to `std::collections::HashSet`,
+//! In addition, `prefix-trie` includes a [`PrefixSet`] analogous to `std::collections::HashSet`,
 //! including union, intersection and difference operations that are implemented as simultaneous
 //! tree traversals. Further, `prefix-trie` has an interface similar to `std::collections`, and
 //! includes methods for accessing all children of a node. Finally, it offers a general
