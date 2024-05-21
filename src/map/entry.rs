@@ -253,6 +253,9 @@ where
         match self.direction {
             DirectionForInsert::Reached => {
                 let node = &mut self.map.table[self.idx];
+                // increment the count, as node.value must be `None`
+                debug_assert!(node.value.is_none());
+                self.map.count += 1;
                 node.value = Some(v);
                 node
             }

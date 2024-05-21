@@ -273,6 +273,7 @@ fn child() {
     assert_map!(pm, ("0.0.0.0/0", ("1.0.0.0/8", 1), ()));
     assert_iter!(pm, ("1.0.0.0/8", 1));
     assert_get!(pm, "1.0.0.0/8", 1);
+    assert_eq!(pm.len(), 1);
 }
 
 #[test]
@@ -281,6 +282,7 @@ fn chain() {
     pm.insert(ip("1.0.0.0/8"), 1);
     pm.insert(ip("1.2.0.0/16"), 2);
     pm.insert(ip("1.2.3.0/24"), 3);
+    assert_eq!(pm.len(), 3);
 
     assert_map!(
         pm,
@@ -296,6 +298,8 @@ fn chain() {
     assert_remove!(pm, "1.0.0.0/8", 1);
     assert_remove!(pm, "1.2.0.0/16", 2);
     assert_remove!(pm, "1.2.3.0/24", 3);
+
+    assert_eq!(pm.len(), 0);
 
     assert_map!(
         pm,
@@ -316,6 +320,8 @@ fn chain_reverse() {
     pm.insert(ip("1.2.0.0/16"), 2);
     pm.insert(ip("1.0.0.0/8"), 1);
 
+    assert_eq!(pm.len(), 3);
+
     assert_map!(
         pm,
         (
@@ -330,6 +336,8 @@ fn chain_reverse() {
     assert_remove!(pm, "1.0.0.0/8", 1);
     assert_remove!(pm, "1.2.0.0/16", 2);
     assert_remove!(pm, "1.2.3.0/24", 3);
+
+    assert_eq!(pm.len(), 0);
 
     assert_map!(
         pm,
@@ -348,6 +356,9 @@ fn branch_direct() {
     pm.insert(ip("0.0.0.0/7"), 1);
     pm.insert(ip("0.0.0.0/8"), 2);
     pm.insert(ip("1.0.0.0/8"), 3);
+
+    assert_eq!(pm.len(), 3);
+
     assert_map!(
         pm,
         (
@@ -362,6 +373,9 @@ fn branch_direct() {
     assert_remove!(pm, "0.0.0.0/7", 1);
     assert_remove!(pm, "0.0.0.0/8", 2);
     assert_remove!(pm, "1.0.0.0/8", 3);
+
+    assert_eq!(pm.len(), 0);
+
     assert_map!(
         pm,
         ("0.0.0.0/0", ("0.0.0.0/7", ("0.0.0.0/8"), ("1.0.0.0/8")), ())
@@ -374,6 +388,9 @@ fn branch_indirect() {
     let mut pm = Map::new();
     pm.insert(ip("0.0.0.0/8"), 1);
     pm.insert(ip("1.0.0.0/8"), 2);
+
+    assert_eq!(pm.len(), 2);
+
     assert_map!(
         pm,
         (
@@ -391,6 +408,7 @@ fn branch_indirect() {
         pm,
         ("0.0.0.0/0", ("0.0.0.0/7", ("0.0.0.0/8"), ("1.0.0.0/8")), ())
     );
+    assert_eq!(pm.len(), 0);
     assert_iter!(pm);
 }
 
@@ -399,6 +417,7 @@ fn branch_indirect_child() {
     let mut pm = Map::new();
     pm.insert(ip("0.0.0.0/8"), 1);
     pm.insert(ip("4.0.0.0/8"), 2);
+    assert_eq!(pm.len(), 2);
     assert_map!(
         pm,
         (
@@ -412,6 +431,7 @@ fn branch_indirect_child() {
 
     assert_remove!(pm, "0.0.0.0/8", 1);
     assert_remove!(pm, "4.0.0.0/8", 2);
+    assert_eq!(pm.len(), 0);
     assert_map!(
         pm,
         ("0.0.0.0/0", ("0.0.0.0/5", ("0.0.0.0/8"), ("4.0.0.0/8")), ())
@@ -425,6 +445,7 @@ fn branch_indirect_with_value() {
     pm.insert(ip("0.0.0.0/8"), 1);
     pm.insert(ip("4.0.0.0/8"), 2);
     pm.insert(ip("0.0.0.0/5"), 3);
+    assert_eq!(pm.len(), 3);
     assert_map!(
         pm,
         (
@@ -439,6 +460,7 @@ fn branch_indirect_with_value() {
     assert_remove!(pm, "0.0.0.0/8", 1);
     assert_remove!(pm, "4.0.0.0/8", 2);
     assert_remove!(pm, "0.0.0.0/5", 3);
+    assert_eq!(pm.len(), 0);
     assert_map!(
         pm,
         ("0.0.0.0/0", ("0.0.0.0/5", ("0.0.0.0/8"), ("4.0.0.0/8")), ())
@@ -452,6 +474,7 @@ fn branch_indirect_twice() {
     pm.insert(ip("0.0.0.0/8"), 1);
     pm.insert(ip("4.0.0.0/8"), 2);
     pm.insert(ip("8.0.0.0/8"), 3);
+    assert_eq!(pm.len(), 3);
     assert_map!(
         pm,
         (
@@ -470,6 +493,7 @@ fn branch_indirect_twice() {
     assert_remove!(pm, "0.0.0.0/8", 1);
     assert_remove!(pm, "4.0.0.0/8", 2);
     assert_remove!(pm, "8.0.0.0/8", 3);
+    assert_eq!(pm.len(), 0);
     assert_map!(
         pm,
         (
@@ -492,6 +516,7 @@ fn get_exact() {
     pm.insert(ip("4.0.0.0/8"), 2);
     pm.insert(ip("8.0.0.0/8"), 3);
     pm.insert(ip("0.0.0.0/4"), 4);
+    assert_eq!(pm.len(), 4);
     assert_map!(
         pm,
         (
@@ -540,6 +565,7 @@ fn get_lpm() {
     pm.insert(ip("4.0.0.0/8"), 2);
     pm.insert(ip("8.0.0.0/8"), 3);
     pm.insert(ip("0.0.0.0/4"), 4);
+    assert_eq!(pm.len(), 4);
     assert_map!(
         pm,
         (
@@ -620,6 +646,7 @@ fn fuzzing(n: usize) {
 
         let sorted = reference.iter().map(|(p, v)| (*p, *v)).collect::<Vec<_>>();
         assert_iter!(pm, sorted);
+        assert_eq!(pm.len(), reference.len());
 
         // select a random prefix and check the iterator of children
         let prefix = Ipv4Net::new(Ipv4Addr::new(rng.gen(), 0, 0, 0), rng.gen_range(1..=6)).unwrap();
@@ -679,6 +706,7 @@ fn fuzzing_check_removal(n: usize) {
                 .filter(|(p, _)| prefix.contains(*p))
                 .collect::<Vec<_>>()
         );
+        assert_eq!(pm.len(), reference.len());
     }
 }
 

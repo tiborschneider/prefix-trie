@@ -13,6 +13,7 @@ pub use iter::*;
 pub struct PrefixMap<P, T> {
     pub(crate) table: Vec<Node<P, T>>,
     free: Vec<usize>,
+    count: usize,
 }
 
 impl<P, T> Default for PrefixMap<P, T>
@@ -28,6 +29,7 @@ where
                 right: None,
             }],
             free: Vec::new(),
+            count: 0,
         }
     }
 }
@@ -39,6 +41,18 @@ where
     /// Create an empty prefix map.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns the number of elements stored in `self`.
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.count
+    }
+
+    /// Returns `true` if the map contains no elements.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
     }
 
     /// Get the value of an element by matching exactly on the prefix.
@@ -328,7 +342,14 @@ where
         loop {
             match self.get_direction_for_insert(idx, &prefix) {
                 DirectionForInsert::Enter { next, .. } => idx = next,
-                DirectionForInsert::Reached => return self.table[idx].value.replace(value),
+                DirectionForInsert::Reached => {
+                    let old_value = self.table[idx].value.take();
+                    if old_value.is_none() {
+                        self.count += 1;
+                    }
+                    self.table[idx].value = Some(value);
+                    return old_value;
+                }
                 DirectionForInsert::NewLeaf { right } => {
                     let new = self.new_node(prefix, Some(value));
                     self.set_child(idx, new, right);
@@ -466,13 +487,20 @@ where
     /// ```
     pub fn remove_keep_tree(&mut self, prefix: &P) -> Option<T> {
         let mut idx = 0;
-        loop {
+        let value = loop {
             match self.get_direction(idx, prefix) {
-                Direction::Reached => return self.table[idx].value.take(),
+                Direction::Reached => break self.table[idx].value.take(),
                 Direction::Enter { next, .. } => idx = next,
-                Direction::Missing => return None,
+                Direction::Missing => break None,
             }
+        };
+
+        // decrease the count if the value is something
+        if value.is_some() {
+            self.count -= 1;
         }
+
+        value
     }
 
     /// Remove all entries that are contained within `prefix`. This will change the tree
@@ -549,6 +577,7 @@ where
             left: None,
             right: None,
         });
+        self.count = 0;
     }
 
     /// Keep only the elements in the map that satisfy the given condition `f`.
@@ -712,7 +741,11 @@ where
         self.clear_child(idx, right);
         while let Some(idx) = to_free.pop() {
             let node = &mut self.table[idx];
-            let _ = node.value.take();
+            let value = node.value.take();
+            // decrease the count if `value` is something
+            if value.is_some() {
+                self.count -= 1;
+            }
             if let Some(left) = node.left.take() {
                 to_free.push(left)
             }
@@ -753,9 +786,13 @@ where
         }
     }
 
-    /// insert a new node into the table and return its index.
+    /// insert a new node into the table and return its index. This function also increments the
+    /// count by 1, but only if `value` is `Some`.
     #[inline(always)]
     fn new_node(&mut self, prefix: P, value: Option<T>) -> usize {
+        if value.is_some() {
+            self.count += 1;
+        }
         if let Some(idx) = self.free.pop() {
             let node = &mut self.table[idx];
             node.prefix = prefix;
@@ -790,6 +827,11 @@ where
         let value = node.value.take();
         let has_left = node.left.is_some();
         let has_right = node.right.is_some();
+
+        // decrease the number of elements if value is something
+        if value.is_some() {
+            self.count -= 1;
+        }
 
         if has_left && has_right {
             // if the node has both left and right set, then it must remain in the tree.
