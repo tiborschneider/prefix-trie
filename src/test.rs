@@ -870,3 +870,17 @@ repeat_same!(fuzzing_remove, fuzzing_check_removal(500), 100);
 repeat_same!(fuzzing_remove_children, fuzzing_remove_children(2000), 100);
 repeat_same!(fuzzing_set, fuzzing_set_union(500), 100);
 repeat_same!(fuzzing_retain, fuzzing_retain(100, 10), 100);
+
+#[test]
+fn test_spm_vs_lpm_all_routes() {
+    let prefix_set = PrefixSet::from_iter(vec![
+        Ipv4Net::from_str("0.0.0.0/0").unwrap(),
+        Ipv4Net::from_str("192.168.0.0/23").unwrap(),
+        Ipv4Net::from_str("192.168.0.0/24").unwrap(),
+    ]);
+
+    let prefix = Ipv4Net::from_str("192.168.0.1/32").unwrap();
+
+    assert_eq!(prefix_set.get_spm(&prefix), Ipv4Net::from_str("0.0.0.0/0").unwrap()),
+    assert_eq!(prefix_set.get_lpm(&prefix), Ipv4Net::from_str("192.168.0.0/24").unwrap()),
+}
