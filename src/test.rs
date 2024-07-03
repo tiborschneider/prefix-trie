@@ -883,6 +883,6 @@ fn test_spm_vs_lpm_all_routes() {
 
     let prefix = Ipv4Net::from_str("192.168.0.1/32").unwrap();
 
-    assert_eq!(prefix_set.get_spm(&prefix), Ipv4Net::from_str("0.0.0.0/0").unwrap());
-    assert_eq!(prefix_set.get_lpm(&prefix), Ipv4Net::from_str("192.168.0.0/24").unwrap());
+    assert_eq!(prefix_set.get_spm(&prefix).unwrap(), Ipv4Net::from_str("0.0.0.0/0").unwrap());
+    assert_eq!(prefix_set.get_lpm(&prefix).unwrap(), Ipv4Net::from_str("192.168.0.0/24").unwrap());
 }
