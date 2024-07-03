@@ -873,6 +873,8 @@ repeat_same!(fuzzing_retain, fuzzing_retain(100, 10), 100);
 
 #[test]
 fn test_spm_vs_lpm_all_routes() {
+    use std::str::FromStr;
+
     let prefix_set = PrefixSet::from_iter(vec![
         Ipv4Net::from_str("0.0.0.0/0").unwrap(),
         Ipv4Net::from_str("192.168.0.0/23").unwrap(),
