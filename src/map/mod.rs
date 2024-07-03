@@ -285,7 +285,7 @@ where
     /// # fn main() {}
     pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(&'a P, &'a T)> {
         // Handle the special case, where the root is populated
-        if let Some(x) = self.table.get(0).and_then(|n| n.prefix_value()) {
+        if let Some(x) = self.table[0].prefix_value() {
             return Some(x)
         }
         let mut idx = 0;
