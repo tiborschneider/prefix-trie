@@ -284,6 +284,10 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(&'a P, &'a T)> {
+        // Handle the special case, where the root is populated
+        if let Some(x) = self.table.get(0).map(|n| n.prefix_value()) {
+            return Some(x)
+        }
         let mut idx = 0;
         loop {
             match self.get_direction(idx, prefix) {
