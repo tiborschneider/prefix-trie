@@ -2,7 +2,7 @@
 
 use crate::*;
 
-use super::Node;
+use super::{Direction, Node};
 
 /// An iterator over all entries of a [`PrefixMap`] in lexicographic order.
 #[derive(Clone)]
@@ -566,5 +566,72 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next().map(|(_, t)| t)
+    }
+}
+
+/// An iterator that yealds all ascendent prefixes (aka supernet) including
+/// given prefix itself.
+#[derive(Clone)]
+pub struct Ascend<'a, P, T> {
+    map: &'a PrefixMap<P, T>,
+    nodes: Vec<usize>,
+}
+
+impl<'a, P, T> Iterator for Ascend<'a, P, T> {
+    type Item = (&'a P, &'a T);
+
+    fn next(&mut self) -> Option<(&'a P, &'a T)> {
+        while let Some(cur) = self.nodes.pop() {
+            let node = &self.map.table[cur];
+            if let Some(v) = &node.value {
+                return Some((&node.prefix, v));
+            }
+        }
+        None
+    }
+}
+
+impl<P, T> PrefixMap<P, T>
+where
+    P: Prefix,
+{
+    /// Get an iterator that generates all ascendant prefixes with a value.
+    /// All elements returned are supernets of the `prefix`, including the prefix itself.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// assert_eq!(
+    ///     pm.ascend(&"192.168.0.0/24".parse()?).collect::<Vec<_>>(),
+    ///     vec![
+    ///         (&"192.168.0.0/24".parse()?, &4),
+    ///         (&"192.168.0.0/23".parse()?, &2),
+    ///         (&"192.168.0.0/22".parse()?, &1),
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn ascend(&self, prefix: &P) -> Ascend<'_, P, T> {
+        let mut idx = 0;
+        let mut nodes = vec![];
+        let nodes = loop {
+            nodes.push(idx);
+            match self.get_direction(idx, prefix) {
+                Direction::Reached => break nodes,
+                Direction::Enter { next, .. } => idx = next,
+                Direction::Missing => break vec![],
+            }
+        };
+        Ascend { map: self, nodes }
     }
 }
