@@ -34,27 +34,14 @@ impl<'a, P, T> Iterator for Iter<'a, P, T> {
 /// An iterator over all prefixes of a [`PrefixMap`] in lexicographic order.
 #[derive(Clone)]
 pub struct Keys<'a, P, T> {
-    map: &'a PrefixMap<P, T>,
-    nodes: Vec<usize>,
+    inner: Iter<'a, P, T>,
 }
 
 impl<'a, P, T> Iterator for Keys<'a, P, T> {
     type Item = &'a P;
 
     fn next(&mut self) -> Option<&'a P> {
-        while let Some(cur) = self.nodes.pop() {
-            let node = &self.map.table[cur];
-            if let Some(right) = node.right {
-                self.nodes.push(right);
-            }
-            if let Some(left) = node.left {
-                self.nodes.push(left);
-            }
-            if node.value.is_some() {
-                return Some(&node.prefix);
-            }
-        }
-        None
+        self.inner.next().map(|(k, _)| k)
     }
 }
 
@@ -62,27 +49,14 @@ impl<'a, P, T> Iterator for Keys<'a, P, T> {
 /// prefixes.
 #[derive(Clone)]
 pub struct Values<'a, P, T> {
-    map: &'a PrefixMap<P, T>,
-    nodes: Vec<usize>,
+    inner: Iter<'a, P, T>,
 }
 
 impl<'a, P, T> Iterator for Values<'a, P, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<&'a T> {
-        while let Some(cur) = self.nodes.pop() {
-            let node = &self.map.table[cur];
-            if let Some(right) = node.right {
-                self.nodes.push(right);
-            }
-            if let Some(left) = node.left {
-                self.nodes.push(left);
-            }
-            if let Some(v) = node.value.as_ref() {
-                return Some(v);
-            }
-        }
-        None
+        self.inner.next().map(|(_, v)| v)
     }
 }
 
@@ -114,29 +88,16 @@ impl<P: Prefix, T> Iterator for IntoIter<P, T> {
 }
 
 /// An iterator over all prefixes of a [`PrefixMap`] in lexicographic order.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct IntoKeys<P, T> {
-    map: PrefixMap<P, T>,
-    nodes: Vec<usize>,
+    inner: IntoIter<P, T>,
 }
 
 impl<P: Prefix, T> Iterator for IntoKeys<P, T> {
     type Item = P;
 
     fn next(&mut self) -> Option<P> {
-        while let Some(cur) = self.nodes.pop() {
-            let node = &mut self.map.table[cur];
-            if let Some(right) = node.right {
-                self.nodes.push(right);
-            }
-            if let Some(left) = node.left {
-                self.nodes.push(left);
-            }
-            if node.value.is_some() {
-                return Some(std::mem::replace(&mut node.prefix, P::zero()));
-            }
-        }
-        None
+        self.inner.next().map(|(k, _)| k)
     }
 }
 
@@ -144,27 +105,14 @@ impl<P: Prefix, T> Iterator for IntoKeys<P, T> {
 /// prefix.
 #[derive(Clone)]
 pub struct IntoValues<P, T> {
-    map: PrefixMap<P, T>,
-    nodes: Vec<usize>,
+    inner: IntoIter<P, T>,
 }
 
-impl<P, T> Iterator for IntoValues<P, T> {
+impl<P: Prefix, T> Iterator for IntoValues<P, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
-        while let Some(cur) = self.nodes.pop() {
-            let node = &mut self.map.table[cur];
-            if let Some(right) = node.right {
-                self.nodes.push(right);
-            }
-            if let Some(left) = node.left {
-                self.nodes.push(left);
-            }
-            if let Some(v) = node.value.take() {
-                return Some(v);
-            }
-        }
-        None
+        self.inner.next().map(|(_, v)| v)
     }
 }
 
@@ -231,6 +179,20 @@ impl<'a, P, T> Iterator for IterMut<'a, P, T> {
             }
         }
         None
+    }
+}
+
+/// A mutable iterator over values of [`PrefixMap`]. This iterator yields elements in lexicographic
+/// order.
+pub struct ValuesMut<'a, P, T> {
+    inner: IterMut<'a, P, T>,
+}
+
+impl<'a, P, T> Iterator for ValuesMut<'a, P, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|(_, v)| v)
     }
 }
 
@@ -316,11 +278,11 @@ impl<P, T> PrefixMap<P, T> {
         self.into_iter()
     }
 
-    /// Get a mutable iterator over all key-value pairs. The order of this iterator is arbitrary
-    /// (and **not** in lexicographic order).
-    pub fn iter_mut(&mut self) -> UnorderedIterMut<'_, P, T> {
-        UnorderedIterMut {
-            table: &mut self.table,
+    /// Get a mutable iterator over all key-value pairs. The order of this iterator is lexicographic.
+    pub fn iter_mut(&mut self) -> IterMut<'_, P, T> {
+        IterMut {
+            map: self,
+            nodes: vec![0],
         }
     }
 
@@ -353,10 +315,7 @@ impl<P, T> PrefixMap<P, T> {
     /// ```
     #[inline(always)]
     pub fn keys(&self) -> Keys<'_, P, T> {
-        Keys {
-            map: self,
-            nodes: vec![0],
-        }
+        Keys { inner: self.iter() }
     }
 
     /// Creates a consuming iterator visiting all keys in lexicographic order. The iterator element
@@ -364,8 +323,10 @@ impl<P, T> PrefixMap<P, T> {
     #[inline(always)]
     pub fn into_keys(self) -> IntoKeys<P, T> {
         IntoKeys {
-            map: self,
-            nodes: vec![0],
+            inner: IntoIter {
+                map: self,
+                nodes: vec![0],
+            },
         }
     }
 
@@ -389,10 +350,7 @@ impl<P, T> PrefixMap<P, T> {
     /// ```
     #[inline(always)]
     pub fn values(&self) -> Values<'_, P, T> {
-        Values {
-            map: self,
-            nodes: vec![0],
-        }
+        Values { inner: self.iter() }
     }
 
     /// Creates a consuming iterator visiting all values in lexicographic order. The iterator
@@ -400,16 +358,17 @@ impl<P, T> PrefixMap<P, T> {
     #[inline(always)]
     pub fn into_values(self) -> IntoValues<P, T> {
         IntoValues {
-            map: self,
-            nodes: vec![0],
+            inner: IntoIter {
+                map: self,
+                nodes: vec![0],
+            },
         }
     }
 
-    /// Get a mutable iterator over all values. The order of this iterator is arbitrary (and **not**
-    /// in lexicographic order).
-    pub fn values_mut(&mut self) -> UnorderedValuesMut<'_, P, T> {
-        UnorderedValuesMut {
-            table: &mut self.table,
+    /// Get a mutable iterator over all values. The order of this iterator is lexicographic.
+    pub fn values_mut(&mut self) -> ValuesMut<'_, P, T> {
+        ValuesMut {
+            inner: self.iter_mut(),
         }
     }
 }
