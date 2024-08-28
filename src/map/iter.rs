@@ -196,54 +196,6 @@ impl<'a, P, T> Iterator for ValuesMut<'a, P, T> {
     }
 }
 
-/// A mutable iterator over a [`PrefixMap`]. This iterator yields elements in arbitrary order!
-pub struct UnorderedIterMut<'a, P, T> {
-    table: &'a mut [Node<P, T>],
-}
-
-impl<'a, P, T> Iterator for UnorderedIterMut<'a, P, T> {
-    type Item = (&'a P, &'a mut T);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut idx = 0;
-        while idx < self.table.len() {
-            if self.table[idx].value.is_some() {
-                let table = std::mem::take(&mut self.table);
-                let (first, second) = table.split_at_mut(idx + 1);
-                self.table = second;
-                return first.get_mut(idx).unwrap().prefix_value_mut();
-            }
-            idx += 1;
-        }
-        self.table = &mut [];
-        None
-    }
-}
-
-/// A mutable iterator over the values of a [`PrefixMap`]. This iterator yields elements in arbitrary order!
-pub struct UnorderedValuesMut<'a, P, T> {
-    table: &'a mut [Node<P, T>],
-}
-
-impl<'a, P, T> Iterator for UnorderedValuesMut<'a, P, T> {
-    type Item = &'a mut T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut idx = 0;
-        while idx < self.table.len() {
-            if self.table[idx].value.is_some() {
-                let table = std::mem::take(&mut self.table);
-                let (first, second) = table.split_at_mut(idx + 1);
-                self.table = second;
-                return first.get_mut(idx).unwrap().value.as_mut();
-            }
-            idx += 1;
-        }
-        self.table = &mut [];
-        None
-    }
-}
-
 impl<P, T> PrefixMap<P, T> {
     /// An iterator visiting all key-value pairs in lexicographic order. The iterator element type
     /// is `(&P, &T)`.
