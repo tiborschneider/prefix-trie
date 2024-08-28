@@ -357,6 +357,36 @@ impl<P: Prefix> PrefixSet<P> {
         }
     }
 
+    /// Get an iterator over the node itself and all children. All elements returned have a prefix
+    /// that is contained within `prefix` itself (or are the same). The iterator yields elements in
+    /// lexicographic order.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// set.insert("192.168.0.0/22".parse()?);
+    /// set.insert("192.168.0.0/23".parse()?);
+    /// set.insert("192.168.2.0/23".parse()?);
+    /// set.insert("192.168.0.0/24".parse()?);
+    /// set.insert("192.168.2.0/24".parse()?);
+    /// assert_eq!(
+    ///     set.children(&"192.168.0.0/23".parse()?).collect::<Vec<_>>(),
+    ///     vec![
+    ///         &"192.168.0.0/23".parse()?,
+    ///         &"192.168.0.0/24".parse()?,
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn children(&self, prefix: &P) -> Iter<'_, P> {
+        Iter(self.0.children(prefix))
+    }
+
     /// Iterate over all prefixes in the set that covers the given `prefix` (including `prefix`
     /// itself if that is present in the set). The returned iterator yields `&'a P`.
     ///
