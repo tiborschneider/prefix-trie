@@ -194,12 +194,52 @@ impl<'a, P, T> IntoIterator for &'a PrefixMap<P, T> {
     }
 }
 
-/// A mutable iterator over a [`PrefixMap`]. This iterator yields elements in arbitrary order!
+unsafe fn extend_lifetime_mut<'short, 'long, T: ?Sized>(v: &'short mut T) -> &'long mut T {
+    std::mem::transmute(v)
+}
+
+/// A mutable iterator over a [`PrefixMap`]. This iterator yields elements in lexicographic order of
+/// their associated prefix.
 pub struct IterMut<'a, P, T> {
-    table: &'a mut [Node<P, T>],
+    map: &'a mut PrefixMap<P, T>,
+    nodes: Vec<usize>,
 }
 
 impl<'a, P, T> Iterator for IterMut<'a, P, T> {
+    type Item = (&'a P, &'a mut T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(cur) = self.nodes.pop() {
+            let node: &'a mut Node<P, T>;
+            // safety: map is a tree. Every node is visited exactly once during the iteration
+            // (self.nodes is not public). Therefore, each in each iteration of this loop (also
+            // between multiple calls to `next`), the index `cur` is different to any of the earlier
+            // iterations. It is therefore safe to extend the lifetime of the elements to 'a (which
+            // is the lifetime for which `self` has an exclusive reference over the map).
+            unsafe {
+                node = extend_lifetime_mut(&mut self.map.table[cur]);
+            }
+            if let Some(right) = node.right {
+                self.nodes.push(right);
+            }
+            if let Some(left) = node.left {
+                self.nodes.push(left);
+            }
+            if node.value.is_some() {
+                let v = node.value.as_mut().unwrap();
+                return Some((&node.prefix, v));
+            }
+        }
+        None
+    }
+}
+
+/// A mutable iterator over a [`PrefixMap`]. This iterator yields elements in arbitrary order!
+pub struct UnorderedIterMut<'a, P, T> {
+    table: &'a mut [Node<P, T>],
+}
+
+impl<'a, P, T> Iterator for UnorderedIterMut<'a, P, T> {
     type Item = (&'a P, &'a mut T);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -219,11 +259,11 @@ impl<'a, P, T> Iterator for IterMut<'a, P, T> {
 }
 
 /// A mutable iterator over the values of a [`PrefixMap`]. This iterator yields elements in arbitrary order!
-pub struct ValuesMut<'a, P, T> {
+pub struct UnorderedValuesMut<'a, P, T> {
     table: &'a mut [Node<P, T>],
 }
 
-impl<'a, P, T> Iterator for ValuesMut<'a, P, T> {
+impl<'a, P, T> Iterator for UnorderedValuesMut<'a, P, T> {
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -278,8 +318,8 @@ impl<P, T> PrefixMap<P, T> {
 
     /// Get a mutable iterator over all key-value pairs. The order of this iterator is arbitrary
     /// (and **not** in lexicographic order).
-    pub fn iter_mut(&mut self) -> IterMut<'_, P, T> {
-        IterMut {
+    pub fn iter_mut(&mut self) -> UnorderedIterMut<'_, P, T> {
+        UnorderedIterMut {
             table: &mut self.table,
         }
     }
@@ -367,8 +407,8 @@ impl<P, T> PrefixMap<P, T> {
 
     /// Get a mutable iterator over all values. The order of this iterator is arbitrary (and **not**
     /// in lexicographic order).
-    pub fn values_mut(&mut self) -> ValuesMut<'_, P, T> {
-        ValuesMut {
+    pub fn values_mut(&mut self) -> UnorderedValuesMut<'_, P, T> {
+        UnorderedValuesMut {
             table: &mut self.table,
         }
     }
@@ -378,8 +418,10 @@ impl<P, T> PrefixMap<P, T>
 where
     P: Prefix,
 {
-    /// Get an iterator over the node itself and all children with a value. All elements returned
-    /// have a prefix that is contained within `prefix` itself (or are the same).
+    /// Get an iterator over the node itself and all children. All elements returned have a prefix
+    /// that is contained within `prefix` itself (or are the same). The iterator yields references
+    /// to both keys and values, i.e., type `(&'a P, &'a T)`. The iterator yields elements in
+    /// lexicographic order.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -428,6 +470,64 @@ where
             }
         };
         Iter { map: self, nodes }
+    }
+
+    /// Get an iterator of mutable references of the node itself and all its children. All elements
+    /// returned have a prefix that is contained within `prefix` itself (or are the same). The
+    /// iterator yields references to the keys, and mutable references to the values, i.e., type
+    /// `(&'a P, &'a mut T)`. The iterator yields elements in lexicographic order.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.0.0/24".parse()?, 3);
+    /// pm.insert("192.168.2.0/23".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// pm.children_mut(&"192.168.0.0/23".parse()?).for_each(|(_, x)| *x *= 10);
+    /// assert_eq!(
+    ///     pm.into_iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         ("192.168.0.0/22".parse()?, 1),
+    ///         ("192.168.0.0/23".parse()?, 20),
+    ///         ("192.168.0.0/24".parse()?, 30),
+    ///         ("192.168.2.0/23".parse()?, 4),
+    ///         ("192.168.2.0/24".parse()?, 5),
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn children_mut(&mut self, prefix: &P) -> IterMut<'_, P, T> {
+        // first, find the longest prefix containing `prefix`.
+        let mut idx = 0;
+        let mut cur_p = &self.table[idx].prefix;
+        let nodes = loop {
+            if cur_p.eq(prefix) {
+                break vec![idx];
+            }
+            let right = to_right(cur_p, prefix);
+            match self.get_child(idx, right) {
+                Some(c) => {
+                    cur_p = &self.table[c].prefix;
+                    if cur_p.contains(prefix) {
+                        // continue traversal
+                        idx = c;
+                    } else if prefix.contains(cur_p) {
+                        break vec![c];
+                    } else {
+                        break vec![];
+                    }
+                }
+                None => break vec![],
+            }
+        };
+        IterMut { map: self, nodes }
     }
 
     /// Get an iterator over the node itself and all children with a value. All elements returned
