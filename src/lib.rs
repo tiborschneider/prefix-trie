@@ -94,10 +94,12 @@ mod test;
 
 pub mod map;
 pub mod set;
+pub mod subtrie;
 
 pub use map::PrefixMap;
 pub use prefix::Prefix;
 pub use set::PrefixSet;
+pub use subtrie::AsSubTrie;
 
 #[inline(always)]
 pub(crate) fn to_right<P: Prefix>(branch_p: &P, child_p: &P) -> bool {

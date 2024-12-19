@@ -7,8 +7,8 @@ use super::Node;
 /// An iterator over all entries of a [`PrefixMap`] in lexicographic order.
 #[derive(Clone)]
 pub struct Iter<'a, P, T> {
-    map: &'a PrefixMap<P, T>,
-    nodes: Vec<usize>,
+    pub(crate) map: &'a PrefixMap<P, T>,
+    pub(crate) nodes: Vec<usize>,
 }
 
 impl<'a, P, T> Iterator for Iter<'a, P, T> {
@@ -34,7 +34,7 @@ impl<'a, P, T> Iterator for Iter<'a, P, T> {
 /// An iterator over all prefixes of a [`PrefixMap`] in lexicographic order.
 #[derive(Clone)]
 pub struct Keys<'a, P, T> {
-    inner: Iter<'a, P, T>,
+    pub(crate) inner: Iter<'a, P, T>,
 }
 
 impl<'a, P, T> Iterator for Keys<'a, P, T> {
@@ -49,7 +49,7 @@ impl<'a, P, T> Iterator for Keys<'a, P, T> {
 /// prefixes.
 #[derive(Clone)]
 pub struct Values<'a, P, T> {
-    inner: Iter<'a, P, T>,
+    pub(crate) inner: Iter<'a, P, T>,
 }
 
 impl<'a, P, T> Iterator for Values<'a, P, T> {

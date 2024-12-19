@@ -762,7 +762,7 @@ where
 
     /// Get the child of a node, either to the left or the right
     #[inline(always)]
-    fn get_child(&self, idx: usize, right: bool) -> Option<usize> {
+    pub(crate) fn get_child(&self, idx: usize, right: bool) -> Option<usize> {
         if right {
             self.table[idx].right
         } else {
@@ -908,7 +908,7 @@ where
 
     /// Get the directions from some node `idx` to get to `prefix`.
     #[inline(always)]
-    fn get_direction(&self, cur: usize, prefix: &P) -> Direction {
+    pub(crate) fn get_direction(&self, cur: usize, prefix: &P) -> Direction {
         let cur_p = &self.table[cur].prefix;
         if cur_p.eq(prefix) {
             Direction::Reached
@@ -984,7 +984,7 @@ pub(crate) struct Node<P, T> {
 
 impl<P, T> Node<P, T> {
     /// get the tuple of prefix and value.
-    fn prefix_value(&self) -> Option<(&P, &T)> {
+    pub(crate) fn prefix_value(&self) -> Option<(&P, &T)> {
         self.value.as_ref().map(|v| (&self.prefix, v))
     }
 
@@ -994,7 +994,7 @@ impl<P, T> Node<P, T> {
     }
 }
 
-enum Direction {
+pub(crate) enum Direction {
     /// The prefix is already reached.
     Reached,
     /// Enter the next index and search again.
