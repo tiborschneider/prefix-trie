@@ -1,5 +1,8 @@
-//! A `SubTrie` is a pointer to a specific element in a PrefixTrie, representing the sub-tree rooted
-//! at that node.
+//! A [`SubTrie`] is a pointer to a specific element in a PrefixTrie, representing the sub-tree
+//! rooted at that node.
+//!
+//! This module allows you to perform Set operations (union, intersection, difference) on
+//! [`PrefixMap`]s and [`PrefixSet`]s, optionally of only a sub-trie.
 
 use crate::{
     map::{Direction, Iter, Keys, Values},
