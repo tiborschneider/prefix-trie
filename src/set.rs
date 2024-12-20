@@ -1,13 +1,10 @@
 //! PrefixSet, that is implemened as a simple binary tree, based on the [`PrefixMap`].
 
-use crate::{map::CoverKeys, Prefix, PrefixMap};
-
-mod difference;
-mod intersection;
-mod union;
-pub use difference::Difference;
-pub use intersection::Intersection;
-pub use union::Union;
+use crate::{
+    map::CoverKeys,
+    trieview::{Difference, Intersection, Union},
+    AsTrieView, Prefix, PrefixMap,
+};
 
 /// Set of prefixes, organized in a tree. This strucutre gives efficient access to the longest
 /// prefix in the set that contains another prefix.
@@ -250,7 +247,7 @@ impl<P: Prefix> PrefixSet<P> {
     }
 
     /// Return an iterator that traverses both trees simultaneously and yields the union of both
-    /// sets in lexicographic order.
+    /// sets in lexicographic order. See [`crate::TrieView::union`] for more information.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -267,7 +264,7 @@ impl<P: Prefix> PrefixSet<P> {
     ///     "192.168.2.0/24".parse()?,
     /// ]);
     /// assert_eq!(
-    ///     set_a.union(&set_b).copied().collect::<Vec<_>>(),
+    ///     set_a.union(&set_b).map(|x| *x.prefix()).collect::<Vec<_>>(),
     ///     vec![
     ///         "192.168.0.0/22".parse()?,
     ///         "192.168.0.0/23".parse()?,
@@ -281,16 +278,13 @@ impl<P: Prefix> PrefixSet<P> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn union<'a>(&'a self, other: &'a Self) -> Union<'a, P> {
-        Union {
-            set_a: &self.0,
-            set_b: &other.0,
-            nodes: vec![union::UnionIndex::Both(0, 0)],
-        }
+    pub fn union<'a, R>(&'a self, other: &'a impl AsTrieView<P, R>) -> Union<'a, P, (), R> {
+        self.trie_view().union(other)
     }
 
     /// Return an iterator that traverses both trees simultaneously and yields the intersection of
-    /// both sets in lexicographic order.
+    /// both sets in lexicographic order. See [`crate::TrieView::intersection`] for more
+    /// information.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -307,7 +301,7 @@ impl<P: Prefix> PrefixSet<P> {
     ///     "192.168.2.0/24".parse()?,
     /// ]);
     /// assert_eq!(
-    ///     set_a.intersection(&set_b).copied().collect::<Vec<_>>(),
+    ///     set_a.intersection(&set_b).map(|(p, _, _)| *p).collect::<Vec<_>>(),
     ///     vec!["192.168.0.0/22".parse()?, "192.168.0.0/24".parse()?]
     /// );
     /// # Ok(())
@@ -315,16 +309,15 @@ impl<P: Prefix> PrefixSet<P> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn intersection<'a>(&'a self, other: &'a Self) -> Intersection<'a, P> {
-        Intersection {
-            set_a: &self.0,
-            set_b: &other.0,
-            nodes: vec![intersection::IntersectionIndex::Both(0, 0)],
-        }
+    pub fn intersection<'a, R>(
+        &'a self,
+        other: &'a impl AsTrieView<P, R>,
+    ) -> Intersection<'a, P, (), R> {
+        self.trie_view().intersection(other)
     }
 
     /// Return an iterator that traverses both trees simultaneously and yields the difference of
-    /// both sets in lexicographic order.
+    /// both sets in lexicographic order. See [`crate::TrieView::difference`] for more information.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -341,7 +334,7 @@ impl<P: Prefix> PrefixSet<P> {
     ///     "192.168.2.0/24".parse()?,
     /// ]);
     /// assert_eq!(
-    ///     set_a.difference(&set_b).copied().collect::<Vec<_>>(),
+    ///     set_a.difference(&set_b).map(|x| *x.prefix).collect::<Vec<_>>(),
     ///     vec!["192.168.2.0/23".parse()?]
     /// );
     /// # Ok(())
@@ -349,12 +342,11 @@ impl<P: Prefix> PrefixSet<P> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn difference<'a>(&'a self, other: &'a Self) -> Difference<'a, P> {
-        Difference {
-            set_a: &self.0,
-            set_b: &other.0,
-            nodes: vec![difference::DifferenceIndex::Both(0, 0)],
-        }
+    pub fn difference<'a, R>(
+        &'a self,
+        other: &'a impl AsTrieView<P, R>,
+    ) -> Difference<'a, P, (), R> {
+        self.trie_view().difference(other)
     }
 
     /// Get an iterator over the node itself and all children. All elements returned have a prefix

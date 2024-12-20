@@ -786,17 +786,23 @@ fn fuzzing_set_union(n: usize) {
 
         // check the union
         let ref_union = ref1.union(&ref2).copied().collect::<Vec<_>>();
-        let union = set1.union(&set2).copied().collect::<Vec<_>>();
+        let union = set1.union(&set2).map(|x| *x.prefix()).collect::<Vec<_>>();
         assert_eq!(union, ref_union, "with\nset1: {set1:?}\nset2: {set2:?}");
 
         // check the intersection
         let ref_intr = ref1.intersection(&ref2).copied().collect::<Vec<_>>();
-        let intr = set1.intersection(&set2).copied().collect::<Vec<_>>();
+        let intr = set1
+            .intersection(&set2)
+            .map(|(p, _, _)| *p)
+            .collect::<Vec<_>>();
         assert_eq!(intr, ref_intr, "with\nset1: {set1:?}\nset2: {set2:?}");
 
         // check the difference
         let ref_diff = ref1.difference(&ref2).copied().collect::<Vec<_>>();
-        let diff = set1.difference(&set2).copied().collect::<Vec<_>>();
+        let diff = set1
+            .difference(&set2)
+            .map(|x| *x.prefix)
+            .collect::<Vec<_>>();
         assert_eq!(diff, ref_diff, "with\nset1: {set1:?}\nset2: {set2:?}");
     }
 }

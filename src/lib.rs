@@ -99,7 +99,7 @@ pub mod trieview;
 pub use map::PrefixMap;
 pub use prefix::Prefix;
 pub use set::PrefixSet;
-pub use trieview::AsTrieView;
+pub use trieview::{AsTrieView, TrieView};
 
 #[inline(always)]
 pub(crate) fn to_right<P: Prefix>(branch_p: &P, child_p: &P) -> bool {
