@@ -21,8 +21,17 @@ pub trait AsTrieView {
 
     /// Get a TrieView rooted at the given `prefix`. If that `prefix` is not part of the trie, `None`
     /// is returned. Calling this function is identical to `self.trie_view().find(prefix)`.
-    fn trie_view_at(&self, prefix: &Self::P) -> Option<TrieView<'_, Self::P, Self::T>> {
+    fn trie_view_at(&self, prefix: &Self::P) -> Option<TrieView<Self::P, Self::T>> {
         self.trie_view().find(prefix)
+    }
+}
+
+impl<P: Prefix, T> AsTrieView for TrieView<'_, P, T> {
+    type P = P;
+    type T = T;
+
+    fn trie_view(&self) -> TrieView<'_, Self::P, Self::T> {
+        *self
     }
 }
 
@@ -48,10 +57,17 @@ impl<P: Prefix> AsTrieView for PrefixSet<P> {
 }
 
 /// A subtree of a prefix-trie rooted at a specific node.
-#[derive(Clone, Copy)]
 pub struct TrieView<'a, P, T> {
     map: &'a PrefixMap<P, T>,
     idx: usize,
+}
+
+impl<P, T> Copy for TrieView<'_, P, T> {}
+
+impl<P, T> Clone for TrieView<'_, P, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 impl<P: std::fmt::Debug, T: std::fmt::Debug> std::fmt::Debug for TrieView<'_, P, T> {
@@ -73,7 +89,6 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::Either;
     /// # #[cfg(feature = "ipnet")]
     /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
     ///
@@ -133,7 +148,6 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::Either;
     /// # #[cfg(feature = "ipnet")]
     /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
     ///
@@ -182,7 +196,6 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::Either;
     /// # #[cfg(feature = "ipnet")]
     /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
     ///
@@ -237,7 +250,6 @@ impl<'a, P, T> TrieView<'a, P, T> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::Either;
     /// # #[cfg(feature = "ipnet")]
     /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
     ///
@@ -272,7 +284,6 @@ impl<'a, P, T> TrieView<'a, P, T> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::Either;
     /// # #[cfg(feature = "ipnet")]
     /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
     ///
@@ -300,7 +311,6 @@ impl<'a, P, T> TrieView<'a, P, T> {
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::Either;
     /// # #[cfg(feature = "ipnet")]
     /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
     ///
@@ -358,7 +368,18 @@ impl<'a, P, T> TrieView<'a, P, T> {
     }
 }
 
+impl<'a, P, T> IntoIterator for TrieView<'a, P, T> {
+    type Item = (&'a P, &'a T);
+    type IntoIter = Iter<'a, P, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+mod difference;
 mod intersection;
 mod union;
+pub use difference::{CoveringDifference, Difference, DifferenceItem};
 pub use intersection::Intersection;
-pub use union::{Either, Union, UnionLpm, UnionLpmItem};
+pub use union::{Union, UnionItem};

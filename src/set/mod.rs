@@ -361,6 +361,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// that is contained within `prefix` itself (or are the same). The iterator yields elements in
     /// lexicographic order.
     ///
+    /// **Info**: Use the [`crate::trieview::TrieView`] abstraction that provides more flexibility.
+    ///
     /// ```
     /// # use prefix_trie::*;
     /// # #[cfg(feature = "ipnet")]

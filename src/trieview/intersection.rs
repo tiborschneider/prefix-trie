@@ -26,7 +26,6 @@ where
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::Either;
     /// # #[cfg(feature = "ipnet")]
     /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
     ///
