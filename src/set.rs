@@ -3,7 +3,7 @@
 use crate::{
     map::CoverKeys,
     trieview::{CoveringDifference, Difference, Intersection, Union},
-    AsTrieView, Prefix, PrefixMap,
+    AsView, Prefix, PrefixMap,
 };
 
 /// Set of prefixes, organized in a tree. This strucutre gives efficient access to the longest
@@ -278,8 +278,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn union<'a, R>(&'a self, other: &'a impl AsTrieView<P, R>) -> Union<'a, P, (), R> {
-        self.trie_view().union(other)
+    pub fn union<'a, R>(&'a self, other: impl AsView<'a, P, R>) -> Union<'a, P, (), R> {
+        self.view().union(other)
     }
 
     /// Return an iterator that traverses both trees simultaneously and yields the intersection of
@@ -311,9 +311,9 @@ impl<P: Prefix> PrefixSet<P> {
     /// ```
     pub fn intersection<'a, R>(
         &'a self,
-        other: &'a impl AsTrieView<P, R>,
+        other: impl AsView<'a, P, R>,
     ) -> Intersection<'a, P, (), R> {
-        self.trie_view().intersection(other)
+        self.view().intersection(other)
     }
 
     /// Return an iterator that traverses both trees simultaneously and yields the difference of
@@ -343,11 +343,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn difference<'a, R>(
-        &'a self,
-        other: &'a impl AsTrieView<P, R>,
-    ) -> Difference<'a, P, (), R> {
-        self.trie_view().difference(other)
+    pub fn difference<'a, R>(&'a self, other: impl AsView<'a, P, R>) -> Difference<'a, P, (), R> {
+        self.view().difference(other)
     }
 
     /// Return an iterator that traverses both trees simultaneously and yields the difference of
@@ -378,9 +375,9 @@ impl<P: Prefix> PrefixSet<P> {
     /// ```
     pub fn covering_difference<'a, R>(
         &'a self,
-        other: &'a impl AsTrieView<P, R>,
+        other: impl AsView<'a, P, R>,
     ) -> CoveringDifference<'a, P, (), R> {
-        self.trie_view().covering_difference(other)
+        self.view().covering_difference(other)
     }
 
     /// Get an iterator over the node itself and all children. All elements returned have a prefix

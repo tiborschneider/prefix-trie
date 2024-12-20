@@ -119,7 +119,7 @@ where
     ///     (net!("192.168.2.0/24"), "c"),
     /// ]);
     /// assert_eq!(
-    ///     map_a.trie_view().union(&map_b).collect::<Vec<_>>(),
+    ///     map_a.view().union(&map_b).collect::<Vec<_>>(),
     ///     vec![
     ///         UnionItem::Left{
     ///             prefix: &net!("192.168.0.0/20"),
@@ -155,8 +155,8 @@ where
     /// );
     /// # }
     /// ```
-    pub fn union<R>(&self, other: &'a impl AsTrieView<P, R>) -> Union<'a, P, L, R> {
-        let other = other.trie_view();
+    pub fn union<R>(&self, other: impl AsView<'a, P, R>) -> Union<'a, P, L, R> {
+        let other = other.view();
         Union {
             map_l: self.map,
             map_r: other.map,

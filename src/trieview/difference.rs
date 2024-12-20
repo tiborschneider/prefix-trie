@@ -68,10 +68,10 @@ where
     ///     (net!("192.168.0.0/23"), "c"),
     ///     (net!("192.168.2.0/24"), "d"),
     /// ]);
-    /// let sub_a = map_a.trie_view_at(&net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.trie_view_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_a = map_a.view_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_b = map_b.view_at(&net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(
-    ///     sub_a.difference(&sub_b).collect::<Vec<_>>(),
+    ///     sub_a.difference(sub_b).collect::<Vec<_>>(),
     ///     vec![
     ///         DifferenceItem { prefix: &net!("192.168.0.0/24"), value: &3, right: Some((&net!("192.168.0.0/23"), &"c"))},
     ///         DifferenceItem { prefix: &net!("192.168.2.0/23"), value: &4, right: Some((&net!("192.168.0.0/22"), &"b"))},
@@ -79,8 +79,8 @@ where
     /// );
     /// # }
     /// ```
-    pub fn difference<R>(&self, other: &'a impl AsTrieView<P, R>) -> Difference<'a, P, L, R> {
-        let other = other.trie_view();
+    pub fn difference<R>(&self, other: impl AsView<'a, P, R>) -> Difference<'a, P, L, R> {
+        let other = other.view();
         Difference {
             map_l: self.map,
             map_r: other.map,
@@ -113,16 +113,16 @@ where
     ///     net!("192.168.0.0/23"),
     /// ]);
     /// assert_eq!(
-    ///     map_a.trie_view().covering_difference(&set_b).collect::<Vec<_>>(),
+    ///     map_a.view().covering_difference(&set_b).collect::<Vec<_>>(),
     ///     vec![(&net!("192.168.0.0/22"), &1), (&net!("192.168.2.0/23"), &3)],
     /// );
     /// # }
     /// ```
     pub fn covering_difference<R>(
         &self,
-        other: &'a impl AsTrieView<P, R>,
+        other: impl AsView<'a, P, R>,
     ) -> CoveringDifference<'a, P, L, R> {
-        let other = other.trie_view();
+        let other = other.view();
         CoveringDifference {
             map_l: self.map,
             map_r: other.map,

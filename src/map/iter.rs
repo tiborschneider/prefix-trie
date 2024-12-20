@@ -149,8 +149,8 @@ unsafe fn extend_lifetime_mut<'short, 'long, T: ?Sized>(v: &'short mut T) -> &'l
 /// A mutable iterator over a [`PrefixMap`]. This iterator yields elements in lexicographic order of
 /// their associated prefix.
 pub struct IterMut<'a, P, T> {
-    map: &'a mut PrefixMap<P, T>,
-    nodes: Vec<usize>,
+    pub(crate) map: &'a mut PrefixMap<P, T>,
+    pub(crate) nodes: Vec<usize>,
 }
 
 impl<'a, P, T> Iterator for IterMut<'a, P, T> {
@@ -185,7 +185,7 @@ impl<'a, P, T> Iterator for IterMut<'a, P, T> {
 /// A mutable iterator over values of [`PrefixMap`]. This iterator yields elements in lexicographic
 /// order.
 pub struct ValuesMut<'a, P, T> {
-    inner: IterMut<'a, P, T>,
+    pub(crate) inner: IterMut<'a, P, T>,
 }
 
 impl<'a, P, T> Iterator for ValuesMut<'a, P, T> {

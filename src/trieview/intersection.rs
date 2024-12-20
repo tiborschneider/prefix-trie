@@ -42,10 +42,10 @@ where
     ///     (net!("192.168.0.0/24"), "d"),
     ///     (net!("192.168.2.0/24"), "e"),
     /// ]);
-    /// let sub_a = map_a.trie_view_at(&net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.trie_view_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_a = map_a.view_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_b = map_b.view_at(&net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(
-    ///     sub_a.intersection(&sub_b).collect::<Vec<_>>(),
+    ///     sub_a.intersection(sub_b).collect::<Vec<_>>(),
     ///     vec![
     ///         (&net!("192.168.0.0/22"), &2, &"b"),
     ///         (&net!("192.168.0.0/24"), &3, &"d"),
@@ -53,8 +53,8 @@ where
     /// );
     /// # }
     /// ```
-    pub fn intersection<R>(&self, other: &'a impl AsTrieView<P, R>) -> Intersection<'a, P, L, R> {
-        let other = other.trie_view();
+    pub fn intersection<R>(&self, other: impl AsView<'a, P, R>) -> Intersection<'a, P, L, R> {
+        let other = other.view();
         Intersection {
             map_l: self.map,
             map_r: other.map,
