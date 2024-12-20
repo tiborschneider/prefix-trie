@@ -107,21 +107,19 @@ where
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # {
-    /// let mut set_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
     ///     (net!("192.168.0.0/20"), 1),
     ///     (net!("192.168.0.0/22"), 2),
     ///     (net!("192.168.0.0/24"), 3),
     ///     (net!("192.168.2.0/23"), 4),
     /// ]);
-    /// let mut set_b: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
+    /// let mut map_b: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
     ///     (net!("192.168.0.0/22"), "a"),
     ///     (net!("192.168.0.0/23"), "b"),
     ///     (net!("192.168.2.0/24"), "c"),
     /// ]);
-    /// let sub_a = set_a.trie_view();
-    /// let sub_b = set_b.trie_view();
     /// assert_eq!(
-    ///     sub_a.union(&sub_b).collect::<Vec<_>>(),
+    ///     map_a.trie_view().union(&map_b).collect::<Vec<_>>(),
     ///     vec![
     ///         UnionItem::Left{
     ///             prefix: &net!("192.168.0.0/20"),
@@ -157,7 +155,8 @@ where
     /// );
     /// # }
     /// ```
-    pub fn union<R>(&self, other: &TrieView<'a, P, R>) -> Union<'a, P, L, R> {
+    pub fn union<R>(&self, other: &'a impl AsTrieView<P, R>) -> Union<'a, P, L, R> {
+        let other = other.trie_view();
         Union {
             map_l: self.map,
             map_r: other.map,

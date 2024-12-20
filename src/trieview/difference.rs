@@ -79,7 +79,8 @@ where
     /// );
     /// # }
     /// ```
-    pub fn difference<R>(&self, other: &TrieView<'a, P, R>) -> Difference<'a, P, L, R> {
+    pub fn difference<R>(&self, other: &'a impl AsTrieView<P, R>) -> Difference<'a, P, L, R> {
+        let other = other.trie_view();
         Difference {
             map_l: self.map,
             map_r: other.map,
@@ -111,18 +112,17 @@ where
     /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
     ///     net!("192.168.0.0/23"),
     /// ]);
-    /// let sub_a = map_a.trie_view();
-    /// let sub_b = set_b.trie_view();
     /// assert_eq!(
-    ///     sub_a.covering_difference(&sub_b).collect::<Vec<_>>(),
+    ///     map_a.trie_view().covering_difference(&set_b).collect::<Vec<_>>(),
     ///     vec![(&net!("192.168.0.0/22"), &1), (&net!("192.168.2.0/23"), &3)],
     /// );
     /// # }
     /// ```
     pub fn covering_difference<R>(
         &self,
-        other: &TrieView<'a, P, R>,
+        other: &'a impl AsTrieView<P, R>,
     ) -> CoveringDifference<'a, P, L, R> {
+        let other = other.trie_view();
         CoveringDifference {
             map_l: self.map,
             map_r: other.map,

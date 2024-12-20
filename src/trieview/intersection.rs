@@ -22,8 +22,6 @@ where
     /// Iterate over the union of both Views. Each element will yield a reference to the prefix and
     /// the value stored in `self` and `other` (if the prefix is in both views).
     ///
-    /// If instead you are interested in the longest prefix match, look at [`TrieView::union_lpm`].
-    ///
     /// ```
     /// # use prefix_trie::*;
     /// # #[cfg(feature = "ipnet")]
@@ -55,7 +53,8 @@ where
     /// );
     /// # }
     /// ```
-    pub fn intersection<R>(&self, other: &TrieView<'a, P, R>) -> Intersection<'a, P, L, R> {
+    pub fn intersection<R>(&self, other: &'a impl AsTrieView<P, R>) -> Intersection<'a, P, L, R> {
+        let other = other.trie_view();
         Intersection {
             map_l: self.map,
             map_r: other.map,

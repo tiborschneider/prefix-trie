@@ -10,45 +10,31 @@ use crate::{
 };
 
 /// A trait for creating a TrieView of `self`.
-pub trait AsTrieView {
-    /// The prefix of the TrieView
-    type P: Prefix;
-    /// The value of the map in the Trie.
-    type T;
-
+pub trait AsTrieView<P: Prefix, T> {
     /// Get a TrieView rooted at the origin (referencing the entire trie).
-    fn trie_view(&self) -> TrieView<'_, Self::P, Self::T>;
+    fn trie_view(&self) -> TrieView<'_, P, T>;
 
     /// Get a TrieView rooted at the given `prefix`. If that `prefix` is not part of the trie, `None`
     /// is returned. Calling this function is identical to `self.trie_view().find(prefix)`.
-    fn trie_view_at(&self, prefix: &Self::P) -> Option<TrieView<Self::P, Self::T>> {
+    fn trie_view_at(&self, prefix: &P) -> Option<TrieView<P, T>> {
         self.trie_view().find(prefix)
     }
 }
 
-impl<P: Prefix, T> AsTrieView for TrieView<'_, P, T> {
-    type P = P;
-    type T = T;
-
-    fn trie_view(&self) -> TrieView<'_, Self::P, Self::T> {
+impl<P: Prefix, T> AsTrieView<P, T> for TrieView<'_, P, T> {
+    fn trie_view(&self) -> TrieView<'_, P, T> {
         *self
     }
 }
 
-impl<P: Prefix, T> AsTrieView for PrefixMap<P, T> {
-    type P = P;
-    type T = T;
-
-    fn trie_view(&self) -> TrieView<'_, Self::P, Self::T> {
+impl<P: Prefix, T> AsTrieView<P, T> for PrefixMap<P, T> {
+    fn trie_view(&self) -> TrieView<'_, P, T> {
         TrieView { map: self, idx: 0 }
     }
 }
 
-impl<P: Prefix> AsTrieView for PrefixSet<P> {
-    type P = P;
-    type T = ();
-
-    fn trie_view(&self) -> TrieView<'_, Self::P, Self::T> {
+impl<P: Prefix> AsTrieView<P, ()> for PrefixSet<P> {
+    fn trie_view(&self) -> TrieView<'_, P, ()> {
         TrieView {
             map: &self.0,
             idx: 0,
