@@ -2,14 +2,14 @@ use crate::to_right;
 
 use super::*;
 
-/// An iterator over the union of two SubTries.
+/// An iterator over the union of two TrieViews.
 pub struct Union<'a, P, L, R> {
     map_l: &'a PrefixMap<P, L>,
     map_r: &'a PrefixMap<P, R>,
     nodes: Vec<UnionIndex>,
 }
 
-/// An iterator over the union of two SubTries that always yields the longest prefix match of both
+/// An iterator over the union of two TrieViews that always yields the longest prefix match of both
 /// of them.
 pub struct UnionLpm<'a, P, L, R> {
     map_l: &'a PrefixMap<P, L>,
@@ -20,31 +20,31 @@ pub struct UnionLpm<'a, P, L, R> {
 /// An item of the [`UnionLpm`] iterator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UnionLpmItem<'a, P, L, R> {
-    /// The prefix is only present in the left SubTrie (`self`).
+    /// The prefix is only present in the left TrieView (`self`).
     Left {
         /// The prefix of the element.
         prefix: &'a P,
-        /// The value of the element in the left SubTrie (`self`).
+        /// The value of the element in the left TrieView (`self`).
         left: &'a L,
-        /// The longest prefix match in the right SubTrie (`other`).
+        /// The longest prefix match in the right TrieView (`other`).
         right: Option<(&'a P, &'a R)>,
     },
-    /// The prefix is only present in the right SubTrie (`other`).
+    /// The prefix is only present in the right TrieView (`other`).
     Right {
         /// The prefix of the element.
         prefix: &'a P,
-        /// The longest prefix match in the left SubTrie (`self`).
+        /// The longest prefix match in the left TrieView (`self`).
         left: Option<(&'a P, &'a L)>,
-        /// The value of the element in the right SubTrie (`other`).
+        /// The value of the element in the right TrieView (`other`).
         right: &'a R,
     },
-    /// The prefix is only present in the right SubTrie (`other`).
+    /// The prefix is only present in the right TrieView (`other`).
     Both {
         /// The prefix of the element.
         prefix: &'a P,
-        /// The value of the element in the left SubTrie (`self`).
+        /// The value of the element in the left TrieView (`self`).
         left: &'a L,
-        /// The value of the element in the right SubTrie (`other`).
+        /// The value of the element in the right TrieView (`other`).
         right: &'a R,
     },
 }
@@ -136,15 +136,16 @@ enum UnionIndex {
     OnlyR(usize),
 }
 
-impl<'a, P, L> SubTrie<'a, P, L>
+impl<'a, P, L> TrieView<'a, P, L>
 where
     P: Prefix,
 {
-    /// Iterate over the union of both SubTries.
+    /// Iterate over the union of two views. Each element contains the prefix and a reference to the
+    /// value stored in either `self`, or `other` (see [`Either`]).
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use prefix_trie::subtrie::Either;
+    /// # use prefix_trie::trieview::Either;
     /// # #[cfg(feature = "ipnet")]
     /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
     ///
@@ -161,8 +162,8 @@ where
     ///     (net!("192.168.0.0/23"), "b"),
     ///     (net!("192.168.2.0/24"), "c"),
     /// ]);
-    /// let sub_a = set_a.sub_trie_at(&net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = set_b.sub_trie_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_a = set_a.trie_view_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_b = set_b.trie_view_at(&net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(
     ///     sub_a.union(&sub_b).collect::<Vec<_>>(),
     ///     vec![
@@ -175,7 +176,7 @@ where
     /// );
     /// # }
     /// ```
-    pub fn union<R>(&self, other: &SubTrie<'a, P, R>) -> Union<'a, P, L, R> {
+    pub fn union<R>(&self, other: &TrieView<'a, P, R>) -> Union<'a, P, L, R> {
         Union {
             map_l: self.map,
             map_r: other.map,
@@ -183,17 +184,18 @@ where
         }
     }
 
-    /// Iterate over the union of both SubTries. If a prefix is present in both trees, the iterator
-    /// will yield both elements. Otherwise, the iterator will yield the element of one SubTrie
-    /// together with the longest prefix match in the other SubTrie.
+    /// Iterate over the union of two views. If a prefix is present in both trees, the iterator
+    /// will yield both elements. Otherwise, the iterator will yield the element of one TrieView
+    /// together with the longest prefix match in the other TrieView. Elements are of type
+    /// [`UnionLpmItem`].
     ///
-    /// **Warning**: The iterator will only yield elements of the given SubTries. If either of the
-    /// two SubTries is pointing to a branching node, then the longest prefix match returned may be
+    /// **Warning**: The iterator will only yield elements of the given TrieViews. If either of the
+    /// two TrieViews is pointing to a branching node, then the longest prefix match returned may be
     /// `None`, even though it exists in the larger tree.
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use prefix_trie::subtrie::UnionLpmItem;
+    /// # use prefix_trie::trieview::UnionLpmItem;
     /// # #[cfg(feature = "ipnet")]
     /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
     ///
@@ -210,8 +212,8 @@ where
     ///     (net!("192.168.0.0/23"), "b"),
     ///     (net!("192.168.2.0/24"), "c"),
     /// ]);
-    /// let sub_a = set_a.sub_trie();
-    /// let sub_b = set_b.sub_trie();
+    /// let sub_a = set_a.trie_view();
+    /// let sub_b = set_b.trie_view();
     /// assert_eq!(
     ///     sub_a.union_lpm(&sub_b).collect::<Vec<_>>(),
     ///     vec![
@@ -249,7 +251,7 @@ where
     /// );
     /// # }
     /// ```
-    pub fn union_lpm<R>(&self, other: &SubTrie<'a, P, R>) -> UnionLpm<'a, P, L, R> {
+    pub fn union_lpm<R>(&self, other: &TrieView<'a, P, R>) -> UnionLpm<'a, P, L, R> {
         UnionLpm {
             map_l: self.map,
             map_r: other.map,

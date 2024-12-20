@@ -15,15 +15,18 @@ pub(super) enum IntersectionIndex {
     FirstB(usize, usize),
 }
 
-impl<'a, P, L> SubTrie<'a, P, L>
+impl<'a, P, L> TrieView<'a, P, L>
 where
     P: Prefix,
 {
-    /// Iterate over the union of both SubTries.
+    /// Iterate over the union of both Views. Each element will yield a reference to the prefix and
+    /// the value stored in `self` and `other` (if the prefix is in both views).
+    ///
+    /// If instead you are interested in the longest prefix match, look at [`TrieView::union_lpm`].
     ///
     /// ```
     /// # use prefix_trie::*;
-    /// # use prefix_trie::subtrie::Either;
+    /// # use prefix_trie::trieview::Either;
     /// # #[cfg(feature = "ipnet")]
     /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
     ///
@@ -42,8 +45,8 @@ where
     ///     (net!("192.168.0.0/24"), "d"),
     ///     (net!("192.168.2.0/24"), "e"),
     /// ]);
-    /// let sub_a = map_a.sub_trie_at(&net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.sub_trie_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_a = map_a.trie_view_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_b = map_b.trie_view_at(&net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(
     ///     sub_a.intersection(&sub_b).collect::<Vec<_>>(),
     ///     vec![
@@ -53,7 +56,7 @@ where
     /// );
     /// # }
     /// ```
-    pub fn intersection<R>(&self, other: &SubTrie<'a, P, R>) -> Intersection<'a, P, L, R> {
+    pub fn intersection<R>(&self, other: &TrieView<'a, P, R>) -> Intersection<'a, P, L, R> {
         Intersection {
             map_l: self.map,
             map_r: other.map,
