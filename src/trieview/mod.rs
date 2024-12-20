@@ -27,6 +27,15 @@ impl<'a, P: Prefix, T> AsView<'a, P, T> for TrieView<'a, P, T> {
     }
 }
 
+impl<'a, P: Prefix, T> AsView<'a, P, T> for TrieViewMut<'a, P, T> {
+    fn view(self) -> TrieView<'a, P, T> {
+        TrieView {
+            map: self.map,
+            idx: self.idx,
+        }
+    }
+}
+
 impl<'a, P: Prefix, T> AsView<'a, P, T> for &'a PrefixMap<P, T> {
     fn view(self) -> TrieView<'a, P, T> {
         TrieView { map: self, idx: 0 }
@@ -823,6 +832,9 @@ impl<'a, P, T> IntoIterator for TrieViewMut<'a, P, T> {
 mod difference;
 mod intersection;
 mod union;
-pub use difference::{CoveringDifference, Difference, DifferenceItem};
-pub use intersection::Intersection;
-pub use union::{Union, UnionItem};
+pub use difference::{
+    CoveringDifference, CoveringDifferenceMut, Difference, DifferenceItem, DifferenceMut,
+    DifferenceMutItem,
+};
+pub use intersection::{Intersection, IntersectionMut};
+pub use union::{Union, UnionItem, UnionMut};

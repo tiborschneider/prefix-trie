@@ -142,7 +142,9 @@ impl<'a, P, T> IntoIterator for &'a PrefixMap<P, T> {
     }
 }
 
-unsafe fn extend_lifetime_mut<'short, 'long, T: ?Sized>(v: &'short mut T) -> &'long mut T {
+pub(crate) unsafe fn extend_lifetime_mut<'short, 'long, T: ?Sized>(
+    v: &'short mut T,
+) -> &'long mut T {
     std::mem::transmute(v)
 }
 

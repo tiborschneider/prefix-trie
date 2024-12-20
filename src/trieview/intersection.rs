@@ -1,4 +1,4 @@
-use crate::to_right;
+use crate::{map::extend_lifetime_mut, to_right};
 
 use super::*;
 
@@ -6,6 +6,14 @@ use super::*;
 pub struct Intersection<'a, P, L, R> {
     pub(super) map_l: &'a PrefixMap<P, L>,
     pub(super) map_r: &'a PrefixMap<P, R>,
+    pub(super) nodes: Vec<IntersectionIndex>,
+}
+
+/// an iterator over the intersection of two [`crate::PrefixSet`]s in lexicographic order, yielding
+/// mutable references to all elements.
+pub struct IntersectionMut<'a, P, L, R> {
+    pub(super) map_l: &'a mut PrefixMap<P, L>,
+    pub(super) map_r: &'a mut PrefixMap<P, R>,
     pub(super) nodes: Vec<IntersectionIndex>,
 }
 
@@ -68,6 +76,129 @@ where
     }
 }
 
+impl<P, L> TrieViewMut<'_, P, L>
+where
+    P: Prefix,
+{
+    /// Iterate over the union of both Views. Each element will yield a reference to the prefix and
+    /// the value stored in `self` and `other` (if the prefix is in both views).
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    ///     (net!("192.168.2.0/23"), 4),
+    /// ]);
+    /// let mut map_b: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), "a"),
+    ///     (net!("192.168.0.0/22"), "b"),
+    ///     (net!("192.168.0.0/23"), "c"),
+    ///     (net!("192.168.0.0/24"), "d"),
+    ///     (net!("192.168.2.0/24"), "e"),
+    /// ]);
+    /// let sub_a = map_a.view_mut_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_b = map_b.view_mut_at(&net!("192.168.0.0/22")).unwrap();
+    /// assert_eq!(
+    ///     sub_a.intersection(sub_b).collect::<Vec<_>>(),
+    ///     vec![
+    ///         (&net!("192.168.0.0/22"), &2, &"b"),
+    ///         (&net!("192.168.0.0/24"), &3, &"d"),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    pub fn intersection<'b, R>(
+        &'b self,
+        other: impl AsView<'b, P, R>,
+    ) -> Intersection<'b, P, L, R> {
+        let other = other.view();
+        Intersection {
+            map_l: self.map,
+            map_r: other.map,
+            nodes: Vec::from_iter(next_indices(
+                self.map,
+                other.map,
+                Some(self.idx),
+                Some(other.idx),
+            )),
+        }
+    }
+
+    /// Iterate over the union of both Views. Each element will yield a reference to the prefix and
+    /// mutable references to the values stored in `self` and `other` (if the prefix is in both
+    /// views).
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # use prefix_trie::trieview::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    ///     (net!("192.168.2.0/23"), 4),
+    /// ]);
+    /// let mut map_b: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), 10),
+    ///     (net!("192.168.0.0/23"), 20),
+    ///     (net!("192.168.2.0/24"), 30),
+    /// ]);
+    ///
+    /// // Modify the two maps by adding their values for elements of the same prefix.
+    /// for (_, l, r) in map_a.view_mut().intersection_mut(&mut map_b) {
+    ///     *l += *r;
+    ///     *r = *l;
+    /// }
+    ///
+    /// assert_eq!(
+    ///     map_a.into_iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         (net!("192.168.0.0/20"), 1),
+    ///         (net!("192.168.0.0/22"), 12),
+    ///         (net!("192.168.0.0/24"), 3),
+    ///         (net!("192.168.2.0/23"), 4),
+    ///     ],
+    /// );
+    /// assert_eq!(
+    ///     map_b.into_iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         (net!("192.168.0.0/22"), 12),
+    ///         (net!("192.168.0.0/23"), 20),
+    ///         (net!("192.168.2.0/24"), 30),
+    ///     ],
+    /// );
+    /// # }
+    /// ```
+    pub fn intersection_mut<'b, R>(
+        &'b mut self,
+        other: impl AsViewMut<'b, P, R>,
+    ) -> IntersectionMut<'b, P, L, R> {
+        let other = other.view_mut();
+        let nodes = Vec::from_iter(next_indices(
+            self.map,
+            other.map,
+            Some(self.idx),
+            Some(other.idx),
+        ));
+        IntersectionMut {
+            map_l: self.map,
+            map_r: other.map,
+            nodes,
+        }
+    }
+}
+
 impl<'a, P: Prefix, L, R> Iterator for Intersection<'a, P, L, R> {
     type Item = (&'a P, &'a L, &'a R);
 
@@ -91,6 +222,71 @@ impl<'a, P: Prefix, L, R> Iterator for Intersection<'a, P, L, R> {
                     ));
                     if let (Some(left), Some(right)) =
                         (node_l.value.as_ref(), node_r.value.as_ref())
+                    {
+                        return Some((&node_l.prefix, left, right));
+                    }
+                }
+                IntersectionIndex::FirstA(l, r) => {
+                    let node_l = &self.map_l.table[l];
+                    self.nodes.extend(next_indices_first_a(
+                        self.map_l,
+                        self.map_r,
+                        l,
+                        node_l.left,
+                        node_l.right,
+                        r,
+                    ));
+                }
+                IntersectionIndex::FirstB(l, r) => {
+                    let node_r = &self.map_r.table[r];
+                    self.nodes.extend(next_indices_first_b(
+                        self.map_l,
+                        self.map_r,
+                        l,
+                        r,
+                        node_r.left,
+                        node_r.right,
+                    ));
+                }
+            }
+        }
+        None
+    }
+}
+
+impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
+    type Item = (&'a P, &'a mut L, &'a mut R);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(cur) = self.nodes.pop() {
+            match cur {
+                IntersectionIndex::Both(l, r) => {
+                    // safety: map is a tree. Every node is visited exactly once during the
+                    // iteration (self.nodes is not public). Therefore, each in each iteration of
+                    // this loop (also between multiple calls to `next`), the index `cur` is
+                    // different to any of the earlier iterations. It is therefore safe to extend
+                    // the lifetime of the elements to 'a (which is the lifetime for which `self`
+                    // has an exclusive reference over the map).
+                    let node_l: &'a mut crate::map::Node<P, L>;
+                    let node_r: &'a mut crate::map::Node<P, R>;
+                    unsafe {
+                        node_l = extend_lifetime_mut(&mut self.map_l.table[l]);
+                        node_r = extend_lifetime_mut(&mut self.map_r.table[r]);
+                    };
+                    self.nodes.extend(next_indices(
+                        self.map_l,
+                        self.map_r,
+                        node_l.right,
+                        node_r.right,
+                    ));
+                    self.nodes.extend(next_indices(
+                        self.map_l,
+                        self.map_r,
+                        node_l.left,
+                        node_r.left,
+                    ));
+                    if let (Some(left), Some(right)) =
+                        (node_l.value.as_mut(), node_r.value.as_mut())
                     {
                         return Some((&node_l.prefix, left, right));
                     }
