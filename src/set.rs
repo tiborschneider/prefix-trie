@@ -2,7 +2,7 @@
 
 use crate::{
     map::CoverKeys,
-    trieview::{Difference, Intersection, Union},
+    trieview::{CoveringDifference, Difference, Intersection, Union},
     AsTrieView, Prefix, PrefixMap,
 };
 
@@ -327,6 +327,7 @@ impl<P: Prefix> PrefixSet<P> {
     ///     "192.168.0.0/22".parse()?,
     ///     "192.168.0.0/24".parse()?,
     ///     "192.168.2.0/23".parse()?,
+    ///     "192.168.2.0/24".parse()?,
     /// ]);
     /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
     ///     "192.168.0.0/22".parse()?,
@@ -347,6 +348,39 @@ impl<P: Prefix> PrefixSet<P> {
         other: &'a impl AsTrieView<P, R>,
     ) -> Difference<'a, P, (), R> {
         self.trie_view().difference(other)
+    }
+
+    /// Return an iterator that traverses both trees simultaneously and yields the difference of
+    /// both sets in lexicographic order. Only elements of `self` are yielded that are not covered
+    /// by any prefix in `other`. See [`crate::TrieView::covering_difference`] for more information.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set_a: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
+    ///     "192.168.0.0/22".parse()?,
+    ///     "192.168.0.0/24".parse()?,
+    ///     "192.168.2.0/23".parse()?,
+    ///     "192.168.2.0/24".parse()?,
+    /// ]);
+    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
+    ///     "192.168.2.0/23".parse()?,
+    /// ]);
+    /// assert_eq!(
+    ///     set_a.covering_difference(&set_b).map(|(p, _)| *p).collect::<Vec<_>>(),
+    ///     vec!["192.168.0.0/22".parse()?, "192.168.0.0/24".parse()?]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn covering_difference<'a, R>(
+        &'a self,
+        other: &'a impl AsTrieView<P, R>,
+    ) -> CoveringDifference<'a, P, (), R> {
+        self.trie_view().covering_difference(other)
     }
 
     /// Get an iterator over the node itself and all children. All elements returned have a prefix
