@@ -42,13 +42,21 @@ value (`Option`), and two optional children. Adding a new child, or traversing i
 done as follows: we look at the most significant bit that is **not** part of the prefix
 itself. If it is not set, then we take the left branch, and otherwise, we take the right one.
 
-## Traversals
+# Traversals
 
 Any iteration over all elements in the tree is implemented as a graph traversal that will yield
-elements in lexicographic order (with the exception of mutable iteration of the
-`PrefixMap`). This also includes the iteration over the union, intersection, or difference of
-two `PrefixSet`s, which are implemented as simultaneous tree traversals. Further, calling
-`retain` will also traverse the tree only once, removing elements during the traversal.
+elements in lexicographic order.
+
+The library offers set operations of different maps or sets. We implement a union, intersection,
+difference, and covering_difference. These iterators are implemented using simultaneous tree
+traversals. They will yield elements in lexicographic order. Whenever appropriate, the yielded
+items will also include the longest prefix match.
+
+# [`TrieView`]s
+
+You can create a view of a (sub)-trie. Such a view has an arbitrary node as its root. Any
+operations on that view will only traverse that node and all its children. You can iterate over
+all children, search in that sub-trie, and perform set operations on them.
 
 ## Operations on the tree
 
