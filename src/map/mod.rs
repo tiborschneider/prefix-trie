@@ -1,5 +1,7 @@
 //! Implementation of the Prefix Map.
 
+use std::cell::UnsafeCell;
+
 use crate::{to_right, Prefix};
 
 mod entry;
@@ -9,11 +11,23 @@ pub use entry::*;
 pub use iter::*;
 
 /// Prefix map implemented as a prefix tree.
-#[derive(Clone)]
 pub struct PrefixMap<P, T> {
-    pub(crate) table: Vec<Node<P, T>>,
+    pub(crate) table: UnsafeCell<Vec<Node<P, T>>>,
     free: Vec<usize>,
     count: usize,
+}
+
+impl<P: Clone, T: Clone> Clone for PrefixMap<P, T> {
+    fn clone(&self) -> Self {
+        // Safety: We own an immutable reference to the table, so getting an immutable table for
+        // cloning is fine here.
+        let table = unsafe { self._table().get().as_ref().unwrap().clone() };
+        Self {
+            table: UnsafeCell::new(table),
+            free: self.free.clone(),
+            count: self.count.clone(),
+        }
+    }
 }
 
 impl<P, T> Default for PrefixMap<P, T>
@@ -22,15 +36,31 @@ where
 {
     fn default() -> Self {
         Self {
-            table: vec![Node {
+            table: UnsafeCell::new(vec![Node {
                 prefix: P::zero(),
                 value: None,
                 left: None,
                 right: None,
-            }],
+            }]),
             free: Vec::new(),
             count: 0,
         }
+    }
+}
+
+impl<P, T> PrefixMap<P, T> {
+    pub(crate) fn _get(&self, idx: usize) -> &Node<P, T> {
+        // Safety: We own an immutable reference to the table, so that operation is fine.
+        unsafe { &self.table.get().as_ref().unwrap()[idx] }
+    }
+
+    pub(crate) fn _get_mut(&mut self, idx: usize) -> &mut Node<P, T> {
+        &mut self.table.get_mut()[idx]
+    }
+
+    /// Safety: The returned cell must adhere to borrowing rules!
+    pub(crate) unsafe fn _table(&self) -> &UnsafeCell<Vec<Node<P, T>>> {
+        &self.table
     }
 }
 
@@ -76,7 +106,7 @@ where
         let mut idx = 0;
         loop {
             match self.get_direction(idx, prefix) {
-                Direction::Reached => return self.table[idx].value.as_ref(),
+                Direction::Reached => return self._get(idx).value.as_ref(),
                 Direction::Enter { next, .. } => idx = next,
                 Direction::Missing => return None,
             }
@@ -104,7 +134,7 @@ where
         let mut idx = 0;
         loop {
             match self.get_direction(idx, prefix) {
-                Direction::Reached => return self.table[idx].value.as_mut(),
+                Direction::Reached => return self._get_mut(idx).value.as_mut(),
                 Direction::Enter { next, .. } => idx = next,
                 Direction::Missing => return None,
             }
@@ -130,7 +160,7 @@ where
         let mut idx = 0;
         loop {
             match self.get_direction(idx, prefix) {
-                Direction::Reached => return self.table[idx].prefix_value(),
+                Direction::Reached => return self._get(idx).prefix_value(),
                 Direction::Enter { next, .. } => idx = next,
                 Direction::Missing => return None,
             }
@@ -159,7 +189,7 @@ where
         let mut idx = 0;
         let mut best_match: Option<(&P, &T)> = None;
         loop {
-            best_match = self.table[idx].prefix_value().or(best_match);
+            best_match = self._get(idx).prefix_value().or(best_match);
             match self.get_direction(idx, prefix) {
                 Direction::Enter { next, .. } => idx = next,
                 _ => return best_match,
@@ -188,7 +218,7 @@ where
         let mut idx = 0;
         let mut best_match: Option<usize> = None;
         loop {
-            best_match = if self.table[idx].value.is_some() {
+            best_match = if self._get(idx).value.is_some() {
                 Some(idx)
             } else {
                 best_match
@@ -199,7 +229,7 @@ where
             }
         }
         if let Some(idx) = best_match {
-            self.table.get_mut(idx).unwrap().prefix_value_mut()
+            self._get_mut(idx).prefix_value_mut()
         } else {
             None
         }
@@ -226,7 +256,7 @@ where
         let mut idx = 0;
         loop {
             match self.get_direction(idx, prefix) {
-                Direction::Reached => return self.table[idx].value.is_some(),
+                Direction::Reached => return self._get(idx).value.is_some(),
                 Direction::Enter { next, .. } => idx = next,
                 Direction::Missing => return false,
             }
@@ -255,10 +285,7 @@ where
         let mut idx = 0;
         let mut best_match: Option<&P> = None;
         loop {
-            best_match = self.table[idx]
-                .prefix_value()
-                .map(|(p, _)| p)
-                .or(best_match);
+            best_match = self._get(idx).prefix_value().map(|(p, _)| p).or(best_match);
             match self.get_direction(idx, prefix) {
                 Direction::Enter { next, .. } => idx = next,
                 _ => return best_match,
@@ -285,16 +312,16 @@ where
     /// # fn main() {}
     pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(&'a P, &'a T)> {
         // Handle the special case, where the root is populated
-        if let Some(x) = self.table[0].prefix_value() {
+        if let Some(x) = self._get(0).prefix_value() {
             return Some(x);
         }
         let mut idx = 0;
         loop {
             match self.get_direction(idx, prefix) {
-                Direction::Reached => return self.table[idx].prefix_value(),
+                Direction::Reached => return self._get(idx).prefix_value(),
                 Direction::Enter { next, .. } => {
                     // Go until the first node with a value
-                    match self.table[next].prefix_value() {
+                    match self._get(next).prefix_value() {
                         Some(x) => return Some(x),
                         None => idx = next,
                     }
@@ -347,11 +374,14 @@ where
             match self.get_direction_for_insert(idx, &prefix) {
                 DirectionForInsert::Enter { next, .. } => idx = next,
                 DirectionForInsert::Reached => {
-                    let old_value = self.table[idx].value.take();
+                    let mut inc = 0;
+                    let node = self._get_mut(idx);
+                    let old_value = node.value.take();
                     if old_value.is_none() {
-                        self.count += 1;
+                        inc = 1;
                     }
-                    self.table[idx].value = Some(value);
+                    node.value = Some(value);
+                    self.count += inc;
                     return old_value;
                 }
                 DirectionForInsert::NewLeaf { right } => {
@@ -403,9 +433,9 @@ where
         loop {
             match self.get_direction_for_insert(idx, &prefix) {
                 DirectionForInsert::Enter { next, .. } => idx = next,
-                DirectionForInsert::Reached if self.table[idx].value.is_some() => {
+                DirectionForInsert::Reached if self._get(idx).value.is_some() => {
                     return Entry::Occupied(OccupiedEntry {
-                        node: &mut self.table[idx],
+                        node: self._get_mut(idx),
                     })
                 }
                 direction => {
@@ -493,7 +523,7 @@ where
         let mut idx = 0;
         let value = loop {
             match self.get_direction(idx, prefix) {
-                Direction::Reached => break self.table[idx].value.take(),
+                Direction::Reached => break self._get_mut(idx).value.take(),
                 Direction::Enter { next, .. } => idx = next,
                 Direction::Missing => break None,
             }
@@ -573,9 +603,9 @@ where
     /// # fn main() {}
     /// ```
     pub fn clear(&mut self) {
-        self.table.clear();
+        self.table.get_mut().clear();
         self.free.clear();
-        self.table.push(Node {
+        self.table.get_mut().push(Node {
             prefix: P::zero(),
             value: None,
             left: None,
@@ -659,7 +689,7 @@ where
     /// ```
     pub fn cover<'a>(&'a self, prefix: &'a P) -> Cover<'a, P, T> {
         Cover {
-            map: self,
+            table: self,
             idx: None,
             prefix,
         }
@@ -693,7 +723,7 @@ where
     /// ```
     pub fn cover_keys<'a>(&'a self, prefix: &'a P) -> CoverKeys<'a, P, T> {
         CoverKeys(Cover {
-            map: self,
+            table: self,
             idx: None,
             prefix,
         })
@@ -727,7 +757,7 @@ where
     /// ```
     pub fn cover_values<'a>(&'a self, prefix: &'a P) -> CoverValues<'a, P, T> {
         CoverValues(Cover {
-            map: self,
+            table: self,
             idx: None,
             prefix,
         })
@@ -744,11 +774,12 @@ where
         let mut to_free = vec![self.get_child(idx, right).unwrap()];
         self.clear_child(idx, right);
         while let Some(idx) = to_free.pop() {
-            let node = &mut self.table[idx];
+            let mut dec = 0;
+            let node = &mut self._get_mut(idx);
             let value = node.value.take();
             // decrease the count if `value` is something
             if value.is_some() {
-                self.count -= 1;
+                dec = 1;
             }
             if let Some(left) = node.left.take() {
                 to_free.push(left)
@@ -757,6 +788,7 @@ where
                 to_free.push(right)
             }
             self.free.push(idx);
+            self.count -= dec;
         }
     }
 
@@ -764,9 +796,9 @@ where
     #[inline(always)]
     pub(crate) fn get_child(&self, idx: usize, right: bool) -> Option<usize> {
         if right {
-            self.table[idx].right
+            self._get(idx).right
         } else {
-            self.table[idx].left
+            self._get(idx).left
         }
     }
 
@@ -774,9 +806,9 @@ where
     #[inline(always)]
     fn set_child(&mut self, idx: usize, child: usize, right: bool) -> Option<usize> {
         if right {
-            self.table[idx].right.replace(child)
+            self._get_mut(idx).right.replace(child)
         } else {
-            self.table[idx].left.replace(child)
+            self._get_mut(idx).left.replace(child)
         }
     }
 
@@ -784,9 +816,9 @@ where
     #[inline(always)]
     fn clear_child(&mut self, idx: usize, right: bool) -> Option<usize> {
         if right {
-            self.table[idx].right.take()
+            self._get_mut(idx).right.take()
         } else {
-            self.table[idx].left.take()
+            self._get_mut(idx).left.take()
         }
     }
 
@@ -798,15 +830,16 @@ where
             self.count += 1;
         }
         if let Some(idx) = self.free.pop() {
-            let node = &mut self.table[idx];
+            let node = &mut self._get_mut(idx);
             node.prefix = prefix;
             node.value = value;
             node.left = None;
             node.right = None;
             idx
         } else {
-            let idx = self.table.len();
-            self.table.push(Node {
+            let table = self.table.get_mut();
+            let idx = table.len();
+            table.push(Node {
                 prefix,
                 value,
                 left: None,
@@ -827,7 +860,7 @@ where
     ) -> (Option<T>, bool) {
         // if we reach this point, then `idx` is the element to remove, `parent` is its parent,
         // and `parent_right` stores the direction of `idx` at `parent`.
-        let node = &mut self.table[idx];
+        let node = &mut self._get_mut(idx);
         let value = node.value.take();
         let has_left = node.left.is_some();
         let has_right = node.right.is_some();
@@ -847,7 +880,7 @@ where
                 // now, if the parent has no value, also remove the parent and replace it with the
                 // current node. but only do that if the grandparent is something.
                 if let Some(grp) = grp {
-                    if self.table[par].value.is_none() {
+                    if self._get(par).value.is_none() {
                         if let Some(sibling) = self.get_child(par, !par_right) {
                             self.set_child(grp, sibling, grp_right);
                             return (value, true);
@@ -885,10 +918,10 @@ where
         // first, do the recursion
         let mut idx_removed = false;
         let mut par_removed = false;
-        if let Some(left) = self.table[idx].left {
+        if let Some(left) = self._get(idx).left {
             (f, idx_removed) = self._retain(left, Some(idx), false, par, par_right, f);
         }
-        if let Some(right) = self.table[idx].right {
+        if let Some(right) = self._get(idx).right {
             if idx_removed {
                 (f, par_removed) = self._retain(right, par, par_right, grp, grp_right, f);
             } else {
@@ -896,8 +929,8 @@ where
             }
         }
         // then, check if we need to delete the node
-        if let Some(val) = self.table[idx].value.as_ref() {
-            if !f(&self.table[idx].prefix, val) {
+        if let Some(val) = self._get(idx).value.as_ref() {
+            if !f(&self._get(idx).prefix, val) {
                 // deletion is necessary.
                 let (_, par_del) = self._remove_node(idx, par, par_right, grp, grp_right);
                 par_removed = par_del;
@@ -909,13 +942,13 @@ where
     /// Get the directions from some node `idx` to get to `prefix`.
     #[inline(always)]
     pub(crate) fn get_direction(&self, cur: usize, prefix: &P) -> Direction {
-        let cur_p = &self.table[cur].prefix;
+        let cur_p = &self._get(cur).prefix;
         if cur_p.eq(prefix) {
             Direction::Reached
         } else {
             let right = to_right(cur_p, prefix);
             match self.get_child(cur, right) {
-                Some(child) if self.table[child].prefix.contains(prefix) => {
+                Some(child) if self._get(child).prefix.contains(prefix) => {
                     Direction::Enter { next: child, right }
                 }
                 _ => Direction::Missing,
@@ -926,13 +959,13 @@ where
     /// Get the directions from some node `idx` to get to `prefix`.
     #[inline(always)]
     fn get_direction_for_insert(&self, cur: usize, prefix: &P) -> DirectionForInsert<P> {
-        let cur_p = &self.table[cur].prefix;
+        let cur_p = &self._get(cur).prefix;
         if cur_p.eq(prefix) {
             DirectionForInsert::Reached
         } else {
             let right = to_right(cur_p, prefix);
             if let Some(child) = self.get_child(cur, right) {
-                let child_p = &self.table[child].prefix;
+                let child_p = &self._get(child).prefix;
                 if child_p.contains(prefix) {
                     DirectionForInsert::Enter { next: child, right }
                 } else if prefix.contains(child_p) {

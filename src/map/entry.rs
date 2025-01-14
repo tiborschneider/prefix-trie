@@ -252,23 +252,24 @@ where
     fn _insert(self, v: T) -> &'a mut Node<P, T> {
         match self.direction {
             DirectionForInsert::Reached => {
-                let node = &mut self.map.table[self.idx];
-                // increment the count, as node.value must be `None`
-                debug_assert!(node.value.is_none());
+                // increment the count, as node.value will be `None`. We do it here as we borrow
+                // `map` mutably in the next line.
                 self.map.count += 1;
+                let node = self.map._get_mut(self.idx);
+                debug_assert!(node.value.is_none());
                 node.value = Some(v);
                 node
             }
             DirectionForInsert::NewLeaf { right } => {
                 let new = self.map.new_node(self.prefix, Some(v));
                 self.map.set_child(self.idx, new, right);
-                &mut self.map.table[new]
+                self.map._get_mut(new)
             }
             DirectionForInsert::NewChild { right, child_right } => {
                 let new = self.map.new_node(self.prefix, Some(v));
                 let child = self.map.set_child(self.idx, new, right).unwrap();
                 self.map.set_child(new, child, child_right);
-                &mut self.map.table[new]
+                self.map._get_mut(new)
             }
             DirectionForInsert::NewBranch {
                 branch_prefix,
@@ -280,7 +281,7 @@ where
                 let child = self.map.set_child(self.idx, branch, right).unwrap();
                 self.map.set_child(branch, new, prefix_right);
                 self.map.set_child(branch, child, !prefix_right);
-                &mut self.map.table[new]
+                self.map._get_mut(new)
             }
             DirectionForInsert::Enter { .. } => unreachable!(),
         }

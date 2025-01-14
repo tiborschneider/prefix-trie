@@ -1,5 +1,7 @@
 //! Module that contains the implementation for the iterators
 
+use std::cell::UnsafeCell;
+
 use crate::*;
 
 use super::Node;
@@ -7,7 +9,7 @@ use super::Node;
 /// An iterator over all entries of a [`PrefixMap`] in lexicographic order.
 #[derive(Clone)]
 pub struct Iter<'a, P, T> {
-    pub(crate) map: &'a PrefixMap<P, T>,
+    pub(crate) table: &'a [Node<P, T>],
     pub(crate) nodes: Vec<usize>,
 }
 
@@ -16,7 +18,7 @@ impl<'a, P, T> Iterator for Iter<'a, P, T> {
 
     fn next(&mut self) -> Option<(&'a P, &'a T)> {
         while let Some(cur) = self.nodes.pop() {
-            let node = &self.map.table[cur];
+            let node = &self.table[cur];
             if let Some(right) = node.right {
                 self.nodes.push(right);
             }
@@ -63,7 +65,7 @@ impl<'a, P, T> Iterator for Values<'a, P, T> {
 /// An iterator over all owned entries of a [`PrefixMap`] in lexicographic order.
 #[derive(Clone)]
 pub struct IntoIter<P, T> {
-    map: PrefixMap<P, T>,
+    table: Vec<Node<P, T>>,
     nodes: Vec<usize>,
 }
 
@@ -72,7 +74,7 @@ impl<P: Prefix, T> Iterator for IntoIter<P, T> {
 
     fn next(&mut self) -> Option<(P, T)> {
         while let Some(cur) = self.nodes.pop() {
-            let node = &mut self.map.table[cur];
+            let node = &mut self.table[cur];
             if let Some(right) = node.right {
                 self.nodes.push(right);
             }
@@ -123,7 +125,7 @@ impl<P: Prefix, T> IntoIterator for PrefixMap<P, T> {
 
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
-            map: self,
+            table: self.table.into_inner(),
             nodes: vec![0],
         }
     }
@@ -135,23 +137,19 @@ impl<'a, P, T> IntoIterator for &'a PrefixMap<P, T> {
     type IntoIter = Iter<'a, P, T>;
 
     fn into_iter(self) -> Self::IntoIter {
+        // Safety: we own an immutable reference, and `Iter` will only ever read the table.
+        let table = unsafe { self.table.get().as_ref().unwrap() };
         Iter {
-            map: self,
+            table,
             nodes: vec![0],
         }
     }
 }
 
-pub(crate) unsafe fn extend_lifetime_mut<'short, 'long, T: ?Sized>(
-    v: &'short mut T,
-) -> &'long mut T {
-    std::mem::transmute(v)
-}
-
 /// A mutable iterator over a [`PrefixMap`]. This iterator yields elements in lexicographic order of
 /// their associated prefix.
 pub struct IterMut<'a, P, T> {
-    pub(crate) map: &'a mut PrefixMap<P, T>,
+    pub(crate) table: &'a UnsafeCell<Vec<Node<P, T>>>,
     pub(crate) nodes: Vec<usize>,
 }
 
@@ -160,15 +158,13 @@ impl<'a, P, T> Iterator for IterMut<'a, P, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(cur) = self.nodes.pop() {
-            let node: &'a mut Node<P, T>;
-            // safety: map is a tree. Every node is visited exactly once during the iteration
-            // (self.nodes is not public). Therefore, each in each iteration of this loop (also
-            // between multiple calls to `next`), the index `cur` is different to any of the earlier
-            // iterations. It is therefore safe to extend the lifetime of the elements to 'a (which
-            // is the lifetime for which `self` has an exclusive reference over the map).
-            unsafe {
-                node = extend_lifetime_mut(&mut self.map.table[cur]);
-            }
+            // Safety: The iterator must "borrow" from &'a mut PrefixMap, see `PrefixMap::iter_mut`
+            // where 'a is linked to a mutable reference.
+            // Then, we must ensure that we only ever construct a mutable reference to each element
+            // exactly once. We ensure this by the fact that we iterate over a tree. Thus, each node
+            // is visited exactly once.
+            let node: &'a mut Node<P, T> = unsafe { &mut self.table.get().as_mut().unwrap()[cur] };
+
             if let Some(right) = node.right {
                 self.nodes.push(right);
             }
@@ -233,9 +229,13 @@ impl<P, T> PrefixMap<P, T> {
     }
 
     /// Get a mutable iterator over all key-value pairs. The order of this iterator is lexicographic.
-    pub fn iter_mut(&mut self) -> IterMut<'_, P, T> {
+    pub fn iter_mut<'a>(&'a mut self) -> IterMut<'a, P, T> {
+        // Safety: We get the pointer to the table by and construct the `IterMut`. Its lifetime is
+        // now tied to the mutable borrow of `self`, so we are allowed to access elements of that
+        // table mutably.
+        let table = unsafe { self._table() };
         IterMut {
-            map: self,
+            table,
             nodes: vec![0],
         }
     }
@@ -278,7 +278,7 @@ impl<P, T> PrefixMap<P, T> {
     pub fn into_keys(self) -> IntoKeys<P, T> {
         IntoKeys {
             inner: IntoIter {
-                map: self,
+                table: self.table.into_inner(),
                 nodes: vec![0],
             },
         }
@@ -313,7 +313,7 @@ impl<P, T> PrefixMap<P, T> {
     pub fn into_values(self) -> IntoValues<P, T> {
         IntoValues {
             inner: IntoIter {
-                map: self,
+                table: self.table.into_inner(),
                 nodes: vec![0],
             },
         }
@@ -360,29 +360,12 @@ where
     /// ```
     pub fn children(&self, prefix: &P) -> Iter<'_, P, T> {
         // first, find the longest prefix containing `prefix`.
-        let mut idx = 0;
-        let mut cur_p = &self.table[idx].prefix;
-        let nodes = loop {
-            if cur_p.eq(prefix) {
-                break vec![idx];
-            }
-            let right = to_right(cur_p, prefix);
-            match self.get_child(idx, right) {
-                Some(c) => {
-                    cur_p = &self.table[c].prefix;
-                    if cur_p.contains(prefix) {
-                        // continue traversal
-                        idx = c;
-                    } else if prefix.contains(cur_p) {
-                        break vec![c];
-                    } else {
-                        break vec![];
-                    }
-                }
-                None => break vec![],
-            }
-        };
-        Iter { map: self, nodes }
+        let nodes = lpm_children_iter_start(self, prefix);
+        // Safety: Iter only ever accesses elements immutably. Further, we link the immutable borrow
+        // of `self` to the returned `Iter`, so no mutable borrow of `self` can occur while the
+        // iterator lives.
+        let table = unsafe { self._table().get().as_ref().unwrap() };
+        Iter { table, nodes }
     }
 
     /// Get an iterator of mutable references of the node itself and all its children. All elements
@@ -418,29 +401,11 @@ where
     /// ```
     pub fn children_mut(&mut self, prefix: &P) -> IterMut<'_, P, T> {
         // first, find the longest prefix containing `prefix`.
-        let mut idx = 0;
-        let mut cur_p = &self.table[idx].prefix;
-        let nodes = loop {
-            if cur_p.eq(prefix) {
-                break vec![idx];
-            }
-            let right = to_right(cur_p, prefix);
-            match self.get_child(idx, right) {
-                Some(c) => {
-                    cur_p = &self.table[c].prefix;
-                    if cur_p.contains(prefix) {
-                        // continue traversal
-                        idx = c;
-                    } else if prefix.contains(cur_p) {
-                        break vec![c];
-                    } else {
-                        break vec![];
-                    }
-                }
-                None => break vec![],
-            }
-        };
-        IterMut { map: self, nodes }
+        let nodes = lpm_children_iter_start(self, prefix);
+        // Safety: we bind the mutable borrow of self to the returned `IterMut`. There cannot be any
+        // other borrow (mutable or not) of `self`, so the `IterMut` can yield mutable references.
+        let table = unsafe { self._table() };
+        IterMut { table, nodes }
     }
 
     /// Get an iterator over the node itself and all children with a value. All elements returned
@@ -470,31 +435,38 @@ where
     /// # fn main() {}
     /// ```
     pub fn into_children(self, prefix: &P) -> IntoIter<P, T> {
-        // first, find the longest prefix containing `prefix`.
-        let mut idx = 0;
-        let mut cur_p = &self.table[idx].prefix;
-        let nodes = loop {
-            if cur_p.eq(prefix) {
-                break vec![idx];
-            }
-            let right = to_right(cur_p, prefix);
-            match self.get_child(idx, right) {
-                Some(c) => {
-                    cur_p = &self.table[c].prefix;
-                    if cur_p.contains(prefix) {
-                        // continue traversal
-                        idx = c;
-                    } else if prefix.contains(cur_p) {
-                        break vec![c];
-                    } else {
-                        break vec![];
-                    }
-                }
-                None => break vec![],
-            }
-        };
-        IntoIter { map: self, nodes }
+        let nodes = lpm_children_iter_start(&self, prefix);
+        IntoIter {
+            table: self.table.into_inner(),
+            nodes,
+        }
     }
+}
+
+fn lpm_children_iter_start<P: Prefix, T>(map: &PrefixMap<P, T>, prefix: &P) -> Vec<usize> {
+    let mut idx = 0;
+    let mut cur_p = &map._get(idx).prefix;
+    let nodes = loop {
+        if cur_p.eq(prefix) {
+            break vec![idx];
+        }
+        let right = to_right(cur_p, prefix);
+        match map.get_child(idx, right) {
+            Some(c) => {
+                cur_p = &map._get(c).prefix;
+                if cur_p.contains(prefix) {
+                    // continue traversal
+                    idx = c;
+                } else if prefix.contains(cur_p) {
+                    break vec![c];
+                } else {
+                    break vec![];
+                }
+            }
+            None => break vec![],
+        }
+    };
+    nodes
 }
 
 impl<P, T> FromIterator<(P, T)> for PrefixMap<P, T>
@@ -528,7 +500,7 @@ where
         // check if self.idx is None. If so, then check if the first branch is present in the map
         if self.idx.is_none() {
             self.idx = Some(0);
-            let entry = &self.map.table[0];
+            let entry = &self.map._get(0);
             if let Some(value) = entry.value.as_ref() {
                 return Some((&entry.prefix, value));
             }
@@ -543,7 +515,7 @@ where
                 return None;
             };
             self.idx = Some(next);
-            let entry = &self.map.table[next];
+            let entry = &self.map._get(next);
             if let Some(value) = entry.value.as_ref() {
                 return Some((&entry.prefix, value));
             }
