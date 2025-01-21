@@ -93,6 +93,7 @@
 #![deny(missing_docs)]
 
 mod fmt;
+pub(crate) mod inner;
 mod prefix;
 #[cfg(feature = "serde")]
 mod serde;

@@ -12,7 +12,7 @@ impl<P: Debug, T: Debug> Debug for PrefixMap<P, T> {
 
 struct DebugPrefixMap<'a, P, T>(&'a PrefixMap<P, T>, usize);
 
-impl<'a, P: Debug, T: Debug> Debug for DebugPrefixMap<'a, P, T> {
+impl<P: Debug, T: Debug> Debug for DebugPrefixMap<'_, P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         let map = self.0;
         let idx = self.1;

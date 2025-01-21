@@ -25,7 +25,7 @@ pub struct OccupiedEntry<'a, P, T> {
     pub(super) node: &'a mut Node<P, T>,
 }
 
-impl<'a, P, T> Entry<'a, P, T> {
+impl<P, T> Entry<'_, P, T> {
     /// Get the value if it exists
     ///
     /// ```
@@ -255,21 +255,21 @@ where
                 // increment the count, as node.value will be `None`. We do it here as we borrow
                 // `map` mutably in the next line.
                 self.map.count += 1;
-                let node = self.map._get_mut(self.idx);
+                let node = &mut self.map.table[self.idx];
                 debug_assert!(node.value.is_none());
                 node.value = Some(v);
                 node
             }
             DirectionForInsert::NewLeaf { right } => {
                 let new = self.map.new_node(self.prefix, Some(v));
-                self.map.set_child(self.idx, new, right);
-                self.map._get_mut(new)
+                self.map.table.set_child(self.idx, new, right);
+                &mut self.map.table[new]
             }
             DirectionForInsert::NewChild { right, child_right } => {
                 let new = self.map.new_node(self.prefix, Some(v));
-                let child = self.map.set_child(self.idx, new, right).unwrap();
-                self.map.set_child(new, child, child_right);
-                self.map._get_mut(new)
+                let child = self.map.table.set_child(self.idx, new, right).unwrap();
+                self.map.table.set_child(new, child, child_right);
+                &mut self.map.table[new]
             }
             DirectionForInsert::NewBranch {
                 branch_prefix,
@@ -278,10 +278,10 @@ where
             } => {
                 let branch = self.map.new_node(branch_prefix, None);
                 let new = self.map.new_node(self.prefix, Some(v));
-                let child = self.map.set_child(self.idx, branch, right).unwrap();
-                self.map.set_child(branch, new, prefix_right);
-                self.map.set_child(branch, child, !prefix_right);
-                self.map._get_mut(new)
+                let child = self.map.table.set_child(self.idx, branch, right).unwrap();
+                self.map.table.set_child(branch, new, prefix_right);
+                self.map.table.set_child(branch, child, !prefix_right);
+                &mut self.map.table[new]
             }
             DirectionForInsert::Enter { .. } => unreachable!(),
         }

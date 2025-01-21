@@ -1,21 +1,41 @@
-use crate::{map::extend_lifetime_mut, to_right};
+use crate::to_right;
 
 use super::*;
 
 /// An iterator over the union of two TrieViews that always yields either the exact value or the
 /// longest prefix match of both of them.
 pub struct Union<'a, P, L, R> {
-    map_l: &'a PrefixMap<P, L>,
-    map_r: &'a PrefixMap<P, R>,
+    table_l: &'a Table<P, L>,
+    table_r: &'a Table<P, R>,
     nodes: Vec<Node<'a, P, L, R>>,
 }
 
 /// An iterator over the union of two TrieViews that always yields either the exact value or the
 /// longest prefix match of both of them.
 pub struct UnionMut<'a, P, L, R> {
-    map_l: &'a mut PrefixMap<P, L>,
-    map_r: &'a mut PrefixMap<P, R>,
+    // Safety: table_l must be distinct from table_r
+    table_l: &'a Table<P, L>,
+    // Safety: table_l must be distinct from table_r
+    table_r: &'a Table<P, R>,
     nodes: Vec<UnionIndex>,
+}
+
+impl<'a, P, L, R> UnionMut<'a, P, L, R> {
+    /// Safety:
+    /// 1. Table_l must come from a `TrieViewMut` and satisfy the conditions in `TrieViewMut::new`.
+    /// 2. Table_r must come from a `TrieViewMut` and satisfy the conditions in `TrieViewMut::new`.
+    /// 3. Table_l and Table_r must be distinct. This is implicitly given by the two rules above.
+    unsafe fn new(
+        table_l: &'a Table<P, L>,
+        table_r: &'a Table<P, R>,
+        nodes: Vec<UnionIndex>,
+    ) -> Self {
+        Self {
+            table_l,
+            table_r,
+            nodes,
+        }
+    }
 }
 
 type Lpm<'a, P, T> = Option<(&'a P, &'a T)>;
@@ -166,14 +186,14 @@ where
     pub fn union<R>(&self, other: impl AsView<'a, P, R>) -> Union<'a, P, L, R> {
         let other = other.view();
         Union {
-            map_l: self.map,
-            map_r: other.map,
+            table_l: self.table,
+            table_r: other.table,
             nodes: extend_lpm(
-                self.map,
-                other.map,
-                self.map.table[self.idx].prefix_value(),
-                other.map.table[other.idx].prefix_value(),
-                next_indices(self.map, other.map, Some(self.idx), Some(other.idx)),
+                self.table,
+                other.table,
+                self.table[self.idx].prefix_value(),
+                other.table[other.idx].prefix_value(),
+                next_indices(self.table, other.table, Some(self.idx), Some(other.idx)),
             )
             .collect(),
         }
@@ -252,14 +272,14 @@ where
     pub fn union<'b, R>(&'b self, other: impl AsView<'b, P, R>) -> Union<'b, P, L, R> {
         let other = other.view();
         Union {
-            map_l: self.map,
-            map_r: other.map,
+            table_l: self.table,
+            table_r: other.table,
             nodes: extend_lpm(
-                self.map,
-                other.map,
-                self.map.table[self.idx].prefix_value(),
-                other.map.table[other.idx].prefix_value(),
-                next_indices(self.map, other.map, Some(self.idx), Some(other.idx)),
+                self.table,
+                other.table,
+                self.table[self.idx].prefix_value(),
+                other.table[other.idx].prefix_value(),
+                next_indices(self.table, other.table, Some(self.idx), Some(other.idx)),
             )
             .collect(),
         }
@@ -320,12 +340,10 @@ where
         other: impl AsViewMut<'b, P, R>,
     ) -> UnionMut<'b, P, L, R> {
         let other = other.view_mut();
-        let nodes = next_indices(self.map, other.map, Some(self.idx), Some(other.idx));
-        UnionMut {
-            map_l: self.map,
-            map_r: other.map,
-            nodes,
-        }
+        let nodes = next_indices(self.table, other.table, Some(self.idx), Some(other.idx));
+        // Safety: We take the reference to the table from two TrieViewMut. Since they both have to
+        // be created using TrieViewMut::new, we satisfy the conditions in `UnionMut::new`.
+        unsafe { UnionMut::new(self.table, other.table, nodes) }
     }
 }
 
@@ -336,8 +354,13 @@ impl<'a, P: Prefix, L, R> Union<'a, P, L, R> {
         lpm_l: Lpm<'a, P, L>,
         lpm_r: Lpm<'a, P, R>,
     ) {
-        self.nodes
-            .extend(extend_lpm(self.map_l, self.map_r, lpm_l, lpm_r, indices));
+        self.nodes.extend(extend_lpm(
+            self.table_l,
+            self.table_r,
+            lpm_l,
+            lpm_r,
+            indices,
+        ));
     }
 
     fn get_next(
@@ -376,15 +399,15 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
         while let Some((cur, lpm_l, lpm_r)) = self.nodes.pop() {
             match cur {
                 UnionIndex::Both(l, r) => {
-                    let node_l = &self.map_l.table[l];
-                    let node_r = &self.map_r.table[r];
+                    let node_l = &self.table_l[l];
+                    let node_r = &self.table_r[r];
                     self.extend(
-                        next_indices(self.map_l, self.map_r, node_l.right, node_r.right),
+                        next_indices(self.table_l, self.table_r, node_l.right, node_r.right),
                         lpm_l,
                         lpm_r,
                     );
                     self.extend(
-                        next_indices(self.map_l, self.map_r, node_l.left, node_r.left),
+                        next_indices(self.table_l, self.table_r, node_l.left, node_r.left),
                         lpm_l,
                         lpm_r,
                     );
@@ -399,11 +422,11 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                     }
                 }
                 UnionIndex::FirstL(l, r) => {
-                    let node_l = &self.map_l.table[l];
+                    let node_l = &self.table_l[l];
                     self.extend(
                         next_indices_first_l(
-                            self.map_l,
-                            self.map_r,
+                            self.table_l,
+                            self.table_r,
                             l,
                             node_l.left,
                             node_l.right,
@@ -419,11 +442,11 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                     }
                 }
                 UnionIndex::FirstR(l, r) => {
-                    let node_r = &self.map_r.table[r];
+                    let node_r = &self.table_r[r];
                     self.extend(
                         next_indices_first_r(
-                            self.map_l,
-                            self.map_r,
+                            self.table_l,
+                            self.table_r,
                             l,
                             r,
                             node_r.left,
@@ -439,7 +462,7 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                     }
                 }
                 UnionIndex::OnlyL(l) => {
-                    let node_l = &self.map_l.table[l];
+                    let node_l = &self.table_l[l];
                     if let Some(right) = node_l.right {
                         self.extend([UnionIndex::OnlyL(right)], lpm_l, lpm_r);
                     }
@@ -453,7 +476,7 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                     }
                 }
                 UnionIndex::OnlyR(r) => {
-                    let node_r = &self.map_r.table[r];
+                    let node_r = &self.table_r[r];
                     if let Some(right) = node_r.right {
                         self.extend([UnionIndex::OnlyR(right)], lpm_l, lpm_r);
                     }
@@ -482,23 +505,23 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
             // between multiple calls to `next`), the index `cur` is different to any of the earlier
             // iterations. It is therefore safe to extend the lifetime of the elements to 'a (which
             // is the lifetime for which `self` has an exclusive reference over the map).
-            let node_l: &'a mut crate::map::Node<P, L>;
-            let node_r: &'a mut crate::map::Node<P, R>;
+            let node_l: &'a mut crate::inner::Node<P, L>;
+            let node_r: &'a mut crate::inner::Node<P, R>;
             match cur {
                 UnionIndex::Both(l, r) => {
                     unsafe {
-                        node_l = extend_lifetime_mut(&mut self.map_l.table[l]);
-                        node_r = extend_lifetime_mut(&mut self.map_r.table[r]);
+                        node_l = self.table_l.get_mut(l);
+                        node_r = self.table_r.get_mut(r);
                     };
                     self.nodes.extend(next_indices(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         node_l.right,
                         node_r.right,
                     ));
                     self.nodes.extend(next_indices(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         node_l.left,
                         node_r.left,
                     ));
@@ -512,11 +535,11 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                 }
                 UnionIndex::FirstL(l, r) => {
                     unsafe {
-                        node_l = extend_lifetime_mut(&mut self.map_l.table[l]);
+                        node_l = self.table_l.get_mut(l);
                     };
                     self.nodes.extend(next_indices_first_l(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         l,
                         node_l.left,
                         node_l.right,
@@ -528,11 +551,11 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                 }
                 UnionIndex::FirstR(l, r) => {
                     unsafe {
-                        node_r = extend_lifetime_mut(&mut self.map_r.table[l]);
+                        node_r = self.table_r.get_mut(r);
                     };
                     self.nodes.extend(next_indices_first_r(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         l,
                         r,
                         node_r.left,
@@ -544,7 +567,7 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                 }
                 UnionIndex::OnlyL(l) => {
                     unsafe {
-                        node_l = extend_lifetime_mut(&mut self.map_l.table[l]);
+                        node_l = self.table_l.get_mut(l);
                     };
                     if let Some(right) = node_l.right {
                         self.nodes.push(UnionIndex::OnlyL(right));
@@ -558,7 +581,7 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                 }
                 UnionIndex::OnlyR(r) => {
                     unsafe {
-                        node_r = extend_lifetime_mut(&mut self.map_r.table[r]);
+                        node_r = self.table_r.get_mut(r);
                     };
                     if let Some(right) = node_r.right {
                         self.nodes.push(UnionIndex::OnlyR(right));
@@ -577,8 +600,8 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
 }
 
 fn next_indices<'a, P: Prefix, L, R>(
-    map_l: &'a PrefixMap<P, L>,
-    map_r: &'a PrefixMap<P, R>,
+    table_l: &'a Table<P, L>,
+    table_r: &'a Table<P, R>,
     node_l: Option<usize>,
     node_r: Option<usize>,
 ) -> Vec<UnionIndex> {
@@ -586,8 +609,8 @@ fn next_indices<'a, P: Prefix, L, R>(
         (None, Some(b)) => vec![UnionIndex::OnlyR(b)],
         (Some(a), None) => vec![UnionIndex::OnlyL(a)],
         (Some(a), Some(b)) => {
-            let p_a = &map_l.table[a].prefix;
-            let p_b = &map_r.table[b].prefix;
+            let p_a = &table_l[a].prefix;
+            let p_b = &table_r[b].prefix;
             if p_a.prefix_len() == p_b.prefix_len() {
                 match p_a.mask().cmp(&p_b.mask()) {
                     std::cmp::Ordering::Less => {
@@ -617,8 +640,8 @@ fn next_indices<'a, P: Prefix, L, R>(
 }
 
 fn next_indices_first_l<'a, P: Prefix, L, R>(
-    map_l: &'a PrefixMap<P, L>,
-    map_r: &'a PrefixMap<P, R>,
+    table_l: &'a Table<P, L>,
+    table_r: &'a Table<P, R>,
     l: usize,
     ll: Option<usize>,
     lr: Option<usize>,
@@ -626,15 +649,15 @@ fn next_indices_first_l<'a, P: Prefix, L, R>(
 ) -> Vec<UnionIndex> {
     match (ll, lr) {
         (None, None) => vec![UnionIndex::OnlyR(r)],
-        (None, Some(lr)) => next_indices(map_l, map_r, Some(lr), Some(r)),
-        (Some(ll), None) => next_indices(map_l, map_r, Some(ll), Some(r)),
+        (None, Some(lr)) => next_indices(table_l, table_r, Some(lr), Some(r)),
+        (Some(ll), None) => next_indices(table_l, table_r, Some(ll), Some(r)),
         (Some(ll), Some(lr)) => {
-            if to_right(&map_l.table[l].prefix, &map_r.table[r].prefix) {
-                let mut idxes = next_indices(map_l, map_r, Some(lr), Some(r));
+            if to_right(&table_l[l].prefix, &table_r[r].prefix) {
+                let mut idxes = next_indices(table_l, table_r, Some(lr), Some(r));
                 idxes.push(UnionIndex::OnlyL(ll));
                 idxes
             } else {
-                let mut idxes = next_indices(map_l, map_r, Some(ll), Some(r));
+                let mut idxes = next_indices(table_l, table_r, Some(ll), Some(r));
                 idxes.insert(0, UnionIndex::OnlyL(lr));
                 idxes
             }
@@ -643,8 +666,8 @@ fn next_indices_first_l<'a, P: Prefix, L, R>(
 }
 
 fn next_indices_first_r<'a, P: Prefix, L, R>(
-    map_l: &'a PrefixMap<P, L>,
-    map_r: &'a PrefixMap<P, R>,
+    table_l: &'a Table<P, L>,
+    table_r: &'a Table<P, R>,
     l: usize,
     r: usize,
     rl: Option<usize>,
@@ -652,15 +675,15 @@ fn next_indices_first_r<'a, P: Prefix, L, R>(
 ) -> Vec<UnionIndex> {
     match (rl, rr) {
         (None, None) => vec![UnionIndex::OnlyL(l)],
-        (None, Some(rr)) => next_indices(map_l, map_r, Some(l), Some(rr)),
-        (Some(rl), None) => next_indices(map_l, map_r, Some(l), Some(rl)),
+        (None, Some(rr)) => next_indices(table_l, table_r, Some(l), Some(rr)),
+        (Some(rl), None) => next_indices(table_l, table_r, Some(l), Some(rl)),
         (Some(rl), Some(rr)) => {
-            if to_right(&map_r.table[r].prefix, &map_l.table[l].prefix) {
-                let mut idxes = next_indices(map_l, map_r, Some(l), Some(rr));
+            if to_right(&table_r[r].prefix, &table_l[l].prefix) {
+                let mut idxes = next_indices(table_l, table_r, Some(l), Some(rr));
                 idxes.push(UnionIndex::OnlyR(rl));
                 idxes
             } else {
-                let mut idxes = next_indices(map_l, map_r, Some(l), Some(rl));
+                let mut idxes = next_indices(table_l, table_r, Some(l), Some(rl));
                 idxes.insert(0, UnionIndex::OnlyR(rr));
                 idxes
             }
@@ -669,14 +692,14 @@ fn next_indices_first_r<'a, P: Prefix, L, R>(
 }
 
 fn extend_lpm<'a, P: Prefix, L, R>(
-    map_l: &'a PrefixMap<P, L>,
-    map_r: &'a PrefixMap<P, R>,
+    table_l: &'a Table<P, L>,
+    table_r: &'a Table<P, R>,
     lpm_l: Lpm<'a, P, L>,
     lpm_r: Lpm<'a, P, R>,
     indices: impl IntoIterator<Item = UnionIndex> + 'static,
 ) -> impl Iterator<Item = Node<'a, P, L, R>> + 'a {
-    let get_lpm_l = move |l: usize| map_l.table[l].prefix_value().or(lpm_l);
-    let get_lpm_r = move |r: usize| map_r.table[r].prefix_value().or(lpm_r);
+    let get_lpm_l = move |l: usize| table_l[l].prefix_value().or(lpm_l);
+    let get_lpm_r = move |r: usize| table_r[r].prefix_value().or(lpm_r);
     indices.into_iter().map(move |x| match x {
         UnionIndex::Both(l, r) => (x, get_lpm_l(l), get_lpm_r(r)),
         UnionIndex::FirstL(l, _) | UnionIndex::OnlyL(l) => (x, get_lpm_l(l), lpm_r),

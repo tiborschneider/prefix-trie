@@ -1,20 +1,38 @@
-use crate::{map::extend_lifetime_mut, to_right};
+use crate::to_right;
 
 use super::*;
 
 /// an iterator over the intersection of two [`crate::PrefixSet`]s in lexicographic order.
 pub struct Intersection<'a, P, L, R> {
-    pub(super) map_l: &'a PrefixMap<P, L>,
-    pub(super) map_r: &'a PrefixMap<P, R>,
+    pub(super) table_l: &'a Table<P, L>,
+    pub(super) table_r: &'a Table<P, R>,
     pub(super) nodes: Vec<IntersectionIndex>,
 }
 
 /// an iterator over the intersection of two [`crate::PrefixSet`]s in lexicographic order, yielding
 /// mutable references to all elements.
 pub struct IntersectionMut<'a, P, L, R> {
-    pub(super) map_l: &'a mut PrefixMap<P, L>,
-    pub(super) map_r: &'a mut PrefixMap<P, R>,
+    pub(super) table_l: &'a Table<P, L>,
+    pub(super) table_r: &'a Table<P, R>,
     pub(super) nodes: Vec<IntersectionIndex>,
+}
+
+impl<'a, P, L, R> IntersectionMut<'a, P, L, R> {
+    /// Safety:
+    /// 1. Table_l must come from a `TrieViewMut` and satisfy the conditions in `TrieViewMut::new`.
+    /// 2. Table_r must come from a `TrieViewMut` and satisfy the conditions in `TrieViewMut::new`.
+    /// 3. Table_l and Table_r must be distinct. This is implicitly given by the two rules above.
+    unsafe fn new(
+        table_l: &'a Table<P, L>,
+        table_r: &'a Table<P, R>,
+        nodes: Vec<IntersectionIndex>,
+    ) -> Self {
+        Self {
+            table_l,
+            table_r,
+            nodes,
+        }
+    }
 }
 
 pub(super) enum IntersectionIndex {
@@ -64,11 +82,11 @@ where
     pub fn intersection<R>(&self, other: impl AsView<'a, P, R>) -> Intersection<'a, P, L, R> {
         let other = other.view();
         Intersection {
-            map_l: self.map,
-            map_r: other.map,
+            table_l: self.table,
+            table_r: other.table,
             nodes: Vec::from_iter(next_indices(
-                self.map,
-                other.map,
+                self.table,
+                other.table,
                 Some(self.idx),
                 Some(other.idx),
             )),
@@ -120,11 +138,11 @@ where
     ) -> Intersection<'b, P, L, R> {
         let other = other.view();
         Intersection {
-            map_l: self.map,
-            map_r: other.map,
+            table_l: self.table,
+            table_r: other.table,
             nodes: Vec::from_iter(next_indices(
-                self.map,
-                other.map,
+                self.table,
+                other.table,
                 Some(self.idx),
                 Some(other.idx),
             )),
@@ -186,16 +204,14 @@ where
     ) -> IntersectionMut<'b, P, L, R> {
         let other = other.view_mut();
         let nodes = Vec::from_iter(next_indices(
-            self.map,
-            other.map,
+            self.table,
+            other.table,
             Some(self.idx),
             Some(other.idx),
         ));
-        IntersectionMut {
-            map_l: self.map,
-            map_r: other.map,
-            nodes,
-        }
+        // Safety: Both `self` and `other` are `TrieViewMut`s, and must adhere to the safety
+        // constraints in `TrieViewMut::new`.
+        unsafe { IntersectionMut::new(self.table, other.table, nodes) }
     }
 }
 
@@ -206,17 +222,17 @@ impl<'a, P: Prefix, L, R> Iterator for Intersection<'a, P, L, R> {
         while let Some(cur) = self.nodes.pop() {
             match cur {
                 IntersectionIndex::Both(l, r) => {
-                    let node_l = &self.map_l.table[l];
-                    let node_r = &self.map_r.table[r];
+                    let node_l = &self.table_l[l];
+                    let node_r = &self.table_r[r];
                     self.nodes.extend(next_indices(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         node_l.right,
                         node_r.right,
                     ));
                     self.nodes.extend(next_indices(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         node_l.left,
                         node_r.left,
                     ));
@@ -227,10 +243,10 @@ impl<'a, P: Prefix, L, R> Iterator for Intersection<'a, P, L, R> {
                     }
                 }
                 IntersectionIndex::FirstA(l, r) => {
-                    let node_l = &self.map_l.table[l];
+                    let node_l = &self.table_l[l];
                     self.nodes.extend(next_indices_first_a(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         l,
                         node_l.left,
                         node_l.right,
@@ -238,10 +254,10 @@ impl<'a, P: Prefix, L, R> Iterator for Intersection<'a, P, L, R> {
                     ));
                 }
                 IntersectionIndex::FirstB(l, r) => {
-                    let node_r = &self.map_r.table[r];
+                    let node_r = &self.table_r[r];
                     self.nodes.extend(next_indices_first_b(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         l,
                         r,
                         node_r.left,
@@ -267,21 +283,21 @@ impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
                     // different to any of the earlier iterations. It is therefore safe to extend
                     // the lifetime of the elements to 'a (which is the lifetime for which `self`
                     // has an exclusive reference over the map).
-                    let node_l: &'a mut crate::map::Node<P, L>;
-                    let node_r: &'a mut crate::map::Node<P, R>;
+                    let node_l: &'a mut crate::inner::Node<P, L>;
+                    let node_r: &'a mut crate::inner::Node<P, R>;
                     unsafe {
-                        node_l = extend_lifetime_mut(&mut self.map_l.table[l]);
-                        node_r = extend_lifetime_mut(&mut self.map_r.table[r]);
+                        node_l = self.table_l.get_mut(l);
+                        node_r = self.table_r.get_mut(r);
                     };
                     self.nodes.extend(next_indices(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         node_l.right,
                         node_r.right,
                     ));
                     self.nodes.extend(next_indices(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         node_l.left,
                         node_r.left,
                     ));
@@ -292,10 +308,10 @@ impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
                     }
                 }
                 IntersectionIndex::FirstA(l, r) => {
-                    let node_l = &self.map_l.table[l];
+                    let node_l = &self.table_l[l];
                     self.nodes.extend(next_indices_first_a(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         l,
                         node_l.left,
                         node_l.right,
@@ -303,10 +319,10 @@ impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
                     ));
                 }
                 IntersectionIndex::FirstB(l, r) => {
-                    let node_r = &self.map_r.table[r];
+                    let node_r = &self.table_r[r];
                     self.nodes.extend(next_indices_first_b(
-                        self.map_l,
-                        self.map_r,
+                        self.table_l,
+                        self.table_r,
                         l,
                         r,
                         node_r.left,
@@ -320,8 +336,8 @@ impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
 }
 
 fn next_indices<'a, P: Prefix, L, R>(
-    map_l: &'a PrefixMap<P, L>,
-    map_r: &'a PrefixMap<P, R>,
+    table_l: &'a Table<P, L>,
+    table_r: &'a Table<P, R>,
     node_l: Option<usize>,
     node_r: Option<usize>,
 ) -> Option<IntersectionIndex> {
@@ -329,8 +345,8 @@ fn next_indices<'a, P: Prefix, L, R>(
         (None, Some(_)) => None,
         (Some(_), None) => None,
         (Some(a), Some(b)) => {
-            let p_a = &map_l.table[a].prefix;
-            let p_b = &map_r.table[b].prefix;
+            let p_a = &table_l[a].prefix;
+            let p_b = &table_r[b].prefix;
             if p_a.prefix_len() == p_b.prefix_len() {
                 match p_a.mask().cmp(&p_b.mask()) {
                     std::cmp::Ordering::Equal => Some(IntersectionIndex::Both(a, b)),
@@ -349,8 +365,8 @@ fn next_indices<'a, P: Prefix, L, R>(
 }
 
 fn next_indices_first_a<'a, P: Prefix, L, R>(
-    map_l: &'a PrefixMap<P, L>,
-    map_r: &'a PrefixMap<P, R>,
+    table_l: &'a Table<P, L>,
+    table_r: &'a Table<P, R>,
     l: usize,
     ll: Option<usize>,
     lr: Option<usize>,
@@ -358,21 +374,21 @@ fn next_indices_first_a<'a, P: Prefix, L, R>(
 ) -> Option<IntersectionIndex> {
     match (ll, lr) {
         (None, None) => None,
-        (None, Some(lr)) => next_indices(map_l, map_r, Some(lr), Some(r)),
-        (Some(ll), None) => next_indices(map_l, map_r, Some(ll), Some(r)),
+        (None, Some(lr)) => next_indices(table_l, table_r, Some(lr), Some(r)),
+        (Some(ll), None) => next_indices(table_l, table_r, Some(ll), Some(r)),
         (Some(ll), Some(lr)) => {
-            if to_right(&map_l.table[l].prefix, &map_r.table[r].prefix) {
-                next_indices(map_l, map_r, Some(lr), Some(r))
+            if to_right(&table_l[l].prefix, &table_r[r].prefix) {
+                next_indices(table_l, table_r, Some(lr), Some(r))
             } else {
-                next_indices(map_l, map_r, Some(ll), Some(r))
+                next_indices(table_l, table_r, Some(ll), Some(r))
             }
         }
     }
 }
 
 fn next_indices_first_b<'a, P: Prefix, L, R>(
-    map_l: &'a PrefixMap<P, L>,
-    map_r: &'a PrefixMap<P, R>,
+    table_l: &'a Table<P, L>,
+    table_r: &'a Table<P, R>,
     l: usize,
     r: usize,
     rl: Option<usize>,
@@ -380,13 +396,13 @@ fn next_indices_first_b<'a, P: Prefix, L, R>(
 ) -> Option<IntersectionIndex> {
     match (rl, rr) {
         (None, None) => None,
-        (None, Some(rr)) => next_indices(map_l, map_r, Some(l), Some(rr)),
-        (Some(rl), None) => next_indices(map_l, map_r, Some(l), Some(rl)),
+        (None, Some(rr)) => next_indices(table_l, table_r, Some(l), Some(rr)),
+        (Some(rl), None) => next_indices(table_l, table_r, Some(l), Some(rl)),
         (Some(rl), Some(rr)) => {
-            if to_right(&map_r.table[r].prefix, &map_l.table[l].prefix) {
-                next_indices(map_l, map_r, Some(l), Some(rr))
+            if to_right(&table_r[r].prefix, &table_l[l].prefix) {
+                next_indices(table_l, table_r, Some(l), Some(rr))
             } else {
-                next_indices(map_l, map_r, Some(l), Some(rl))
+                next_indices(table_l, table_r, Some(l), Some(rl))
             }
         }
     }

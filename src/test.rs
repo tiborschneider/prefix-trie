@@ -5,7 +5,7 @@ use std::{
 
 use ipnet::Ipv4Net;
 
-use super::map::Node;
+use super::inner::Node;
 use super::*;
 use rand::prelude::*;
 
@@ -35,9 +35,9 @@ impl TestNode {
         let idx = if self.prefix == Default::default() {
             0
         } else {
-            map.table.len()
+            map.table.as_ref().len()
         };
-        map.table.push(Node {
+        map.table.as_mut().push(Node {
             prefix: self.prefix,
             value: self.value,
             left: None,

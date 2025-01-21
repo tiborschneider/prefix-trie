@@ -5,7 +5,8 @@
 //! [`PrefixMap`]s and [`PrefixSet`]s, optionally of only a trie-view.
 
 use crate::{
-    map::{Direction, Iter, IterMut, Keys, Values, ValuesMut},
+    inner::{Direction, Node, Table},
+    map::{Iter, IterMut, Keys, Values, ValuesMut},
     Prefix, PrefixMap, PrefixSet,
 };
 
@@ -30,7 +31,7 @@ impl<'a, P: Prefix, T> AsView<'a, P, T> for TrieView<'a, P, T> {
 impl<'a, P: Prefix, T> AsView<'a, P, T> for TrieViewMut<'a, P, T> {
     fn view(self) -> TrieView<'a, P, T> {
         TrieView {
-            map: self.map,
+            table: &self.table,
             idx: self.idx,
         }
     }
@@ -38,14 +39,17 @@ impl<'a, P: Prefix, T> AsView<'a, P, T> for TrieViewMut<'a, P, T> {
 
 impl<'a, P: Prefix, T> AsView<'a, P, T> for &'a PrefixMap<P, T> {
     fn view(self) -> TrieView<'a, P, T> {
-        TrieView { map: self, idx: 0 }
+        TrieView {
+            table: &self.table,
+            idx: 0,
+        }
     }
 }
 
 impl<'a, P: Prefix> AsView<'a, P, ()> for &'a PrefixSet<P> {
     fn view(self) -> TrieView<'a, P, ()> {
         TrieView {
-            map: &self.0,
+            table: &self.0.table,
             idx: 0,
         }
     }
@@ -53,7 +57,7 @@ impl<'a, P: Prefix> AsView<'a, P, ()> for &'a PrefixSet<P> {
 
 /// A subtree of a prefix-trie rooted at a specific node.
 pub struct TrieView<'a, P, T> {
-    map: &'a PrefixMap<P, T>,
+    table: &'a Table<P, T>,
     idx: usize,
 }
 
@@ -68,7 +72,7 @@ impl<P, T> Clone for TrieView<'_, P, T> {
 impl<P: std::fmt::Debug, T: std::fmt::Debug> std::fmt::Debug for TrieView<'_, P, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("View")
-            .field(&self.map.table[self.idx].prefix)
+            .field(&self.table[self.idx].prefix)
             .finish()
     }
 }
@@ -120,15 +124,20 @@ where
         let mut last_idx = self.idx;
         let mut idx = self.idx;
         loop {
-            match self.map.get_direction(idx, prefix) {
+            match self.table.get_direction(idx, prefix) {
                 Direction::Enter { next, .. } => {
                     last_idx = idx;
                     idx = next;
                 }
-                Direction::Reached => return Some(Self { map: self.map, idx }),
-                Direction::Missing if self.map.table[last_idx].prefix.contains(prefix) => {
+                Direction::Reached => {
                     return Some(Self {
-                        map: self.map,
+                        table: self.table,
+                        idx,
+                    })
+                }
+                Direction::Missing if self.table[last_idx].prefix.contains(prefix) => {
+                    return Some(Self {
+                        table: self.table,
                         idx: last_idx,
                     })
                 }
@@ -170,12 +179,12 @@ where
     pub fn find_exact(&self, prefix: &P) -> Option<TrieView<'a, P, T>> {
         let mut idx = self.idx;
         loop {
-            match self.map.get_direction(idx, prefix) {
+            match self.table.get_direction(idx, prefix) {
                 Direction::Reached => {
-                    return self.map.table[idx]
-                        .value
-                        .is_some()
-                        .then_some(Self { map: self.map, idx })
+                    return self.table[idx].value.is_some().then_some(Self {
+                        table: self.table,
+                        idx,
+                    })
                 }
                 Direction::Enter { next, .. } => idx = next,
                 Direction::Missing => return None,
@@ -228,12 +237,17 @@ where
         let mut idx = self.idx;
         let mut best_match = None;
         loop {
-            if self.map.table[idx].value.is_some() {
+            if self.table[idx].value.is_some() {
                 best_match = Some(idx);
             }
-            match self.map.get_direction(idx, prefix) {
+            match self.table.get_direction(idx, prefix) {
                 Direction::Enter { next, .. } => idx = next,
-                _ => return best_match.map(|idx| Self { map: self.map, idx }),
+                _ => {
+                    return best_match.map(|idx| Self {
+                        table: self.table,
+                        idx,
+                    })
+                }
             }
         }
     }
@@ -269,7 +283,7 @@ impl<'a, P, T> TrieView<'a, P, T> {
     /// ```
     pub fn iter(&self) -> Iter<'a, P, T> {
         Iter {
-            map: self.map,
+            table: self.table,
             nodes: vec![self.idx],
         }
     }
@@ -328,19 +342,19 @@ impl<'a, P, T> TrieView<'a, P, T> {
     /// explicitly in the map/set, but may be used as a branching node (or when you call
     /// `remove_keep_tree`).
     pub fn prefix(&self) -> &'a P {
-        &self.map.table[self.idx].prefix
+        &self.table[self.idx].prefix
     }
 
     /// Get a reference to the value at the root of the current view. This function may return
     /// `None` if `self` is pointing at a branching node.
     pub fn value(&self) -> Option<&'a T> {
-        self.map.table[self.idx].value.as_ref()
+        self.table[self.idx].value.as_ref()
     }
 
     /// Get a reference to both the prefix and the value. This function may return `None` if either
     /// `self` is pointing at a branching node.
     pub fn prefix_value(&self) -> Option<(&'a P, &'a T)> {
-        let x = &self.map.table[self.idx];
+        let x = &self.table[self.idx];
         Some((&x.prefix, x.value.as_ref()?))
     }
 
@@ -348,8 +362,8 @@ impl<'a, P, T> TrieView<'a, P, T> {
     /// contained within `self.prefix()`, and for which the next bit is set to 0.
     pub fn left(&self) -> Option<Self> {
         Some(Self {
-            map: self.map,
-            idx: self.map.table[self.idx].left?,
+            table: self.table,
+            idx: self.table[self.idx].left?,
         })
     }
 
@@ -357,8 +371,8 @@ impl<'a, P, T> TrieView<'a, P, T> {
     /// contained within `self.prefix()`, and for which the next bit is set to 1.
     pub fn right(&self) -> Option<Self> {
         Some(Self {
-            map: self.map,
-            idx: self.map.table[self.idx].right?,
+            table: self.table,
+            idx: self.table[self.idx].right?,
         })
     }
 }
@@ -392,29 +406,40 @@ impl<'a, P: Prefix, T> AsViewMut<'a, P, T> for TrieViewMut<'a, P, T> {
 
 impl<'a, P: Prefix, T> AsViewMut<'a, P, T> for &'a mut PrefixMap<P, T> {
     fn view_mut(self) -> TrieViewMut<'a, P, T> {
-        TrieViewMut { map: self, idx: 0 }
+        // Safety: We borrow the prefixmap mutably here. Thus, this is the only mutable reference,
+        // and we can create such a view to the root (referencing the entire tree mutably).
+        unsafe { TrieViewMut::new(&self.table, 0) }
     }
 }
 
 impl<'a, P: Prefix> AsViewMut<'a, P, ()> for &'a mut PrefixSet<P> {
     fn view_mut(self) -> TrieViewMut<'a, P, ()> {
-        TrieViewMut {
-            map: &mut self.0,
-            idx: 0,
-        }
+        self.0.view_mut()
     }
 }
 
 /// A mutable view of a prefix-trie rooted at a specific node.
 pub struct TrieViewMut<'a, P, T> {
-    map: &'a mut PrefixMap<P, T>,
+    table: &'a Table<P, T>,
     idx: usize,
+}
+
+impl<'a, P, T> TrieViewMut<'a, P, T> {
+    /// # Safety
+    /// - First, ensure that `'a` is tied to a mutable reference `&'a Table<P, T>`.
+    /// - Second, you must guarantee that, if multiple `TrieViewMut` exist, all of them point to
+    ///   nodes that are located on separate sub-trees. You must guarantee that no `TrieViewMut` is
+    ///   contained within another `TrieViewMut` or `TrieView`. Also, you must guarantee that no
+    ///   `TrieView` is contained within a `TrieViewMut`.
+    pub(crate) unsafe fn new(table: &'a Table<P, T>, idx: usize) -> Self {
+        Self { table, idx }
+    }
 }
 
 impl<P: std::fmt::Debug, T: std::fmt::Debug> std::fmt::Debug for TrieViewMut<'_, P, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ViewMut")
-            .field(&self.map.table[self.idx].prefix)
+            .field(&self.table[self.idx].prefix)
             .finish()
     }
 }
@@ -459,17 +484,22 @@ where
         let mut last_idx = self.idx;
         let mut idx = self.idx;
         loop {
-            match self.map.get_direction(idx, prefix) {
+            match self.table.get_direction(idx, prefix) {
                 Direction::Enter { next, .. } => {
                     last_idx = idx;
                     idx = next;
                 }
-                Direction::Reached => return Ok(Self { map: self.map, idx }),
-                Direction::Missing if self.map.table[last_idx].prefix.contains(prefix) => {
-                    return Ok(Self {
-                        map: self.map,
-                        idx: last_idx,
-                    })
+                Direction::Reached => {
+                    // Safety: We own the entire sub-tree, including `idx` (which was reached from
+                    // `self.idx`). Here, we return a new TrieViewMut pointing to that node (which
+                    // is still not covered by any other view), while dropping `self`.
+                    return unsafe { Ok(Self::new(self.table, idx)) };
+                }
+                Direction::Missing if self.table[last_idx].prefix.contains(prefix) => {
+                    // Safety: We own the entire sub-tree, including `last_idx` (which was reached
+                    // from `self.idx`). Here, we return a new TrieViewMut pointing to that node
+                    // (which is still not covered by any other view), while dropping `self`.
+                    return unsafe { Ok(Self::new(self.table, last_idx)) };
                 }
                 Direction::Missing => return Err(self),
             }
@@ -511,13 +541,16 @@ where
     pub fn find_exact(self, prefix: &P) -> Result<Self, Self> {
         let mut idx = self.idx;
         loop {
-            match self.map.get_direction(idx, prefix) {
+            match self.table.get_direction(idx, prefix) {
                 Direction::Reached => {
-                    return if self.map.table[idx].value.is_some() {
-                        Ok(Self { map: self.map, idx })
+                    return if self.table[idx].value.is_some() {
+                        // Safety: We own the entire sub-tree, including `idx` (which was reached
+                        // from `self.idx`). Here, we return a new TrieViewMut pointing to that node
+                        // (which is still not covered by any other view), while dropping `self`.
+                        unsafe { Ok(Self::new(self.table, idx)) }
                     } else {
                         Err(self)
-                    }
+                    };
                 }
                 Direction::Enter { next, .. } => idx = next,
                 Direction::Missing => return Err(self),
@@ -563,17 +596,20 @@ where
         let mut idx = self.idx;
         let mut best_match = None;
         loop {
-            if self.map.table[idx].value.is_some() {
+            if self.table[idx].value.is_some() {
                 best_match = Some(idx);
             }
-            match self.map.get_direction(idx, prefix) {
+            match self.table.get_direction(idx, prefix) {
                 Direction::Enter { next, .. } => idx = next,
                 _ => {
                     return if let Some(idx) = best_match {
-                        Ok(Self { map: self.map, idx })
+                        // Safety: We own the entire sub-tree, including `idx` (which was reached
+                        // from `self.idx`). Here, we return a new TrieViewMut pointing to that node
+                        // (which is still not covered by any other view), while dropping `self`.
+                        unsafe { Ok(Self::new(self.table, idx)) }
                     } else {
                         Err(self)
-                    }
+                    };
                 }
             }
         }
@@ -585,7 +621,7 @@ impl<'a, P, T> TrieViewMut<'a, P, T> {
     /// lexicographic order.
     pub fn iter(&self) -> Iter<'_, P, T> {
         Iter {
-            map: self.map,
+            table: self.table,
             nodes: vec![self.idx],
         }
     }
@@ -593,10 +629,11 @@ impl<'a, P, T> TrieViewMut<'a, P, T> {
     /// Iterate over all elements in the given view (including the element itself), in
     /// lexicographic order, with a mutable reference to the value.
     pub fn iter_mut(&mut self) -> IterMut<'_, P, T> {
-        IterMut {
-            map: self.map,
-            nodes: vec![self.idx],
-        }
+        // Safety: Here, we assume the TrieView was created using the `TrieViewMut::new` function,
+        // and that the safety conditions from that function were satisfied. These safety conditions
+        // comply with the safety conditions from `IterMut::new()`. Further, `self` is borrowed
+        // mutably for the lifetime of the mutable iterator.
+        unsafe { IterMut::new(self.table, vec![self.idx]) }
     }
 
     /// Iterate over all keys in the given view (including the element itself), in lexicographic
@@ -622,7 +659,7 @@ impl<'a, P, T> TrieViewMut<'a, P, T> {
     /// Return an immutable view of the current subtrie.
     pub fn view(&self) -> TrieView<'_, P, T> {
         TrieView {
-            map: self.map,
+            table: self.table,
             idx: self.idx,
         }
     }
@@ -631,33 +668,39 @@ impl<'a, P, T> TrieViewMut<'a, P, T> {
     /// explicitly in the map/set, but may be used as a branching node (or when you call
     /// `remove_keep_tree`).
     pub fn prefix(&self) -> &P {
-        &self.map.table[self.idx].prefix
+        &self.table[self.idx].prefix
     }
 
     /// Get a reference to the value at the root of the current view. This function may return
     /// `None` if `self` is pointing at a branching node.
     pub fn value(&self) -> Option<&T> {
-        self.map.table[self.idx].value.as_ref()
+        self.table[self.idx].value.as_ref()
+    }
+
+    fn node_mut(&mut self) -> &mut Node<P, T> {
+        // Safety: In the following, we assume that the safety conditions of `TrieViewMut::new` were
+        // satisfied. In that case, we know that we are the only ones owning a mutable reference to
+        // a tree that contains that root node. Therefore, it is safe to take a mutable reference of
+        // that value.
+        unsafe { self.table.get_mut(self.idx) }
     }
 
     /// Get a mutable reference to the value at the root of the current view. This function may
     /// return `None` if `self` is pointing at a branching node.
     pub fn value_mut(&mut self) -> Option<&mut T> {
-        self.map.table[self.idx].value.as_mut()
+        self.node_mut().value.as_mut()
     }
 
     /// Get a reference to both the prefix and the value. This function may return `None` if either
     /// `self` is pointing at a branching node.
     pub fn prefix_value(&self) -> Option<(&P, &T)> {
-        let x = &self.map.table[self.idx];
-        Some((&x.prefix, x.value.as_ref()?))
+        self.table[self.idx].prefix_value()
     }
 
     /// Get a reference to both the prefix and the value (the latter is mutable). This function may
     /// return `None` if either `self` is pointing at a branching node.
     pub fn prefix_value_mut(&mut self) -> Option<(&P, &mut T)> {
-        let x = &mut self.map.table[self.idx];
-        Some((&x.prefix, x.value.as_mut()?))
+        self.node_mut().prefix_value_mut()
     }
 
     /// Remove the element at the current position of the view. The tree structure is not modified
@@ -698,7 +741,7 @@ impl<'a, P, T> TrieViewMut<'a, P, T> {
     /// # }
     /// ```
     pub fn remove(&mut self) -> Option<T> {
-        self.map.table[self.idx].value.take()
+        self.node_mut().value.take()
     }
 
     /// Insert an element at the current position of the view. The function returns the old value
@@ -730,15 +773,19 @@ impl<'a, P, T> TrieViewMut<'a, P, T> {
     /// # }
     /// ```
     pub fn insert(&mut self, value: T) -> Option<T> {
-        self.map.table[self.idx].value.replace(value)
+        self.node_mut().value.replace(value)
     }
 
     /// Get the left branch at the current view. The right branch contains all prefix that are
     /// contained within `self.prefix()`, and for which the next bit is set to 0. If the node has no
     /// children to the left, the function will return the previous view as `Err(self)`.
     pub fn left(self) -> Result<Self, Self> {
-        if let Some(idx) = self.map.table[self.idx].left {
-            Ok(Self { map: self.map, idx })
+        if let Some(idx) = self.table[self.idx].left {
+            // Safety: We assume `self` was created while satisfying the safety conditions from
+            // `TrieViewMut::new`. Thus, `self` is the only TrieView referencing that root. Here, we
+            // construct a new `TrieViewMut` of the left child while destroying `self`, and thus,
+            // the safety conditions remain satisfied.
+            unsafe { Ok(Self::new(self.table, idx)) }
         } else {
             Err(self)
         }
@@ -748,8 +795,12 @@ impl<'a, P, T> TrieViewMut<'a, P, T> {
     /// contained within `self.prefix()`, and for which the next bit is set to 1. If the node has no
     /// children to the right, the function will return the previous view as `Err(self)`.
     pub fn right(self) -> Result<Self, Self> {
-        if let Some(idx) = self.map.table[self.idx].right {
-            Ok(Self { map: self.map, idx })
+        if let Some(idx) = self.table[self.idx].right {
+            // Safety: We assume `self` was created while satisfying the safety conditions from
+            // `TrieViewMut::new`. Thus, `self` is the only TrieView referencing that root. Here, we
+            // construct a new `TrieViewMut` of the right child while destroying `self`, and thus,
+            // the safety conditions remain satisfied.
+            unsafe { Ok(Self::new(self.table, idx)) }
         } else {
             Err(self)
         }
@@ -757,12 +808,12 @@ impl<'a, P, T> TrieViewMut<'a, P, T> {
 
     /// Returns `True` whether `self` has children to the left.
     pub fn has_left(&self) -> bool {
-        self.map.table[self.idx].left.is_some()
+        self.table[self.idx].left.is_some()
     }
 
     /// Returns `True` whether `self` has children to the right.
     pub fn has_right(&self) -> bool {
-        self.map.table[self.idx].right.is_some()
+        self.table[self.idx].right.is_some()
     }
 
     /// Split `self` into two views, one pointing to the left and one pointing to the right child.
@@ -800,20 +851,20 @@ impl<'a, P, T> TrieViewMut<'a, P, T> {
     /// # }
     /// ```
     pub fn split(self) -> (Option<Self>, Option<Self>) {
-        let left = self.map.table[self.idx].left;
-        let right = self.map.table[self.idx].right;
+        let left = self.table[self.idx].left;
+        let right = self.table[self.idx].right;
 
-        let map_1 = self.map;
-        let map_2: &'a mut PrefixMap<P, T>;
-        // Safety: the view can only access its own elements! Therefore, splitting the view up into
-        // two does not create aliasing.
+        // Safety: We assume `self` was created while satisfying the safety conditions from
+        // `TrieViewMut::new`. Thus, `self` is the only TrieView referencing that root. Here, we
+        // construct two new `TrieViewMut`s, one on the left and one on the right. Thus, they are
+        // siblings and don't overlap. Further, we destroy `self`, ensuring that the safety
+        // guarantees remain satisfied.
         unsafe {
-            map_2 = &mut *(map_1 as *mut PrefixMap<P, T>);
+            (
+                left.map(|idx| Self::new(self.table, idx)),
+                right.map(|idx| Self::new(self.table, idx)),
+            )
         }
-        (
-            left.map(|idx| Self { map: map_1, idx }),
-            right.map(|idx| Self { map: map_2, idx }),
-        )
     }
 }
 
@@ -822,10 +873,10 @@ impl<'a, P, T> IntoIterator for TrieViewMut<'a, P, T> {
     type IntoIter = IterMut<'a, P, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IterMut {
-            map: self.map,
-            nodes: vec![self.idx],
-        }
+        // Safety: Here, we assume the TrieView was created using the `TrieViewMut::new` function,
+        // and that the safety conditions from that function were satisfied. These safety conditions
+        // comply with the safety conditions from `IterMut::new()`.
+        unsafe { IterMut::new(self.table, vec![self.idx]) }
     }
 }
 
