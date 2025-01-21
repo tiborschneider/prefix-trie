@@ -505,14 +505,10 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
             // between multiple calls to `next`), the index `cur` is different to any of the earlier
             // iterations. It is therefore safe to extend the lifetime of the elements to 'a (which
             // is the lifetime for which `self` has an exclusive reference over the map).
-            let node_l: &'a mut crate::inner::Node<P, L>;
-            let node_r: &'a mut crate::inner::Node<P, R>;
             match cur {
                 UnionIndex::Both(l, r) => {
-                    unsafe {
-                        node_l = self.table_l.get_mut(l);
-                        node_r = self.table_r.get_mut(r);
-                    };
+                    let node_l = &self.table_l[l];
+                    let node_r = &self.table_r[r];
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
@@ -525,6 +521,8 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                         node_l.left,
                         node_r.left,
                     ));
+                    let node_l = unsafe { self.table_l.get_mut(l) };
+                    let node_r = unsafe { self.table_r.get_mut(r) };
                     if node_l.value.is_some() || node_r.value.is_some() {
                         return Some((
                             &node_l.prefix,
@@ -534,9 +532,7 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                     }
                 }
                 UnionIndex::FirstL(l, r) => {
-                    unsafe {
-                        node_l = self.table_l.get_mut(l);
-                    };
+                    let node_l = &self.table_l[l];
                     self.nodes.extend(next_indices_first_l(
                         self.table_l,
                         self.table_r,
@@ -545,14 +541,13 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                         node_l.right,
                         r,
                     ));
+                    let node_l = unsafe { self.table_l.get_mut(l) };
                     if node_l.value.is_some() {
                         return Some((&node_l.prefix, node_l.value.as_mut(), None));
                     }
                 }
                 UnionIndex::FirstR(l, r) => {
-                    unsafe {
-                        node_r = self.table_r.get_mut(r);
-                    };
+                    let node_r = &self.table_r[r];
                     self.nodes.extend(next_indices_first_r(
                         self.table_l,
                         self.table_r,
@@ -561,14 +556,13 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                         node_r.left,
                         node_r.right,
                     ));
+                    let node_r = unsafe { self.table_r.get_mut(r) };
                     if node_r.value.is_some() {
                         return Some((&node_r.prefix, None, node_r.value.as_mut()));
                     }
                 }
                 UnionIndex::OnlyL(l) => {
-                    unsafe {
-                        node_l = self.table_l.get_mut(l);
-                    };
+                    let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(right) = node_l.right {
                         self.nodes.push(UnionIndex::OnlyL(right));
                     }
@@ -580,9 +574,7 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                     }
                 }
                 UnionIndex::OnlyR(r) => {
-                    unsafe {
-                        node_r = self.table_r.get_mut(r);
-                    };
+                    let node_r = unsafe { self.table_r.get_mut(r) };
                     if let Some(right) = node_r.right {
                         self.nodes.push(UnionIndex::OnlyR(right));
                     }

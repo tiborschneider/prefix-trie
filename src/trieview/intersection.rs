@@ -274,21 +274,16 @@ impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
     type Item = (&'a P, &'a mut L, &'a mut R);
 
     fn next(&mut self) -> Option<Self::Item> {
+        // safety: map is a tree. Every node is visited exactly once during the iteration
+        // (self.nodes is not public). Therefore, each in each iteration of this loop (also between
+        // multiple calls to `next`), the index `cur` is different to any of the earlier
+        // iterations. It is therefore safe to extend the lifetime of the elements to 'a (which is
+        // the lifetime for which `self` has an exclusive reference over the map).
         while let Some(cur) = self.nodes.pop() {
             match cur {
                 IntersectionIndex::Both(l, r) => {
-                    // safety: map is a tree. Every node is visited exactly once during the
-                    // iteration (self.nodes is not public). Therefore, each in each iteration of
-                    // this loop (also between multiple calls to `next`), the index `cur` is
-                    // different to any of the earlier iterations. It is therefore safe to extend
-                    // the lifetime of the elements to 'a (which is the lifetime for which `self`
-                    // has an exclusive reference over the map).
-                    let node_l: &'a mut crate::inner::Node<P, L>;
-                    let node_r: &'a mut crate::inner::Node<P, R>;
-                    unsafe {
-                        node_l = self.table_l.get_mut(l);
-                        node_r = self.table_r.get_mut(r);
-                    };
+                    let node_l = &self.table_l[l];
+                    let node_r = &self.table_r[r];
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
@@ -301,6 +296,8 @@ impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
                         node_l.left,
                         node_r.left,
                     ));
+                    let node_l = unsafe { self.table_l.get_mut(l) };
+                    let node_r = unsafe { self.table_r.get_mut(r) };
                     if let (Some(left), Some(right)) =
                         (node_l.value.as_mut(), node_r.value.as_mut())
                     {

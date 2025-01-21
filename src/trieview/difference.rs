@@ -563,10 +563,9 @@ impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
             // between multiple calls to `next`), the index `cur` is different to any of the earlier
             // iterations. It is therefore safe to extend the lifetime of the elements to 'a (which
             // is the lifetime for which `self` has an exclusive reference over the map).
-            let node_l: &'a mut crate::inner::Node<P, L>;
             match cur {
                 DifferenceIndex::Both(l, r) => {
-                    node_l = unsafe { self.table_l.get_mut(l) };
+                    let node_l = &self.table_l[l];
                     let node_r = &self.table_r[r];
                     self.extend(
                         next_indices(self.table_l, self.table_r, node_l.right, node_r.right),
@@ -576,6 +575,7 @@ impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
                         next_indices(self.table_l, self.table_r, node_l.left, node_r.left),
                         lpm_r,
                     );
+                    let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(value) = node_l.value.as_mut() {
                         if node_r.value.is_none() {
                             return Some(DifferenceMutItem {
@@ -587,7 +587,7 @@ impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
                     }
                 }
                 DifferenceIndex::FirstL(l, r) => {
-                    node_l = unsafe { self.table_l.get_mut(l) };
+                    let node_l = &self.table_l[l];
                     self.extend(
                         next_indices_first_a(
                             self.table_l,
@@ -599,6 +599,7 @@ impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
                         ),
                         lpm_r,
                     );
+                    let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(value) = node_l.value.as_mut() {
                         return Some(DifferenceMutItem {
                             prefix: &node_l.prefix,
@@ -622,7 +623,7 @@ impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
                     );
                 }
                 DifferenceIndex::OnlyL(l) => {
-                    node_l = unsafe { self.table_l.get_mut(l) };
+                    let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(right) = node_l.right {
                         self.extend([DifferenceIndex::OnlyL(right)], lpm_r);
                     }
@@ -653,10 +654,9 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifferenceMut<'a, P, L, R> {
             // between multiple calls to `next`), the index `cur` is different to any of the earlier
             // iterations. It is therefore safe to extend the lifetime of the elements to 'a (which
             // is the lifetime for which `self` has an exclusive reference over the map).
-            let node_l: &'a mut crate::inner::Node<P, L>;
             match cur {
                 DifferenceIndex::Both(l, r) => {
-                    node_l = unsafe { self.table_l.get_mut(l) };
+                    let node_l = &self.table_l[l];
                     let node_r = &self.table_r[r];
                     // skip if r has a value (this all children must be ignored)
                     if node_r.value.is_some() {
@@ -674,12 +674,13 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifferenceMut<'a, P, L, R> {
                         node_l.left,
                         node_r.left,
                     ));
+                    let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(value) = node_l.value.as_mut() {
                         return Some((&node_l.prefix, value));
                     }
                 }
                 DifferenceIndex::FirstL(l, r) => {
-                    node_l = unsafe { self.table_l.get_mut(l) };
+                    let node_l = &self.table_l[l];
                     self.nodes.extend(next_indices_first_a(
                         self.table_l,
                         self.table_r,
@@ -688,6 +689,7 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifferenceMut<'a, P, L, R> {
                         node_l.right,
                         r,
                     ));
+                    let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(value) = node_l.value.as_mut() {
                         return Some((&node_l.prefix, value));
                     }
@@ -708,7 +710,7 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifferenceMut<'a, P, L, R> {
                     ));
                 }
                 DifferenceIndex::OnlyL(l) => {
-                    node_l = unsafe { self.table_l.get_mut(l) };
+                    let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(right) = node_l.right {
                         self.nodes.extend([DifferenceIndex::OnlyL(right)]);
                     }
