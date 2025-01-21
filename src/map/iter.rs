@@ -248,7 +248,7 @@ impl<P, T> PrefixMap<P, T> {
     }
 
     /// Get a mutable iterator over all key-value pairs. The order of this iterator is lexicographic.
-    pub fn iter_mut<'a>(&'a mut self) -> IterMut<'a, P, T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, P, T> {
         // Safety: We get the pointer to the table by and construct the `IterMut`. Its lifetime is
         // now tied to the mutable borrow of `self`, so we are allowed to access elements of that
         // table mutably.
@@ -459,7 +459,8 @@ where
 fn lpm_children_iter_start<P: Prefix, T>(table: &Table<P, T>, prefix: &P) -> Vec<usize> {
     let mut idx = 0;
     let mut cur_p = &table[idx].prefix;
-    let nodes = loop {
+    
+    loop {
         if cur_p.eq(prefix) {
             break vec![idx];
         }
@@ -478,8 +479,7 @@ fn lpm_children_iter_start<P: Prefix, T>(table: &Table<P, T>, prefix: &P) -> Vec
             }
             None => break vec![],
         }
-    };
-    nodes
+    }
 }
 
 impl<P, T> FromIterator<(P, T)> for PrefixMap<P, T>

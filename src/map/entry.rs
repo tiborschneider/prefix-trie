@@ -288,7 +288,7 @@ where
     }
 }
 
-impl<'a, P, T> OccupiedEntry<'a, P, T> {
+impl<P, T> OccupiedEntry<'_, P, T> {
     /// Gets a reference to the key in the entry.
     ///
     /// ```
@@ -407,7 +407,7 @@ impl<'a, P, T> OccupiedEntry<'a, P, T> {
     }
 }
 
-impl<'a, P, T> VacantEntry<'a, P, T> {
+impl<P, T> VacantEntry<'_, P, T> {
     /// Gets a reference to the key in the entry.
     ///
     /// ```

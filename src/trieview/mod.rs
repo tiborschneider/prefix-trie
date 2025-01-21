@@ -31,7 +31,7 @@ impl<'a, P: Prefix, T> AsView<'a, P, T> for TrieView<'a, P, T> {
 impl<'a, P: Prefix, T> AsView<'a, P, T> for TrieViewMut<'a, P, T> {
     fn view(self) -> TrieView<'a, P, T> {
         TrieView {
-            table: &self.table,
+            table: self.table,
             idx: self.idx,
         }
     }
@@ -616,7 +616,7 @@ where
     }
 }
 
-impl<'a, P, T> TrieViewMut<'a, P, T> {
+impl<P, T> TrieViewMut<'_, P, T> {
     /// Iterate over all elements in the given view (including the element itself), in
     /// lexicographic order.
     pub fn iter(&self) -> Iter<'_, P, T> {

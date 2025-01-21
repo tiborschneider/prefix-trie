@@ -200,7 +200,7 @@ where
     }
 }
 
-impl<'a, P, L> TrieViewMut<'a, P, L>
+impl<P, L> TrieViewMut<'_, P, L>
 where
     P: Prefix,
 {
