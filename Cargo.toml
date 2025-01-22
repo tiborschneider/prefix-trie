@@ -10,6 +10,7 @@ readme = "Readme.md"
 categories = ["network-programming"]
 keywords = ["IP", "prefix", "trie", "collection"]
 description = "Prefix trie datastructure (both a set and a map) that provides exact and longest-prefix matches."
+rust-version = "1.65.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

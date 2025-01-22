@@ -10,37 +10,47 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - name: Install rustup
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
-        override: true
-        components: rustfmt, clippy
-
-    - name: Build
-      run: cargo build --verbose
-    - name: Run clippy
-      run: cargo clippy --verbose
-    - name: Run rustfmt
-      run: cargo fmt --check
-
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+          - beta
+          - nightly
     steps:
     - uses: actions/checkout@v3
     - name: Install rustup
       uses: actions-rs/toolchain@v1
       with:
-        toolchain: nightly
+        toolchain: ${{ matrix.toolchain }}
         override: true
+        components: rustfmt, clippy
+    - name: Install cargo-hack
+      run: cargo install cargo-hack
+
+    - name: Run clippy
+      run: cargo hack --feature-powerset clippy --verbose
+    - name: Run rustfmt
+      run: cargo fmt --check
     - name: Run tests
-      run: cargo test --verbose --all-features --lib --release
+      run: cargo hack --feature-powerset test --verbose --lib --release
     - name: Run doctests
-      run: cargo test --verbose --all-features --doc
+      run: cargo hack --feature-powerset test --verbose --doc
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install rustup
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    - name: Install cargo-hack
+      run: cargo install cargo-msrv
+    - name: Check rust version
+      run: cargo msrv verify --all-features
 
   miri:
     runs-on: ubuntu-latest
