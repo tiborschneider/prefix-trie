@@ -4,6 +4,7 @@
 [![downloads](https://img.shields.io/crates/d/prefix-trie)](https://crates.io/crates/prefix-trie)
 [![docs.rs](https://img.shields.io/docsrs/prefix-trie/latest)](https://docs.rs/prefix-trie/latest/prefix_trie/)
 [![license](https://img.shields.io/crates/l/prefix-trie/0.2.2)](https://crates.io/crates/prefix-trie)
+[![Crates.io MSRV](https://img.shields.io/crates/msrv/prefix-trie)](https://crates.io/crates/prefix-trie)
 
 # Prefix-Trie
 
