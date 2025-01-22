@@ -56,7 +56,7 @@
 //! - A branching node that does not exist in the map, but is needed for the tree structure (or that
 //!   was deleted using the function `remove_keep_tree`)
 //! - A virtual node that does not exist as a node in the tree. This is only the case if you call
-//!   [`PrefixView::find`] or [`AsView::view_at`] with a node that is not present in the tree, but
+//!   [`TrieView::find`] or [`AsView::view_at`] with a node that is not present in the tree, but
 //!   that contains elements present in the tree. Virtual nodes are treated as if they are actually
 //!   present in the tree as branching nodes.
 //!
