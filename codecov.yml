@@ -1,0 +1,3 @@
+ignore:
+  - "src/fuzzing/*.rs"
+  - "src/test.rs"
