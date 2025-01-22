@@ -459,7 +459,7 @@ where
 fn lpm_children_iter_start<P: Prefix, T>(table: &Table<P, T>, prefix: &P) -> Vec<usize> {
     let mut idx = 0;
     let mut cur_p = &table[idx].prefix;
-    
+
     loop {
         if cur_p.eq(prefix) {
             break vec![idx];
