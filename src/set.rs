@@ -397,7 +397,7 @@ impl<P: Prefix> PrefixSet<P> {
     /// set.insert("192.168.0.0/24".parse()?);
     /// set.insert("192.168.2.0/24".parse()?);
     /// assert_eq!(
-    ///     set.children(&"192.168.0.0/23".parse()?).collect::<Vec<_>>(),
+    ///     set.children("192.168.0.0/23".parse()?).collect::<Vec<_>>(),
     ///     vec![
     ///         &"192.168.0.0/23".parse()?,
     ///         &"192.168.0.0/24".parse()?,
@@ -408,7 +408,7 @@ impl<P: Prefix> PrefixSet<P> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn children(&self, prefix: &P) -> Iter<'_, P> {
+    pub fn children(&self, prefix: P) -> Iter<'_, P> {
         Iter(self.0.children(prefix))
     }
 
@@ -460,7 +460,7 @@ where
 
 impl<P> Eq for PrefixSet<P> where P: Prefix + Eq {}
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 /// An iterator over all entries of a [`PrefixSet`] in lexicographic order.
 pub struct Iter<'a, P>(crate::map::Iter<'a, P, ()>);
 

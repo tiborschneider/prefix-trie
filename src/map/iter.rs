@@ -9,8 +9,26 @@ use super::Node;
 /// An iterator over all entries of a [`PrefixMap`] in lexicographic order.
 #[derive(Clone)]
 pub struct Iter<'a, P, T> {
-    pub(crate) table: &'a Table<P, T>,
-    pub(crate) nodes: Vec<usize>,
+    table: Option<&'a Table<P, T>>,
+    nodes: Vec<usize>,
+}
+
+impl<P, T> Default for Iter<'_, P, T> {
+    fn default() -> Self {
+        Self {
+            table: None,
+            nodes: Vec::new(),
+        }
+    }
+}
+
+impl<'a, P, T> Iter<'a, P, T> {
+    pub(crate) fn new(table: &'a Table<P, T>, nodes: Vec<usize>) -> Self {
+        Self {
+            table: Some(table),
+            nodes,
+        }
+    }
 }
 
 impl<'a, P, T> Iterator for Iter<'a, P, T> {
@@ -18,7 +36,7 @@ impl<'a, P, T> Iterator for Iter<'a, P, T> {
 
     fn next(&mut self) -> Option<(&'a P, &'a T)> {
         while let Some(cur) = self.nodes.pop() {
-            let node = &self.table[cur];
+            let node = &self.table.as_ref()?[cur];
             if let Some(right) = node.right {
                 self.nodes.push(right);
             }
@@ -34,7 +52,7 @@ impl<'a, P, T> Iterator for Iter<'a, P, T> {
 }
 
 /// An iterator over all prefixes of a [`PrefixMap`] in lexicographic order.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Keys<'a, P, T> {
     pub(crate) inner: Iter<'a, P, T>,
 }
@@ -49,7 +67,7 @@ impl<'a, P, T> Iterator for Keys<'a, P, T> {
 
 /// An iterator over all values of a [`PrefixMap`] in lexicographic order of their associated
 /// prefixes.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Values<'a, P, T> {
     pub(crate) inner: Iter<'a, P, T>,
 }
@@ -138,18 +156,24 @@ impl<'a, P, T> IntoIterator for &'a PrefixMap<P, T> {
 
     fn into_iter(self) -> Self::IntoIter {
         // Safety: we own an immutable reference, and `Iter` will only ever read the table.
-        Iter {
-            table: &self.table,
-            nodes: vec![0],
-        }
+        Iter::new(&self.table, vec![0])
     }
 }
 
 /// A mutable iterator over a [`PrefixMap`]. This iterator yields elements in lexicographic order of
 /// their associated prefix.
 pub struct IterMut<'a, P, T> {
-    table: &'a Table<P, T>,
+    table: Option<&'a Table<P, T>>,
     nodes: Vec<usize>,
+}
+
+impl<P, T> Default for IterMut<'_, P, T> {
+    fn default() -> Self {
+        Self {
+            table: None,
+            nodes: Vec::new(),
+        }
+    }
 }
 
 impl<'a, P, T> IterMut<'a, P, T> {
@@ -161,7 +185,10 @@ impl<'a, P, T> IterMut<'a, P, T> {
     ///
     /// The iterator will only ever access its roots or its children.
     pub(crate) unsafe fn new(table: &'a Table<P, T>, nodes: Vec<usize>) -> Self {
-        Self { table, nodes }
+        Self {
+            table: Some(table),
+            nodes,
+        }
     }
 }
 
@@ -178,7 +205,7 @@ impl<'a, P, T> Iterator for IterMut<'a, P, T> {
             // linked to a mutable reference. Then, we must ensure that we only ever construct a
             // mutable reference to each element exactly once. We ensure this by the fact that we
             // iterate over a tree. Thus, each node is visited exactly once.
-            let node: &'a mut Node<P, T> = unsafe { self.table.get_mut(cur) };
+            let node: &'a mut Node<P, T> = unsafe { self.table.as_ref()?.get_mut(cur) };
 
             if let Some(right) = node.right {
                 self.nodes.push(right);
@@ -197,6 +224,7 @@ impl<'a, P, T> Iterator for IterMut<'a, P, T> {
 
 /// A mutable iterator over values of [`PrefixMap`]. This iterator yields elements in lexicographic
 /// order.
+#[derive(Default)]
 pub struct ValuesMut<'a, P, T> {
     // # Safety
     // You must ensure that there only ever exists one such iterator for each tree. You may create
@@ -351,6 +379,8 @@ where
     /// to both keys and values, i.e., type `(&'a P, &'a T)`. The iterator yields elements in
     /// lexicographic order.
     ///
+    /// **Note**: Consider using [`AsTrieView::view_at`] as an alternative.
+    ///
     /// ```
     /// # use prefix_trie::*;
     /// # #[cfg(feature = "ipnet")]
@@ -362,7 +392,7 @@ where
     /// pm.insert("192.168.0.0/24".parse()?, 4);
     /// pm.insert("192.168.2.0/24".parse()?, 5);
     /// assert_eq!(
-    ///     pm.children(&"192.168.0.0/23".parse()?).collect::<Vec<_>>(),
+    ///     pm.children("192.168.0.0/23".parse()?).collect::<Vec<_>>(),
     ///     vec![
     ///         (&"192.168.0.0/23".parse()?, &2),
     ///         (&"192.168.0.0/24".parse()?, &4),
@@ -373,19 +403,18 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn children(&self, prefix: &P) -> Iter<'_, P, T> {
-        // first, find the longest prefix containing `prefix`.
-        let nodes = lpm_children_iter_start(&self.table, prefix);
-        Iter {
-            table: &self.table,
-            nodes,
-        }
+    pub fn children(&self, prefix: P) -> Iter<'_, P, T> {
+        self.view_at(prefix)
+            .map(|x| x.into_iter())
+            .unwrap_or_default()
     }
 
     /// Get an iterator of mutable references of the node itself and all its children. All elements
     /// returned have a prefix that is contained within `prefix` itself (or are the same). The
     /// iterator yields references to the keys, and mutable references to the values, i.e., type
     /// `(&'a P, &'a mut T)`. The iterator yields elements in lexicographic order.
+    ///
+    /// **Note**: Consider using [`AsTrieViewMut::view_mut_at`] as an alternative.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -397,7 +426,7 @@ where
     /// pm.insert("192.168.0.0/24".parse()?, 3);
     /// pm.insert("192.168.2.0/23".parse()?, 4);
     /// pm.insert("192.168.2.0/24".parse()?, 5);
-    /// pm.children_mut(&"192.168.0.0/23".parse()?).for_each(|(_, x)| *x *= 10);
+    /// pm.children_mut("192.168.0.0/23".parse()?).for_each(|(_, x)| *x *= 10);
     /// assert_eq!(
     ///     pm.into_iter().collect::<Vec<_>>(),
     ///     vec![
@@ -413,12 +442,10 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn children_mut(&mut self, prefix: &P) -> IterMut<'_, P, T> {
-        // first, find the longest prefix containing `prefix`.
-        let nodes = lpm_children_iter_start(&self.table, prefix);
-        // Safety: we bind the mutable borrow of self to the returned `IterMut`. There cannot be any
-        // other borrow (mutable or not) of `self`, so the `IterMut` can yield mutable references.
-        unsafe { IterMut::new(&self.table, nodes) }
+    pub fn children_mut(&mut self, prefix: P) -> IterMut<'_, P, T> {
+        self.view_mut_at(prefix)
+            .map(|x| x.into_iter())
+            .unwrap_or_default()
     }
 
     /// Get an iterator over the node itself and all children with a value. All elements returned

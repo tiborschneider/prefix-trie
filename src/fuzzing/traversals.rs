@@ -3,7 +3,7 @@ use super::*;
 qc!(children, _children);
 fn _children((map, start): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
     let want = select_ref(&map, |p, _| start.contains(p));
-    map.children(&start).eq(want)
+    map.children(start).eq(want)
 }
 
 qc!(children_trieview, _children_trieview);

@@ -351,10 +351,7 @@ impl<'a, P, T> TrieView<'a, P, T> {
     /// # }
     /// ```
     pub fn iter(&self) -> Iter<'a, P, T> {
-        Iter {
-            table: self.table,
-            nodes: vec![self.loc.idx()],
-        }
+        Iter::new(self.table, vec![self.loc.idx()])
     }
 
     /// Iterate over all keys in the given view (including the element itself), in lexicographic
@@ -836,10 +833,7 @@ impl<P, T> TrieViewMut<'_, P, T> {
     /// Iterate over all elements in the given view (including the element itself), in
     /// lexicographic order.
     pub fn iter(&self) -> Iter<'_, P, T> {
-        Iter {
-            table: self.table,
-            nodes: vec![self.loc.idx()],
-        }
+        Iter::new(self.table, vec![self.loc.idx()])
     }
 
     /// Iterate over all elements in the given view (including the element itself), in
