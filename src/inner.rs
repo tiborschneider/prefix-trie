@@ -1,7 +1,6 @@
 //! The inner datastructure of a PrefixTrie that offers interior mutability.
 
 use std::{
-    borrow::{Borrow, BorrowMut},
     cell::UnsafeCell,
     ops::{Index, IndexMut},
 };
@@ -36,18 +35,6 @@ impl<P, T> Node<P, T> {
 /// is no other reference to the Table that potentially accesses the same node mutably. This interior
 /// mutability is only ever provided in `get_mut`.
 pub(crate) struct Table<P, T>(UnsafeCell<Vec<Node<P, T>>>);
-
-impl<P, T> Borrow<Vec<Node<P, T>>> for Table<P, T> {
-    fn borrow(&self) -> &Vec<Node<P, T>> {
-        self.as_ref()
-    }
-}
-
-impl<P, T> BorrowMut<Vec<Node<P, T>>> for Table<P, T> {
-    fn borrow_mut(&mut self) -> &mut Vec<Node<P, T>> {
-        self.as_mut()
-    }
-}
 
 impl<P, T> AsRef<Vec<Node<P, T>>> for Table<P, T> {
     fn as_ref(&self) -> &Vec<Node<P, T>> {
