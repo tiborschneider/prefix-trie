@@ -32,4 +32,6 @@ jobs:
       run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "examples" --ignore "/*" -o lcov.info
     - name: Upload coverage
       run: bash <(curl -s https://codecov.io/bash) -f lcov.info
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
