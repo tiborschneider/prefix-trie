@@ -1,4 +1,4 @@
-use crate::to_right;
+use crate::{map::extend_lifetime_mut, to_right};
 
 use super::*;
 
@@ -8,6 +8,14 @@ pub struct Union<'a, P, L, R> {
     map_l: &'a PrefixMap<P, L>,
     map_r: &'a PrefixMap<P, R>,
     nodes: Vec<Node<'a, P, L, R>>,
+}
+
+/// An iterator over the union of two TrieViews that always yields either the exact value or the
+/// longest prefix match of both of them.
+pub struct UnionMut<'a, P, L, R> {
+    map_l: &'a mut PrefixMap<P, L>,
+    map_r: &'a mut PrefixMap<P, R>,
+    nodes: Vec<UnionIndex>,
 }
 
 type Lpm<'a, P, T> = Option<(&'a P, &'a T)>;
@@ -172,6 +180,155 @@ where
     }
 }
 
+impl<'a, P, L> TrieViewMut<'a, P, L>
+where
+    P: Prefix,
+{
+    /// Iterate over the union of two views. If a prefix is present in both trees, the iterator
+    /// will yield both elements. Otherwise, the iterator will yield the element of one TrieView
+    /// together with the longest prefix match in the other TrieView. Elements are of type
+    /// [`UnionItem`].
+    ///
+    /// **Warning**: The iterator will only yield elements of the given TrieViews. If either of the
+    /// two TrieViews is pointing to a branching node, then the longest prefix match returned may be
+    /// `None`, even though it exists in the larger tree.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # use prefix_trie::trieview::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    ///     (net!("192.168.2.0/23"), 4),
+    /// ]);
+    /// let mut map_b: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), "a"),
+    ///     (net!("192.168.0.0/23"), "b"),
+    ///     (net!("192.168.2.0/24"), "c"),
+    /// ]);
+    /// assert_eq!(
+    ///     map_a.view_mut().union(&map_b).collect::<Vec<_>>(),
+    ///     vec![
+    ///         UnionItem::Left{
+    ///             prefix: &net!("192.168.0.0/20"),
+    ///             left: &1,
+    ///             right: None,
+    ///         },
+    ///         UnionItem::Both{
+    ///             prefix: &net!("192.168.0.0/22"),
+    ///             left: &2,
+    ///             right: &"a",
+    ///         },
+    ///         UnionItem::Right{
+    ///             prefix: &net!("192.168.0.0/23"),
+    ///             left: Some((&net!("192.168.0.0/22"), &2)),
+    ///             right: &"b",
+    ///         },
+    ///         UnionItem::Left{
+    ///             prefix: &net!("192.168.0.0/24"),
+    ///             left: &3,
+    ///             right: Some((&net!("192.168.0.0/23"), &"b")),
+    ///         },
+    ///         UnionItem::Left{
+    ///             prefix: &net!("192.168.2.0/23"),
+    ///             left: &4,
+    ///             right: Some((&net!("192.168.0.0/22"), &"a")),
+    ///         },
+    ///         UnionItem::Right{
+    ///             prefix: &net!("192.168.2.0/24"),
+    ///             left: Some((&net!("192.168.2.0/23"), &4)),
+    ///             right: &"c",
+    ///         },
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    pub fn union<'b, R>(&'b self, other: impl AsView<'b, P, R>) -> Union<'b, P, L, R> {
+        let other = other.view();
+        Union {
+            map_l: self.map,
+            map_r: other.map,
+            nodes: extend_lpm(
+                self.map,
+                other.map,
+                self.map.table[self.idx].prefix_value(),
+                other.map.table[other.idx].prefix_value(),
+                next_indices(self.map, other.map, Some(self.idx), Some(other.idx)),
+            )
+            .collect(),
+        }
+    }
+
+    /// Iterate over the union of two views. If a prefix is present in both trees, the iterator
+    /// will yield mutable references to both elements. Longest prefix matches are not returned.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # use prefix_trie::trieview::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    ///     (net!("192.168.2.0/23"), 4),
+    /// ]);
+    /// let mut map_b: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), 10),
+    ///     (net!("192.168.0.0/23"), 20),
+    ///     (net!("192.168.2.0/24"), 30),
+    /// ]);
+    ///
+    /// // Modify the two maps by adding their values for elements of the same prefix.
+    /// for (_, l, r) in map_a.view_mut().union_mut(&mut map_b) {
+    ///     if let (Some(l), Some(r)) = (l, r) {
+    ///         *l += *r;
+    ///         *r = *l;
+    ///     }
+    /// }
+    ///
+    /// assert_eq!(
+    ///     map_a.into_iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         (net!("192.168.0.0/20"), 1),
+    ///         (net!("192.168.0.0/22"), 12),
+    ///         (net!("192.168.0.0/24"), 3),
+    ///         (net!("192.168.2.0/23"), 4),
+    ///     ],
+    /// );
+    /// assert_eq!(
+    ///     map_b.into_iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         (net!("192.168.0.0/22"), 12),
+    ///         (net!("192.168.0.0/23"), 20),
+    ///         (net!("192.168.2.0/24"), 30),
+    ///     ],
+    /// );
+    /// # }
+    /// ```
+    pub fn union_mut<'b, R>(
+        &'b mut self,
+        other: impl AsViewMut<'b, P, R>,
+    ) -> UnionMut<'b, P, L, R> {
+        let other = other.view_mut();
+        let nodes = next_indices(self.map, other.map, Some(self.idx), Some(other.idx));
+        UnionMut {
+            map_l: self.map,
+            map_r: other.map,
+            nodes,
+        }
+    }
+}
+
 impl<'a, P: Prefix, L, R> Union<'a, P, L, R> {
     fn extend(
         &mut self,
@@ -307,6 +464,110 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                         self.get_next(&node_r.prefix, None, node_r.value.as_ref(), lpm_l, lpm_r)
                     {
                         return Some(x);
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
+    type Item = (&'a P, Option<&'a mut L>, Option<&'a mut R>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(cur) = self.nodes.pop() {
+            // safety: map is a tree. Every node is visited exactly once during the iteration
+            // (self.nodes is not public). Therefore, each in each iteration of this loop (also
+            // between multiple calls to `next`), the index `cur` is different to any of the earlier
+            // iterations. It is therefore safe to extend the lifetime of the elements to 'a (which
+            // is the lifetime for which `self` has an exclusive reference over the map).
+            let node_l: &'a mut crate::map::Node<P, L>;
+            let node_r: &'a mut crate::map::Node<P, R>;
+            match cur {
+                UnionIndex::Both(l, r) => {
+                    unsafe {
+                        node_l = extend_lifetime_mut(&mut self.map_l.table[l]);
+                        node_r = extend_lifetime_mut(&mut self.map_r.table[r]);
+                    };
+                    self.nodes.extend(next_indices(
+                        self.map_l,
+                        self.map_r,
+                        node_l.right,
+                        node_r.right,
+                    ));
+                    self.nodes.extend(next_indices(
+                        self.map_l,
+                        self.map_r,
+                        node_l.left,
+                        node_r.left,
+                    ));
+                    if node_l.value.is_some() || node_r.value.is_some() {
+                        return Some((
+                            &node_l.prefix,
+                            node_l.value.as_mut(),
+                            node_r.value.as_mut(),
+                        ));
+                    }
+                }
+                UnionIndex::FirstL(l, r) => {
+                    unsafe {
+                        node_l = extend_lifetime_mut(&mut self.map_l.table[l]);
+                    };
+                    self.nodes.extend(next_indices_first_l(
+                        self.map_l,
+                        self.map_r,
+                        l,
+                        node_l.left,
+                        node_l.right,
+                        r,
+                    ));
+                    if node_l.value.is_some() {
+                        return Some((&node_l.prefix, node_l.value.as_mut(), None));
+                    }
+                }
+                UnionIndex::FirstR(l, r) => {
+                    unsafe {
+                        node_r = extend_lifetime_mut(&mut self.map_r.table[l]);
+                    };
+                    self.nodes.extend(next_indices_first_r(
+                        self.map_l,
+                        self.map_r,
+                        l,
+                        r,
+                        node_r.left,
+                        node_r.right,
+                    ));
+                    if node_r.value.is_some() {
+                        return Some((&node_r.prefix, None, node_r.value.as_mut()));
+                    }
+                }
+                UnionIndex::OnlyL(l) => {
+                    unsafe {
+                        node_l = extend_lifetime_mut(&mut self.map_l.table[l]);
+                    };
+                    if let Some(right) = node_l.right {
+                        self.nodes.push(UnionIndex::OnlyL(right));
+                    }
+                    if let Some(left) = node_l.left {
+                        self.nodes.push(UnionIndex::OnlyL(left));
+                    }
+                    if node_l.value.is_some() {
+                        return Some((&node_l.prefix, node_l.value.as_mut(), None));
+                    }
+                }
+                UnionIndex::OnlyR(r) => {
+                    unsafe {
+                        node_r = extend_lifetime_mut(&mut self.map_r.table[r]);
+                    };
+                    if let Some(right) = node_r.right {
+                        self.nodes.push(UnionIndex::OnlyR(right));
+                    }
+                    if let Some(left) = node_r.left {
+                        self.nodes.push(UnionIndex::OnlyR(left));
+                    }
+                    if node_r.value.is_some() {
+                        return Some((&node_r.prefix, None, node_r.value.as_mut()));
                     }
                 }
             }
