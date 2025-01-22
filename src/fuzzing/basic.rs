@@ -39,6 +39,69 @@ fn _new_mods(list: Vec<Operation<TestPrefix, i32>>) -> bool {
     pmap.into_iter().eq(hmap.into_iter().sorted())
 }
 
+qc!(equality, _equality);
+fn _equality(list: Vec<Operation<TestPrefix, i32>>) -> bool {
+    let mut map = PrefixMap::default();
+
+    for op in list {
+        match op {
+            Operation::Add(p, t) => {
+                map.insert(p, t);
+            }
+            Operation::Remove(p) => {
+                map.remove(&p);
+            }
+        }
+    }
+
+    let clone = map.clone().into_iter().collect::<PrefixMap<_, _>>();
+
+    // assert that the iterator of both is the same
+    map == clone && map.len() == clone.len() && map.is_empty() == clone.is_empty()
+}
+
+qc!(equality_keep_tree, _equality_keep_tree);
+fn _equality_keep_tree(list: Vec<Operation<TestPrefix, i32>>) -> bool {
+    let mut map = PrefixMap::default();
+
+    for op in list {
+        match op {
+            Operation::Add(p, t) => {
+                map.insert(p, t);
+            }
+            Operation::Remove(p) => {
+                map.remove_keep_tree(&p);
+            }
+        }
+    }
+
+    let clone = map.clone().into_iter().collect::<PrefixMap<_, _>>();
+
+    // assert that the iterator of both is the same
+    map == clone && map.len() == clone.len() && map.is_empty() == clone.is_empty()
+}
+
+qc!(equality_set, _equality_set);
+fn _equality_set(list: Vec<Operation<TestPrefix, ()>>) -> bool {
+    let mut set = PrefixSet::default();
+
+    for op in list {
+        match op {
+            Operation::Add(p, _) => {
+                set.insert(p);
+            }
+            Operation::Remove(p) => {
+                set.remove(&p);
+            }
+        }
+    }
+
+    let clone = set.iter().copied().collect::<PrefixSet<_>>();
+
+    // assert that the iterator of both is the same
+    set == clone && set.len() == clone.len() && set.is_empty() == clone.is_empty()
+}
+
 qc!(remove_children, _remove_children);
 fn _remove_children((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
     let want = select(&map, |p, _| !root.contains(p));
