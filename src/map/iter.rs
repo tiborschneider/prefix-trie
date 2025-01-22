@@ -379,7 +379,7 @@ where
     /// to both keys and values, i.e., type `(&'a P, &'a T)`. The iterator yields elements in
     /// lexicographic order.
     ///
-    /// **Note**: Consider using [`AsTrieView::view_at`] as an alternative.
+    /// **Note**: Consider using [`AsView::view_at`] as an alternative.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -414,7 +414,7 @@ where
     /// iterator yields references to the keys, and mutable references to the values, i.e., type
     /// `(&'a P, &'a mut T)`. The iterator yields elements in lexicographic order.
     ///
-    /// **Note**: Consider using [`AsTrieViewMut::view_mut_at`] as an alternative.
+    /// **Note**: Consider using [`AsViewMut::view_mut_at`] as an alternative.
     ///
     /// ```
     /// # use prefix_trie::*;
