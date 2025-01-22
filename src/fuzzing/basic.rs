@@ -43,7 +43,7 @@ qc!(remove_children, _remove_children);
 fn _remove_children((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
     let want = select(&map, |p, _| !root.contains(p));
     map.remove_children(&root);
-    map.len() == want.len() && map.into_iter().eq(want.into_iter())
+    map.len() == want.len() && map.into_iter().eq(want)
 }
 
 qc!(retain, _retain);
