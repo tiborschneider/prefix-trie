@@ -55,6 +55,6 @@ jobs:
     - name: Install nextest
       run: cargo install cargo-nextest
     - name: Run miri on libtests
-      run: cargo miri nextest run -j8
+      run: cargo miri nextest run -j4
     - name: Run miri on doctests
       run: cargo miri test --doc
