@@ -101,7 +101,7 @@ pub(crate) enum Direction {
     Reached,
     /// Enter the next index and search again.
     Enter { next: usize, right: bool },
-    /// The node was not found,
+    /// The node was not found.
     Missing,
 }
 

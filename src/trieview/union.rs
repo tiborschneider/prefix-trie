@@ -191,9 +191,14 @@ where
             nodes: extend_lpm(
                 self.table,
                 other.table,
-                self.table[self.idx].prefix_value(),
-                other.table[other.idx].prefix_value(),
-                next_indices(self.table, other.table, Some(self.idx), Some(other.idx)),
+                self.table[self.loc.idx()].prefix_value(),
+                other.table[other.loc.idx()].prefix_value(),
+                next_indices(
+                    self.table,
+                    other.table,
+                    Some(self.loc.idx()),
+                    Some(other.loc.idx()),
+                ),
             )
             .collect(),
         }
@@ -277,9 +282,14 @@ where
             nodes: extend_lpm(
                 self.table,
                 other.table,
-                self.table[self.idx].prefix_value(),
-                other.table[other.idx].prefix_value(),
-                next_indices(self.table, other.table, Some(self.idx), Some(other.idx)),
+                self.table[self.loc.idx()].prefix_value(),
+                other.table[other.loc.idx()].prefix_value(),
+                next_indices(
+                    self.table,
+                    other.table,
+                    Some(self.loc.idx()),
+                    Some(other.loc.idx()),
+                ),
             )
             .collect(),
         }
@@ -340,7 +350,12 @@ where
         other: impl AsViewMut<'b, P, R>,
     ) -> UnionMut<'b, P, L, R> {
         let other = other.view_mut();
-        let nodes = next_indices(self.table, other.table, Some(self.idx), Some(other.idx));
+        let nodes = next_indices(
+            self.table,
+            other.table,
+            Some(self.loc.idx()),
+            Some(other.loc.idx()),
+        );
         // Safety: We take the reference to the table from two TrieViewMut. Since they both have to
         // be created using TrieViewMut::new, we satisfy the conditions in `UnionMut::new`.
         unsafe { UnionMut::new(self.table, other.table, nodes) }

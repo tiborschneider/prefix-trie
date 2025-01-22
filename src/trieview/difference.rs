@@ -129,8 +129,8 @@ where
     ///     (net!("192.168.0.0/23"), "c"),
     ///     (net!("192.168.2.0/24"), "d"),
     /// ]);
-    /// let sub_a = map_a.view_at(&net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.view_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_a = map_a.view_at(net!("192.168.0.0/22")).unwrap();
+    /// let sub_b = map_b.view_at(net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(
     ///     sub_a.difference(sub_b).collect::<Vec<_>>(),
     ///     vec![
@@ -147,8 +147,13 @@ where
             table_r: other.table,
             nodes: extend_lpm(
                 other.table,
-                other.table[other.idx].prefix_value(),
-                next_indices(self.table, other.table, Some(self.idx), Some(other.idx)),
+                other.table[other.loc.idx()].prefix_value(),
+                next_indices(
+                    self.table,
+                    other.table,
+                    Some(self.loc.idx()),
+                    Some(other.loc.idx()),
+                ),
             )
             .collect(),
         }
@@ -187,7 +192,12 @@ where
         CoveringDifference {
             table_l: self.table,
             table_r: other.table,
-            nodes: next_indices(self.table, other.table, Some(self.idx), Some(other.idx)),
+            nodes: next_indices(
+                self.table,
+                other.table,
+                Some(self.loc.idx()),
+                Some(other.loc.idx()),
+            ),
         }
     }
 }
@@ -224,8 +234,8 @@ where
     ///     (net!("192.168.0.0/23"), "c"),
     ///     (net!("192.168.2.0/24"), "d"),
     /// ]);
-    /// let sub_a = map_a.view_mut_at(&net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.view_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_a = map_a.view_mut_at(net!("192.168.0.0/22")).unwrap();
+    /// let sub_b = map_b.view_at(net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(
     ///     sub_a.difference(sub_b).collect::<Vec<_>>(),
     ///     vec![
@@ -242,8 +252,13 @@ where
             table_r: other.table,
             nodes: extend_lpm(
                 other.table,
-                other.table[other.idx].prefix_value(),
-                next_indices(self.table, other.table, Some(self.idx), Some(other.idx)),
+                other.table[other.loc.idx()].prefix_value(),
+                next_indices(
+                    self.table,
+                    other.table,
+                    Some(self.loc.idx()),
+                    Some(other.loc.idx()),
+                ),
             )
             .collect(),
         }
@@ -282,7 +297,12 @@ where
         CoveringDifference {
             table_l: self.table,
             table_r: other.table,
-            nodes: next_indices(self.table, other.table, Some(self.idx), Some(other.idx)),
+            nodes: next_indices(
+                self.table,
+                other.table,
+                Some(self.loc.idx()),
+                Some(other.loc.idx()),
+            ),
         }
     }
 
@@ -315,8 +335,8 @@ where
     ///     (net!("192.168.2.0/24"), "d"),
     /// ]);
     ///
-    /// let mut sub_a = map_a.view_mut_at(&net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.view_at(&net!("192.168.0.0/22")).unwrap();
+    /// let mut sub_a = map_a.view_mut_at(net!("192.168.0.0/22")).unwrap();
+    /// let sub_b = map_b.view_at(net!("192.168.0.0/22")).unwrap();
     /// sub_a.difference_mut(sub_b).for_each(|x| *x.value += 10);
     ///
     /// assert_eq!(
@@ -337,8 +357,13 @@ where
         let other = other.view();
         let nodes = extend_lpm(
             other.table,
-            other.table[other.idx].prefix_value(),
-            next_indices(self.table, other.table, Some(self.idx), Some(other.idx)),
+            other.table[other.loc.idx()].prefix_value(),
+            next_indices(
+                self.table,
+                other.table,
+                Some(self.loc.idx()),
+                Some(other.loc.idx()),
+            ),
         )
         .collect();
         // Safety: `self` comes from a TrieViewMut. Assuming it satisfies all conditions from
@@ -384,7 +409,12 @@ where
         other: impl AsView<'b, P, R>,
     ) -> CoveringDifferenceMut<'b, P, L, R> {
         let other = other.view();
-        let nodes = next_indices(self.table, other.table, Some(self.idx), Some(other.idx));
+        let nodes = next_indices(
+            self.table,
+            other.table,
+            Some(self.loc.idx()),
+            Some(other.loc.idx()),
+        );
 
         // Safety: `self` comes from a TrieViewMut. Assuming it satisfies all conditions from
         // `TrieViewMut::new`, then `self.table` is the the only thing possibly referencing

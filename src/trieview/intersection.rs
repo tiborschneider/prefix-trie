@@ -68,8 +68,8 @@ where
     ///     (net!("192.168.0.0/24"), "d"),
     ///     (net!("192.168.2.0/24"), "e"),
     /// ]);
-    /// let sub_a = map_a.view_at(&net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.view_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_a = map_a.view_at(net!("192.168.0.0/22")).unwrap();
+    /// let sub_b = map_b.view_at(net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(
     ///     sub_a.intersection(sub_b).collect::<Vec<_>>(),
     ///     vec![
@@ -87,8 +87,8 @@ where
             nodes: Vec::from_iter(next_indices(
                 self.table,
                 other.table,
-                Some(self.idx),
-                Some(other.idx),
+                Some(self.loc.idx()),
+                Some(other.loc.idx()),
             )),
         }
     }
@@ -121,8 +121,8 @@ where
     ///     (net!("192.168.0.0/24"), "d"),
     ///     (net!("192.168.2.0/24"), "e"),
     /// ]);
-    /// let sub_a = map_a.view_mut_at(&net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.view_mut_at(&net!("192.168.0.0/22")).unwrap();
+    /// let sub_a = map_a.view_mut_at(net!("192.168.0.0/22")).unwrap();
+    /// let sub_b = map_b.view_mut_at(net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(
     ///     sub_a.intersection(sub_b).collect::<Vec<_>>(),
     ///     vec![
@@ -143,8 +143,8 @@ where
             nodes: Vec::from_iter(next_indices(
                 self.table,
                 other.table,
-                Some(self.idx),
-                Some(other.idx),
+                Some(self.loc.idx()),
+                Some(other.loc.idx()),
             )),
         }
     }
@@ -206,8 +206,8 @@ where
         let nodes = Vec::from_iter(next_indices(
             self.table,
             other.table,
-            Some(self.idx),
-            Some(other.idx),
+            Some(self.loc.idx()),
+            Some(other.loc.idx()),
         ));
         // Safety: Both `self` and `other` are `TrieViewMut`s, and must adhere to the safety
         // constraints in `TrieViewMut::new`.
