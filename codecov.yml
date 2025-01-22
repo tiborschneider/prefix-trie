@@ -1,3 +1,4 @@
 ignore:
-  - "src/fuzzing/*.rs"
+  - "src/fuzzing"
   - "src/test.rs"
+  - "examples"
