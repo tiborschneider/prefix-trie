@@ -44,11 +44,21 @@
 //! traversals. They will yield elements in lexicographic order. Whenever appropriate, the yielded
 //! items will also include the longest prefix match.
 //!
-//! # [`TrieView`]s
+//! # [`TrieView`] and [`TrieViewMut`]
 //!
-//! You can create a view of a (sub)-trie. Such a view has an arbitrary node as its root. Any
-//! operations on that view will only traverse that node and all its children. You can iterate over
-//! all children, search in that sub-trie, and perform set operations on them.
+//! You can create a view of a (sub)-trie. Such a view has an any node as its root. Any operations
+//! on that view will only traverse that node and all its children. You can iterate over all
+//! children, search in that sub-trie, and perform set operations (union, intersection, difference,
+//! or the covering difference) on them.
+//!
+//! A view can point to one of three possible nodes:
+//! - A node in the tree that is actually present in the map,
+//! - A branching node that does not exist in the map, but is needed for the tree structure (or that
+//!   was deleted using the function `remove_keep_tree`)
+//! - A virtual node that does not exist as a node in the tree. This is only the case if you call
+//!   [`PrefixView::find`] or [`AsView::view_at`] with a node that is not present in the tree, but
+//!   that contains elements present in the tree. Virtual nodes are treated as if they are actually
+//!   present in the tree as branching nodes.
 //!
 //! # Operations on the tree
 //!
@@ -59,16 +69,17 @@
 //! The following are the computational complexities of the functions, where `n` is the number of
 //! elements in the tree.
 //!
-//! | Operation                                 | Complexity |
-//! |-------------------------------------------|------------|
-//! | `entry`, `insert`                         | `O(log n)` |
-//! | `remove`, `remove_keep_tree`              | `O(log n)` |
-//! | `remove_children` (calling `drop` on `T`) | `O(n)`     |
-//! | `get`, `get_lpm`, `get_mut`               | `O(log n)` |
-//! | `retain`                                  | `O(n)`     |
-//! | `clear` (calling `drop` on `T`)           | `O(n)`     |
-//! | Operations on [`map::Entry`]              | `O(1)`     |
-//! | `len` and `is_empty`                      | `O(1)`     |
+//! | Operation                                  | Complexity |
+//! |--------------------------------------------|------------|
+//! | `entry`, `insert`                          | `O(log n)` |
+//! | `remove`, `remove_keep_tree`               | `O(log n)` |
+//! | `remove_children` (calling `drop` on `T`)  | `O(n)`     |
+//! | `get`, `get_lpm`, `get_mut`                | `O(log n)` |
+//! | `retain`                                   | `O(n)`     |
+//! | `clear` (calling `drop` on `T`)            | `O(n)`     |
+//! | Operations on [`map::Entry`]               | `O(1)`     |
+//! | `len` and `is_empty`                       | `O(1)`     |
+//! | `union`, `intersection`, `difference`, ... | `O(n)`     |
 //!
 //! There are three kinds of removals you! can do:
 //!
