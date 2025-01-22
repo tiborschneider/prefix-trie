@@ -93,6 +93,8 @@
 #![deny(missing_docs)]
 
 mod fmt;
+#[cfg(test)]
+mod fuzzing;
 pub(crate) mod inner;
 mod prefix;
 #[cfg(feature = "serde")]
