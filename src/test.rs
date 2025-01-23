@@ -604,3 +604,27 @@ fn test_spm_vs_lpm_all_routes() {
         &Ipv4Net::from_str("192.168.0.0/24").unwrap()
     );
 }
+
+#[test]
+fn test_remove_iter_mut() {
+    use std::str::FromStr;
+
+    let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+        (Ipv4Net::from_str("192.168.0.0/20").unwrap(), 1),
+        (Ipv4Net::from_str("192.168.0.0/22").unwrap(), 2),
+        (Ipv4Net::from_str("192.168.0.0/24").unwrap(), 3),
+        (Ipv4Net::from_str("192.168.2.0/23").unwrap(), 4),
+        (Ipv4Net::from_str("192.168.4.0/22").unwrap(), 5),
+    ]);
+    let mut view = map
+        .view_mut_at(Ipv4Net::from_str("192.168.0.0/22").unwrap())
+        .unwrap();
+
+    view.remove();
+
+    let x = view.into_iter().collect::<Vec<_>>();
+    println!("{:?}", *x[0].0);
+    println!("{:?}", *x[0].1);
+    println!("{:?}", *x[1].0);
+    println!("{:?}", *x[1].1);
+}

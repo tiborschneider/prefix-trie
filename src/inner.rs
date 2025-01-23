@@ -122,7 +122,21 @@ impl<P, T> Table<P, T> {
     /// reference to that node (neither mutable nor immutable).
     #[allow(clippy::mut_from_ref)]
     pub(crate) unsafe fn get_mut(&self, idx: usize) -> &mut Node<P, T> {
-        unsafe { &mut self.0.get().as_mut().unwrap()[idx] }
+        // old implementation that caused issues with Miri:
+        // unsafe { &mut self.0.get().as_mut().unwrap()[idx] }
+
+        // new implementation based on manually offsetting the pointers:
+        unsafe {
+            // do the bounds check
+            let len = self.0.get().as_ref().unwrap().len();
+            if idx >= len {
+                panic!("index out of bounds: the len is {len} but the index is {idx}");
+            }
+
+            let ptr_to_slice = self.0.get().as_ref().unwrap().as_ptr();
+            let ptr_to_elem = ptr_to_slice.add(idx);
+            (ptr_to_elem as *mut Node<P, T>).as_mut().unwrap()
+        }
     }
 }
 
