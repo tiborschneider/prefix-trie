@@ -128,14 +128,15 @@ impl<P, T> Table<P, T> {
         // new implementation based on manually offsetting the pointers:
         unsafe {
             // do the bounds check
-            let len = self.0.get().as_ref().unwrap().len();
-            if idx >= len {
-                panic!("index out of bounds: the len is {len} but the index is {idx}");
+            let raw = self.0.get().as_mut().unwrap();
+            // do the bounds check
+            if idx >= raw.len() {
+                panic!(
+                    "index out of bounds: the len is {} but the index is {idx}",
+                    raw.len()
+                );
             }
-
-            let ptr_to_slice = self.0.get().as_ref().unwrap().as_ptr();
-            let ptr_to_elem = ptr_to_slice.add(idx);
-            (ptr_to_elem as *mut Node<P, T>).as_mut().unwrap()
+            raw.as_mut_ptr().add(idx).as_mut().unwrap()
         }
     }
 }
