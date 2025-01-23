@@ -33,8 +33,8 @@ for more details.
 In addition, `prefix-trie` includes a `PrefixSet` analogous to `std::collections::HashSet`,
 including union, intersection and difference operations that are implemented as simultaneous
 tree traversals. Further, `prefix-trie` has an interface similar to `std::collections`, and
-includes methods for accessing all children of a node. Finally, it offers a general
-longest-prefix match that is not limited to individual addresses.
+offers a general longest-prefix match that is not limited to individual addresses. Finally,
+`prefix-trie` allows you to (mutably) borrow a sub-trie using views.
 
 ## Description of the Tree
 
