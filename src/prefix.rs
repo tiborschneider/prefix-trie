@@ -1,7 +1,7 @@
 //! Description of the generic type `Prefix`.
 
 #[cfg(feature = "cidr")]
-use cidr::{Ipv4Cidr, Ipv6Cidr};
+use cidr::{Ipv4Cidr, Ipv6Cidr, Ipv4Inet, Ipv6Inet};
 #[cfg(feature = "ipnet")]
 use ipnet::{Ipv4Net, Ipv6Net};
 #[cfg(feature = "ipnetwork")]
@@ -234,6 +234,7 @@ impl Prefix for Ipv4Cidr {
     }
 
     fn from_repr_len(repr: Self::R, len: u8) -> Self {
+        let repr = repr & mask_from_prefix_len::<Self::R>(len);
         Self::new(repr.into(), len).unwrap()
     }
 
@@ -259,11 +260,54 @@ impl Prefix for Ipv6Cidr {
     }
 
     fn from_repr_len(repr: Self::R, len: u8) -> Self {
+        let repr = repr & mask_from_prefix_len::<Self::R>(len);
         Self::new(repr.into(), len).unwrap()
     }
 
     fn mask(&self) -> Self::R {
         self.mask().into()
+    }
+
+    fn eq(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
+#[cfg(feature = "cidr")]
+impl Prefix for Ipv4Inet {
+    type R = u32;
+
+    fn repr(&self) -> Self::R {
+        self.address().into()
+    }
+
+    fn prefix_len(&self) -> u8 {
+        self.network_length()
+    }
+
+    fn from_repr_len(repr: Self::R, len: u8) -> Self {
+        Self::new(repr.into(), len).unwrap()
+    }
+
+    fn eq(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
+#[cfg(feature = "cidr")]
+impl Prefix for Ipv6Inet {
+    type R = u128;
+
+    fn repr(&self) -> Self::R {
+        self.address().into()
+    }
+
+    fn prefix_len(&self) -> u8 {
+        self.network_length()
+    }
+
+    fn from_repr_len(repr: Self::R, len: u8) -> Self {
+        Self::new(repr.into(), len).unwrap()
     }
 
     fn eq(&self, other: &Self) -> bool {
