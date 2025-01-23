@@ -83,6 +83,20 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
         }
     }
 
+    /// Get the element in both the left and right map, but only if they are both present. By
+    /// doing `a.union(b).filter_map(|x| x.both)`, you get an iterator that yields only elements
+    /// that are present in both tries.
+    pub fn both(&self) -> Option<(&'a P, &'a L, &'a R)> {
+        match self {
+            UnionItem::Left { .. } | UnionItem::Right { .. } => None,
+            UnionItem::Both {
+                prefix,
+                left,
+                right,
+            } => Some((prefix, left, right)),
+        }
+    }
+
     /// Get the value of the left item (`self`). This either returns the exact match or the
     /// longest-prefix match.
     pub fn left(&self) -> Option<(&'a P, &'a L)> {
@@ -124,8 +138,8 @@ where
     /// [`UnionItem`].
     ///
     /// **Warning**: The iterator will only yield elements of the given TrieViews. If either of the
-    /// two TrieViews is pointing to a branching node, then the longest prefix match returned may be
-    /// `None`, even though it exists in the larger tree.
+    /// two TrieViews is pointing to a branching or a virtual node, then the longest prefix match
+    /// returned may be `None`, even though it exists in the larger tree.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -139,12 +153,10 @@ where
     ///     (net!("192.168.0.0/20"), 1),
     ///     (net!("192.168.0.0/22"), 2),
     ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
     /// ]);
     /// let mut map_b: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
     ///     (net!("192.168.0.0/22"), "a"),
     ///     (net!("192.168.0.0/23"), "b"),
-    ///     (net!("192.168.2.0/24"), "c"),
     /// ]);
     /// assert_eq!(
     ///     map_a.view().union(&map_b).collect::<Vec<_>>(),
@@ -168,16 +180,6 @@ where
     ///             prefix: &net!("192.168.0.0/24"),
     ///             left: &3,
     ///             right: Some((&net!("192.168.0.0/23"), &"b")),
-    ///         },
-    ///         UnionItem::Left{
-    ///             prefix: &net!("192.168.2.0/23"),
-    ///             left: &4,
-    ///             right: Some((&net!("192.168.0.0/22"), &"a")),
-    ///         },
-    ///         UnionItem::Right{
-    ///             prefix: &net!("192.168.2.0/24"),
-    ///             left: Some((&net!("192.168.2.0/23"), &4)),
-    ///             right: &"c",
     ///         },
     ///     ]
     /// );
@@ -209,92 +211,6 @@ impl<P, L> TrieViewMut<'_, P, L>
 where
     P: Prefix,
 {
-    /// Iterate over the union of two views. If a prefix is present in both trees, the iterator
-    /// will yield both elements. Otherwise, the iterator will yield the element of one TrieView
-    /// together with the longest prefix match in the other TrieView. Elements are of type
-    /// [`UnionItem`].
-    ///
-    /// **Warning**: The iterator will only yield elements of the given TrieViews. If either of the
-    /// two TrieViews is pointing to a branching node, then the longest prefix match returned may be
-    /// `None`, even though it exists in the larger tree.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::UnionItem;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    /// ]);
-    /// let mut map_b: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/22"), "a"),
-    ///     (net!("192.168.0.0/23"), "b"),
-    ///     (net!("192.168.2.0/24"), "c"),
-    /// ]);
-    /// assert_eq!(
-    ///     map_a.view_mut().union(&map_b).collect::<Vec<_>>(),
-    ///     vec![
-    ///         UnionItem::Left{
-    ///             prefix: &net!("192.168.0.0/20"),
-    ///             left: &1,
-    ///             right: None,
-    ///         },
-    ///         UnionItem::Both{
-    ///             prefix: &net!("192.168.0.0/22"),
-    ///             left: &2,
-    ///             right: &"a",
-    ///         },
-    ///         UnionItem::Right{
-    ///             prefix: &net!("192.168.0.0/23"),
-    ///             left: Some((&net!("192.168.0.0/22"), &2)),
-    ///             right: &"b",
-    ///         },
-    ///         UnionItem::Left{
-    ///             prefix: &net!("192.168.0.0/24"),
-    ///             left: &3,
-    ///             right: Some((&net!("192.168.0.0/23"), &"b")),
-    ///         },
-    ///         UnionItem::Left{
-    ///             prefix: &net!("192.168.2.0/23"),
-    ///             left: &4,
-    ///             right: Some((&net!("192.168.0.0/22"), &"a")),
-    ///         },
-    ///         UnionItem::Right{
-    ///             prefix: &net!("192.168.2.0/24"),
-    ///             left: Some((&net!("192.168.2.0/23"), &4)),
-    ///             right: &"c",
-    ///         },
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    pub fn union<'b, R>(&'b self, other: impl AsView<'b, P, R>) -> Union<'b, P, L, R> {
-        let other = other.view();
-        Union {
-            table_l: self.table,
-            table_r: other.table,
-            nodes: extend_lpm(
-                self.table,
-                other.table,
-                self.table[self.loc.idx()].prefix_value(),
-                other.table[other.loc.idx()].prefix_value(),
-                next_indices(
-                    self.table,
-                    other.table,
-                    Some(self.loc.idx()),
-                    Some(other.loc.idx()),
-                ),
-            )
-            .collect(),
-        }
-    }
-
     /// Iterate over the union of two views. If a prefix is present in both trees, the iterator
     /// will yield mutable references to both elements. Longest prefix matches are not returned.
     ///

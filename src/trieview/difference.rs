@@ -106,8 +106,8 @@ where
     /// `other`.
     ///
     /// **Warning**: The iterator will only yield elements of the given views. If `other` points to
-    /// a branching node, then the longest prefix match returned may be `None`, even though it
-    /// exists in the original map referenced by `other`.
+    /// a branching or a virtual node, then the longest prefix match returned may be `None`, even
+    /// though it exists in the original map referenced by `other`.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -206,106 +206,6 @@ impl<P, L> TrieViewMut<'_, P, L>
 where
     P: Prefix,
 {
-    /// Iterate over the all elements in `self` that are not present in `other`. Each item will
-    /// return a reference to the prefix and value in `self`, as well as the longest prefix match of
-    /// `other`.
-    ///
-    /// **Warning**: The iterator will only yield elements of the given views. If `other` points to
-    /// a branching node, then the longest prefix match returned may be `None`, even though it
-    /// exists in the original map referenced by `other`.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::DifferenceItem;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    /// ]);
-    /// let mut map_b: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), "a"),
-    ///     (net!("192.168.0.0/22"), "b"),
-    ///     (net!("192.168.0.0/23"), "c"),
-    ///     (net!("192.168.2.0/24"), "d"),
-    /// ]);
-    /// let sub_a = map_a.view_mut_at(net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.view_at(net!("192.168.0.0/22")).unwrap();
-    /// assert_eq!(
-    ///     sub_a.difference(sub_b).collect::<Vec<_>>(),
-    ///     vec![
-    ///         DifferenceItem { prefix: &net!("192.168.0.0/24"), value: &3, right: Some((&net!("192.168.0.0/23"), &"c"))},
-    ///         DifferenceItem { prefix: &net!("192.168.2.0/23"), value: &4, right: Some((&net!("192.168.0.0/22"), &"b"))},
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    pub fn difference<'b, R>(&'b self, other: impl AsView<'b, P, R>) -> Difference<'b, P, L, R> {
-        let other = other.view();
-        Difference {
-            table_l: self.table,
-            table_r: other.table,
-            nodes: extend_lpm(
-                other.table,
-                other.table[other.loc.idx()].prefix_value(),
-                next_indices(
-                    self.table,
-                    other.table,
-                    Some(self.loc.idx()),
-                    Some(other.loc.idx()),
-                ),
-            )
-            .collect(),
-        }
-    }
-
-    /// Iterate over all elements in `self` that are not not covered in `other`. In other words,
-    /// only items of `self` are yielded for which there does not exist a prefix in `other` that
-    /// covers it.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/22"), 1),
-    ///     (net!("192.168.0.0/24"), 2),
-    ///     (net!("192.168.2.0/23"), 3),
-    /// ]);
-    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     net!("192.168.0.0/23"),
-    /// ]);
-    /// assert_eq!(
-    ///     map_a.view_mut().covering_difference(&set_b).collect::<Vec<_>>(),
-    ///     vec![(&net!("192.168.0.0/22"), &1), (&net!("192.168.2.0/23"), &3)],
-    /// );
-    /// # }
-    /// ```
-    pub fn covering_difference<'b, R>(
-        &'b self,
-        other: impl AsView<'b, P, R>,
-    ) -> CoveringDifference<'b, P, L, R> {
-        let other = other.view();
-        CoveringDifference {
-            table_l: self.table,
-            table_r: other.table,
-            nodes: next_indices(
-                self.table,
-                other.table,
-                Some(self.loc.idx()),
-                Some(other.loc.idx()),
-            ),
-        }
-    }
-
     /// Iterate over the all elements in `self` that are not present in `other`. Each item will
     /// return a reference to the prefix and a mutable reference to the value in `self`, as well as
     /// the longest prefix match of `other` (with an immutable reference).

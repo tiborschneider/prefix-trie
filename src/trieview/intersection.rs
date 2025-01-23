@@ -99,57 +99,6 @@ where
     P: Prefix,
 {
     /// Iterate over the union of both Views. Each element will yield a reference to the prefix and
-    /// the value stored in `self` and `other` (if the prefix is in both views).
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    /// ]);
-    /// let mut map_b: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), "a"),
-    ///     (net!("192.168.0.0/22"), "b"),
-    ///     (net!("192.168.0.0/23"), "c"),
-    ///     (net!("192.168.0.0/24"), "d"),
-    ///     (net!("192.168.2.0/24"), "e"),
-    /// ]);
-    /// let sub_a = map_a.view_mut_at(net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.view_mut_at(net!("192.168.0.0/22")).unwrap();
-    /// assert_eq!(
-    ///     sub_a.intersection(sub_b).collect::<Vec<_>>(),
-    ///     vec![
-    ///         (&net!("192.168.0.0/22"), &2, &"b"),
-    ///         (&net!("192.168.0.0/24"), &3, &"d"),
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    pub fn intersection<'b, R>(
-        &'b self,
-        other: impl AsView<'b, P, R>,
-    ) -> Intersection<'b, P, L, R> {
-        let other = other.view();
-        Intersection {
-            table_l: self.table,
-            table_r: other.table,
-            nodes: Vec::from_iter(next_indices(
-                self.table,
-                other.table,
-                Some(self.loc.idx()),
-                Some(other.loc.idx()),
-            )),
-        }
-    }
-
-    /// Iterate over the union of both Views. Each element will yield a reference to the prefix and
     /// mutable references to the values stored in `self` and `other` (if the prefix is in both
     /// views).
     ///

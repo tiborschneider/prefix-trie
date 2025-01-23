@@ -28,7 +28,7 @@ impl<'a, P: Prefix, T> AsView<'a, P, T> for TrieView<'a, P, T> {
     }
 }
 
-impl<'a, P: Prefix + Clone, T> AsView<'a, P, T> for TrieViewMut<'a, P, T> {
+impl<'b: 'a, 'a, P: Prefix + Clone, T> AsView<'a, P, T> for &'a TrieViewMut<'b, P, T> {
     fn view(self) -> TrieView<'a, P, T> {
         TrieView {
             table: self.table,
@@ -475,6 +475,39 @@ impl<'a, P: Prefix> AsViewMut<'a, P, ()> for &'a mut PrefixSet<P> {
 }
 
 /// A mutable view of a prefix-trie rooted at a specific node.
+///
+/// **Note**: You can get a `TrieView` from `TrieViewMut` by calling [`AsView::view`]. This will
+/// create a view that has an immutable reference to the mutable view. This allows you to temprarily
+/// borrow the subtrie immutably (to perform set operations). Once all references are dropped, you
+/// can still use the mutable reference.
+///
+/// ```
+/// # use prefix_trie::*;
+/// # #[cfg(feature = "ipnet")]
+/// # macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+/// # #[cfg(feature = "ipnet")]
+/// # {
+/// # let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+/// #     (net!("192.168.0.0/20"), 1),
+/// #     (net!("192.168.0.0/22"), 2),
+/// #     (net!("192.168.0.0/24"), 3),
+/// #     (net!("192.168.2.0/23"), 4),
+/// # ]);
+/// # let other: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+/// #     (net!("192.168.0.0/22"), 10),
+/// #     (net!("192.168.0.0/23"), 20),
+/// #     (net!("192.168.2.0/24"), 30),
+/// # ]);
+/// let mut view: TrieViewMut<_, _> = // ...;
+/// # map.view_mut();
+/// // find the first element that is in the view and in another map.
+/// if let Some((p, _, _)) = view.view().union(&other).find_map(|u| u.both()) {
+///     // remove that element from the map.
+///     let p = p.clone();
+///     view.find(p).unwrap().remove();
+/// }
+/// # }
+/// ```
 ///
 /// The view can point to one of three possible things:
 /// - A node in the tree that is actually present in the map,
