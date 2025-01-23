@@ -182,7 +182,7 @@ fn _covering_difference((a, b): (PrefixMap<TestPrefix, i32>, PrefixMap<TestPrefi
 
 qc!(covering_difference_mut, _covering_difference_mut);
 fn _covering_difference_mut(
-    (a, b): (PrefixMap<TestPrefix, i32>, PrefixMap<TestPrefix, i32>),
+    (mut a, b): (PrefixMap<TestPrefix, i32>, PrefixMap<TestPrefix, i32>),
 ) -> bool {
     let mut difference_set: HashMap<TestPrefix, i32> = HashMap::new();
     for (p, a) in a.iter() {
@@ -193,8 +193,8 @@ fn _covering_difference_mut(
 
     let want = difference_set.into_iter().sorted().collect::<Vec<_>>();
     let got = a
-        .view()
-        .covering_difference(&b)
+        .view_mut()
+        .covering_difference_mut(&b)
         .map(|(p, t)| (*p, *t))
         .collect::<Vec<_>>();
 
