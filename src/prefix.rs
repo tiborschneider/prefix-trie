@@ -238,6 +238,10 @@ impl Prefix for Ipv4Cidr {
         Self::new(repr.into(), len).unwrap()
     }
 
+    fn mask(&self) -> Self::R {
+        self.first_address().into()
+    }
+
     fn eq(&self, other: &Self) -> bool {
         self == other
     }
@@ -260,6 +264,10 @@ impl Prefix for Ipv6Cidr {
         Self::new(repr.into(), len).unwrap()
     }
 
+    fn mask(&self) -> Self::R {
+        self.first_address().into()
+    }
+
     fn eq(&self, other: &Self) -> bool {
         self == other
     }
@@ -275,6 +283,10 @@ impl Prefix for Ipv4Inet {
 
     fn prefix_len(&self) -> u8 {
         self.network_length()
+    }
+
+    fn mask(&self) -> Self::R {
+        self.first_address().into()
     }
 
     fn from_repr_len(repr: Self::R, len: u8) -> Self {
@@ -296,6 +308,10 @@ impl Prefix for Ipv6Inet {
 
     fn prefix_len(&self) -> u8 {
         self.network_length()
+    }
+
+    fn mask(&self) -> Self::R {
+        self.first_address().into()
     }
 
     fn from_repr_len(repr: Self::R, len: u8) -> Self {
