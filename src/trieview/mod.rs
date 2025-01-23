@@ -279,6 +279,33 @@ where
 
     /// Get the left branch at the current view. The right branch contains all prefix that are
     /// contained within `self.prefix()`, and for which the next bit is set to 0.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
+    ///     net!("1.0.0.0/8"),
+    ///     net!("1.0.0.0/16"),
+    ///     net!("1.0.128.0/17"),
+    ///     net!("1.1.0.0/16"),
+    /// ]);
+    ///
+    /// let view = map.view_at(net!("1.0.0.0/8")).unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
+    ///
+    /// let view = view.left().unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
+    ///
+    /// let view = view.left().unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/16"));
+    ///
+    /// assert!(view.left().is_none());
+    /// # }
+    /// ```
     pub fn left(&self) -> Option<Self> {
         match &self.loc {
             ViewLoc::Node(idx) => Some(Self {
@@ -301,6 +328,34 @@ where
 
     /// Get the right branch at the current view. The right branch contains all prefix that are
     /// contained within `self.prefix()`, and for which the next bit is set to 1.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
+    ///     net!("1.0.0.0/8"),
+    ///     net!("1.0.0.0/16"),
+    ///     net!("1.1.0.0/16"),
+    ///     net!("1.1.0.0/24"),
+    /// ]);
+    ///
+    /// let view = map.view_at(net!("1.0.0.0/8")).unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
+    ///
+    /// assert!(view.right().is_none());
+    /// let view = view.left().unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
+    ///
+    /// let view = view.right().unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.1.0.0/16"));
+    ///
+    /// assert!(view.right().is_none());
+    /// # }
+    /// ```
     pub fn right(&self) -> Option<Self> {
         match &self.loc {
             ViewLoc::Node(idx) => Some(Self {
@@ -773,6 +828,33 @@ where
     /// Get the left branch at the current view. The right branch contains all prefix that are
     /// contained within `self.prefix()`, and for which the next bit is set to 0. If the node has no
     /// children to the left, the function will return the previous view as `Err(self)`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
+    ///     net!("1.0.0.0/8"),
+    ///     net!("1.0.0.0/16"),
+    ///     net!("1.0.128.0/17"),
+    ///     net!("1.1.0.0/16"),
+    /// ]);
+    ///
+    /// let view = map.view_mut_at(net!("1.0.0.0/8")).unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
+    ///
+    /// let view = view.left().unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
+    ///
+    /// let view = view.left().unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/16"));
+    ///
+    /// assert!(view.left().is_err());
+    /// # }
+    /// ```
     pub fn left(self) -> Result<Self, Self> {
         // Safety: We assume `self` was created while satisfying the safety conditions from
         // `TrieViewMut::new`. Thus, `self` is the only TrieView referencing that root. Here, we
@@ -801,6 +883,36 @@ where
     /// Get the right branch at the current view. The right branch contains all prefix that are
     /// contained within `self.prefix()`, and for which the next bit is set to 1. If the node has no
     /// children to the right, the function will return the previous view as `Err(self)`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
+    ///     net!("1.0.0.0/8"),
+    ///     net!("1.0.0.0/16"),
+    ///     net!("1.1.0.0/16"),
+    ///     net!("1.1.0.0/24"),
+    /// ]);
+    ///
+    /// let view = map.view_mut_at(net!("1.0.0.0/8")).unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
+    ///
+    /// let view = view.right().unwrap_err(); // there is no view on the right.
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
+    ///
+    /// let view = view.left().unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
+    ///
+    /// let view = view.right().unwrap();
+    /// assert_eq!(view.prefix(), &net!("1.1.0.0/16"));
+    ///
+    /// assert!(view.right().is_err());
+    /// # }
+    /// ```
     pub fn right(self) -> Result<Self, Self> {
         // Safety: We assume `self` was created while satisfying the safety conditions from
         // `TrieViewMut::new`. Thus, `self` is the only TrieView referencing that root. Here, we
@@ -827,6 +939,23 @@ where
     }
 
     /// Returns `True` whether `self` has children to the left.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
+    ///     net!("1.0.0.0/8"),
+    ///     net!("1.0.0.0/9"),
+    /// ]);
+    ///
+    /// assert!(map.view_mut_at(net!("1.0.0.0/8")).unwrap().has_left());
+    /// assert!(!map.view_mut_at(net!("1.0.0.0/9")).unwrap().has_left());
+    /// # }
+    /// ```
     pub fn has_left(&self) -> bool {
         match &self.loc {
             ViewLoc::Node(idx) => self.table[*idx].left.is_some(),
@@ -838,6 +967,23 @@ where
     }
 
     /// Returns `True` whether `self` has children to the right.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
+    ///     net!("1.0.0.0/8"),
+    ///     net!("1.128.0.0/9"),
+    /// ]);
+    ///
+    /// assert!(map.view_mut_at(net!("1.0.0.0/8")).unwrap().has_right());
+    /// assert!(!map.view_mut_at(net!("1.128.0.0/9")).unwrap().has_right());
+    /// # }
+    /// ```
     pub fn has_right(&self) -> bool {
         match &self.loc {
             ViewLoc::Node(idx) => self.table[*idx].right.is_some(),
@@ -857,29 +1003,22 @@ where
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/21"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    ///     (net!("192.168.4.0/22"), 5),
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
+    ///     (net!("1.0.0.0/8"), "a"),
+    ///     (net!("1.0.0.0/9"), "b"),
+    ///     (net!("1.128.0.0/9"), "c"),
+    ///     (net!("1.128.0.0/10"), "d"),
     /// ]);
-    /// let view = map.view_mut_at(net!("192.168.0.0/21")).unwrap();
-    /// assert!(view.has_left());
-    /// assert!(view.has_right());
-    /// let (Some(left), Some(right)) = view.split() else { unreachable!() };
-    /// assert_eq!(
-    ///     left.iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (&net!("192.168.0.0/22"), &2),
-    ///         (&net!("192.168.0.0/24"), &3),
-    ///         (&net!("192.168.2.0/23"), &4),
-    ///     ],
-    /// );
-    /// assert_eq!(
-    ///     right.iter().collect::<Vec<_>>(),
-    ///     vec![(&net!("192.168.4.0/22"), &5)],
-    /// );
+    ///
+    /// let view_at_a = map.view_mut_at(net!("1.0.0.0/8")).unwrap();
+    /// assert_eq!(view_at_a.value(), Some(&"a"));
+    ///
+    /// let (Some(view_at_b), Some(view_at_c)) = view_at_a.split() else { unreachable!() };
+    /// assert_eq!(view_at_b.value(), Some(&"b"));
+    /// assert_eq!(view_at_c.value(), Some(&"c"));
+    ///
+    /// let (Some(view_at_d), None) = view_at_c.split() else { unreachable!() };
+    /// assert_eq!(view_at_d.value(), Some(&"d"));
     /// # }
     /// ```
     pub fn split(self) -> (Option<Self>, Option<Self>) {
@@ -911,13 +1050,34 @@ where
 
 impl<P, T> TrieViewMut<'_, P, T> {
     /// Iterate over all elements in the given view (including the element itself), in
-    /// lexicographic order.
-    pub fn iter(&self) -> Iter<'_, P, T> {
-        Iter::new(self.table, vec![self.loc.idx()])
-    }
-
-    /// Iterate over all elements in the given view (including the element itself), in
     /// lexicographic order, with a mutable reference to the value.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("1.0.0.0/8"), 1),
+    ///     (net!("1.0.0.0/16"), 2),
+    ///     (net!("1.0.1.0/24"), 3),
+    ///     (net!("1.1.0.0/16"), 4),
+    /// ]);
+    ///
+    /// map.view_mut_at(net!("1.0.0.0/16")).unwrap().iter_mut().for_each(|(_, x)| *x *= 10);
+    /// assert_eq!(
+    ///     map.into_iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         (net!("1.0.0.0/8"), 1),
+    ///         (net!("1.0.0.0/16"), 20),
+    ///         (net!("1.0.1.0/24"), 30),
+    ///         (net!("1.1.0.0/16"), 4),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
     pub fn iter_mut(&mut self) -> IterMut<'_, P, T> {
         // Safety: Here, we assume the TrieView was created using the `TrieViewMut::new` function,
         // and that the safety conditions from that function were satisfied. These safety conditions
@@ -926,20 +1086,35 @@ impl<P, T> TrieViewMut<'_, P, T> {
         unsafe { IterMut::new(self.table, vec![self.loc.idx()]) }
     }
 
-    /// Iterate over all keys in the given view (including the element itself), in lexicographic
-    /// order.
-    pub fn keys(&self) -> Keys<'_, P, T> {
-        Keys { inner: self.iter() }
-    }
-
-    /// Iterate over all values in the given view (including the element itself), in lexicographic
-    /// order.
-    pub fn values(&self) -> Values<'_, P, T> {
-        Values { inner: self.iter() }
-    }
-
     /// Iterate over mutable references to all values in the given view (including the element
     /// itself), in lexicographic order.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    ///     (net!("192.168.2.0/23"), 4),
+    /// ]);
+    ///
+    /// map.view_mut_at(net!("192.168.0.0/22")).unwrap().values_mut().for_each(|x| *x *= 10);
+    /// assert_eq!(
+    ///     map.into_iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         (net!("192.168.0.0/20"), 1),
+    ///         (net!("192.168.0.0/22"), 20),
+    ///         (net!("192.168.0.0/24"), 30),
+    ///         (net!("192.168.2.0/23"), 40),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
     pub fn values_mut(&mut self) -> ValuesMut<'_, P, T> {
         ValuesMut {
             inner: self.iter_mut(),
@@ -1105,10 +1280,10 @@ impl<P, T> TrieViewMut<'_, P, T> {
     /// let mut view = map.view_mut_at(net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(view.remove(), Some(2));
     /// assert_eq!(
-    ///     view.iter().collect::<Vec<_>>(),
+    ///     view.into_iter().collect::<Vec<_>>(),
     ///     vec![
-    ///         (&net!("192.168.0.0/24"), &3),
-    ///         (&net!("192.168.2.0/23"), &4),
+    ///         (&net!("192.168.0.0/24"), &mut 3),
+    ///         (&net!("192.168.2.0/23"), &mut 4),
     ///     ]
     /// );
     /// assert_eq!(
@@ -1151,11 +1326,11 @@ impl<P, T> TrieViewMut<'_, P, T> {
     /// let mut view = map.view_mut_at(net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(view.set(20), Ok(Some(2)));
     /// assert_eq!(
-    ///     view.iter().collect::<Vec<_>>(),
+    ///     view.into_iter().collect::<Vec<_>>(),
     ///     vec![
-    ///         (&net!("192.168.0.0/22"), &20),
-    ///         (&net!("192.168.0.0/24"), &3),
-    ///         (&net!("192.168.2.0/23"), &4),
+    ///         (&net!("192.168.0.0/22"), &mut 20),
+    ///         (&net!("192.168.0.0/24"), &mut 3),
+    ///         (&net!("192.168.2.0/23"), &mut 4),
     ///     ]
     /// );
     /// assert_eq!(
