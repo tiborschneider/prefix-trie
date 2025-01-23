@@ -404,9 +404,28 @@ impl<'a, P, T> TrieView<'a, P, T> {
     pub fn values(&self) -> Values<'a, P, T> {
         Values { inner: self.iter() }
     }
+
     /// Get a reference to the prefix that is currently pointed at. This prefix might not exist
     /// explicitly in the map/set, but may be used as a branching node (or when you call
     /// `remove_keep_tree`).
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    /// ]);
+    ///
+    /// assert_eq!(map.view_at(net!("192.168.0.0/20")).unwrap().prefix(), &net!("192.168.0.0/20"));
+    /// assert_eq!(map.view_at(net!("192.168.0.0/21")).unwrap().prefix(), &net!("192.168.0.0/21"));
+    /// assert_eq!(map.view_at(net!("192.168.0.0/22")).unwrap().prefix(), &net!("192.168.0.0/22"));
+    /// # }
+    /// ```
     pub fn prefix(&self) -> &P {
         match &self.loc {
             ViewLoc::Node(idx) => &self.table[*idx].prefix,
@@ -416,6 +435,24 @@ impl<'a, P, T> TrieView<'a, P, T> {
 
     /// Get a reference to the value at the root of the current view. This function may return
     /// `None` if `self` is pointing at a branching node.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    /// ]);
+    ///
+    /// assert_eq!(map.view_at(net!("192.168.0.0/20")).unwrap().value(), Some(&1));
+    /// assert_eq!(map.view_at(net!("192.168.0.0/21")).unwrap().value(), None);
+    /// assert_eq!(map.view_at(net!("192.168.0.0/22")).unwrap().value(), Some(&2));
+    /// # }
+    /// ```
     pub fn value(&self) -> Option<&'a T> {
         match &self.loc {
             ViewLoc::Node(idx) => self.table[*idx].value.as_ref(),
@@ -425,6 +462,26 @@ impl<'a, P, T> TrieView<'a, P, T> {
 
     /// Get a reference to both the prefix and the value. This function may return `None` if either
     /// `self` is pointing at a branching node.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    /// ]);
+    ///
+    /// assert_eq!(
+    ///     map.view_at(net!("192.168.0.0/20")).unwrap().prefix_value(),
+    ///     Some((&net!("192.168.0.0/20"), &1))
+    /// );
+    /// assert_eq!(map.view_at(net!("192.168.0.0/21")).unwrap().prefix_value(), None);
+    /// # }
+    /// ```
     pub fn prefix_value(&self) -> Option<(&'a P, &'a T)> {
         match &self.loc {
             ViewLoc::Node(idx) => self.table[*idx].prefix_value(),
@@ -892,6 +949,24 @@ impl<P, T> TrieViewMut<'_, P, T> {
     /// Get a reference to the prefix that is currently pointed at. This prefix might not exist
     /// explicitly in the map/set. Instead, it might be a branching or a virtual node. In both
     /// cases, this function returns the prefix of that node.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("1.0.0.0/20"), 1),
+    ///     (net!("1.0.0.0/22"), 2),
+    /// ]);
+    ///
+    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/20")).unwrap().prefix(), &net!("1.0.0.0/20"));
+    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/21")).unwrap().prefix(), &net!("1.0.0.0/21"));
+    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/22")).unwrap().prefix(), &net!("1.0.0.0/22"));
+    /// # }
+    /// ```
     pub fn prefix(&self) -> &P {
         match &self.loc {
             ViewLoc::Node(idx) => &self.table[*idx].prefix,
@@ -901,6 +976,24 @@ impl<P, T> TrieViewMut<'_, P, T> {
 
     /// Get a reference to the value at the root of the current view. This function may return
     /// `None` if `self` is pointing at a branching or a virtual node.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("1.0.0.0/20"), 1),
+    ///     (net!("1.0.0.0/22"), 2),
+    /// ]);
+    ///
+    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/20")).unwrap().value(), Some(&1));
+    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/21")).unwrap().value(), None);
+    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/22")).unwrap().value(), Some(&2));
+    /// # }
+    /// ```
     pub fn value(&self) -> Option<&T> {
         match &self.loc {
             ViewLoc::Node(idx) => self.table[*idx].value.as_ref(),
@@ -921,12 +1014,48 @@ impl<P, T> TrieViewMut<'_, P, T> {
 
     /// Get a mutable reference to the value at the root of the current view. This function may
     /// return `None` if `self` is pointing at a branching node.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("1.0.0.0/20"), 1),
+    ///     (net!("1.0.0.0/22"), 2),
+    /// ]);
+    /// *map.view_mut_at(net!("1.0.0.0/22")).unwrap().value_mut().unwrap() *= 10;
+    /// assert_eq!(Vec::from_iter(map), vec![(net!("1.0.0.0/20"), 1), (net!("1.0.0.0/22"), 20)]);
+    /// # }
+    /// ```
     pub fn value_mut(&mut self) -> Option<&mut T> {
         self.node_mut()?.value.as_mut()
     }
 
     /// Get a reference to both the prefix and the value. This function may return `None` if either
     /// `self` is pointing at a branching node.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    /// ]);
+    ///
+    /// assert_eq!(
+    ///     map.view_mut_at(net!("192.168.0.0/20")).unwrap().prefix_value(),
+    ///     Some((&net!("192.168.0.0/20"), &1))
+    /// );
+    /// assert_eq!(map.view_mut_at(net!("192.168.0.0/21")).unwrap().prefix_value(), None);
+    /// # }
+    /// ```
     pub fn prefix_value(&self) -> Option<(&P, &T)> {
         match &self.loc {
             ViewLoc::Node(idx) => self.table[*idx].prefix_value(),
@@ -936,6 +1065,22 @@ impl<P, T> TrieViewMut<'_, P, T> {
 
     /// Get a reference to both the prefix and the value (the latter is mutable). This function may
     /// return `None` if either `self` is pointing at a branching node.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("1.0.0.0/20"), 1),
+    ///     (net!("1.0.0.0/22"), 2),
+    /// ]);
+    /// *map.view_mut_at(net!("1.0.0.0/22")).unwrap().prefix_value_mut().unwrap().1 *= 10;
+    /// assert_eq!(Vec::from_iter(map), vec![(net!("1.0.0.0/20"), 1), (net!("1.0.0.0/22"), 20)]);
+    /// # }
+    /// ```
     pub fn prefix_value_mut(&mut self) -> Option<(&P, &mut T)> {
         self.node_mut()?.prefix_value_mut()
     }
