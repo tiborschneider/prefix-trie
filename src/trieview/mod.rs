@@ -852,16 +852,6 @@ where
     }
 }
 
-impl<P: Clone, T> TrieViewMut<'_, P, T> {
-    /// Return an immutable view of the current subtrie.
-    pub fn view(&self) -> TrieView<'_, P, T> {
-        TrieView {
-            table: self.table,
-            loc: self.loc.clone(),
-        }
-    }
-}
-
 impl<P, T> TrieViewMut<'_, P, T> {
     /// Iterate over all elements in the given view (including the element itself), in
     /// lexicographic order.
@@ -989,6 +979,57 @@ impl<P, T> TrieViewMut<'_, P, T> {
     /// ```
     pub fn remove(&mut self) -> Option<T> {
         self.node_mut()?.value.take()
+    }
+
+    /// Set the value of the node currently pointed at. This operation fails if the current view
+    /// points at a virtual node, returning `Err(value)`. In such a case, you may want to go to the
+    /// next node (e.g., using [`TrieViewMut::split`]).
+    ///
+    /// This is an implementation detail of mutable views. Since you can have multiple different
+    /// mutable views pointing to different parts in the tree, it is not safe to modify the tree
+    /// structure itself.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/20"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    ///     (net!("192.168.2.0/23"), 4),
+    ///     (net!("192.168.4.0/22"), 5),
+    /// ]);
+    /// let mut view = map.view_mut_at(net!("192.168.0.0/22")).unwrap();
+    /// assert_eq!(view.set(20), Ok(Some(2)));
+    /// assert_eq!(
+    ///     view.iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         (&net!("192.168.0.0/22"), &20),
+    ///         (&net!("192.168.0.0/24"), &3),
+    ///         (&net!("192.168.2.0/23"), &4),
+    ///     ]
+    /// );
+    /// assert_eq!(
+    ///     map.into_iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         (net!("192.168.0.0/20"), 1),
+    ///         (net!("192.168.0.0/22"), 20),
+    ///         (net!("192.168.0.0/24"), 3),
+    ///         (net!("192.168.2.0/23"), 4),
+    ///         (net!("192.168.4.0/22"), 5),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    pub fn set(&mut self, value: T) -> Result<Option<T>, T> {
+        match self.node_mut() {
+            Some(n) => Ok(n.value.replace(value)),
+            None => Err(value),
+        }
     }
 }
 
