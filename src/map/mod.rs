@@ -12,6 +12,9 @@ pub use entry::*;
 pub use iter::*;
 
 /// Prefix map implemented as a prefix tree.
+///
+/// You can perform union, intersection, and (covering) difference operations by first creating a
+/// view over the map using [`crate::AsView`] or [`crate::AsViewMut`].
 #[derive(Clone)]
 pub struct PrefixMap<P, T> {
     pub(crate) table: Table<P, T>,

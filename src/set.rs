@@ -1,13 +1,12 @@
 //! PrefixSet, that is implemened as a simple binary tree, based on the [`PrefixMap`].
 
-use crate::{
-    map::CoverKeys,
-    trieview::{CoveringDifference, Difference, Intersection, Union},
-    AsView, Prefix, PrefixMap,
-};
+use crate::{map::CoverKeys, Prefix, PrefixMap};
 
 /// Set of prefixes, organized in a tree. This strucutre gives efficient access to the longest
 /// prefix in the set that contains another prefix.
+///
+/// You can perform union, intersection, and (covering) difference operations by first creating a
+/// view over the map using [`crate::AsView`] or [`crate::AsViewMut`].
 #[derive(Clone)]
 pub struct PrefixSet<P>(pub(crate) PrefixMap<P, ()>);
 
@@ -244,140 +243,6 @@ impl<P: Prefix> PrefixSet<P> {
         F: FnMut(&P) -> bool,
     {
         let _ = self.0._retain(0, None, false, None, false, |p, _| f(p));
-    }
-
-    /// Return an iterator that traverses both trees simultaneously and yields the union of both
-    /// sets in lexicographic order. See [`crate::TrieView::union`] for more information.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set_a: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     "192.168.0.0/22".parse()?,
-    ///     "192.168.0.0/24".parse()?,
-    ///     "192.168.2.0/23".parse()?,
-    /// ]);
-    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     "192.168.0.0/22".parse()?,
-    ///     "192.168.0.0/23".parse()?,
-    ///     "192.168.2.0/24".parse()?,
-    /// ]);
-    /// assert_eq!(
-    ///     set_a.union(&set_b).map(|x| *x.prefix()).collect::<Vec<_>>(),
-    ///     vec![
-    ///         "192.168.0.0/22".parse()?,
-    ///         "192.168.0.0/23".parse()?,
-    ///         "192.168.0.0/24".parse()?,
-    ///         "192.168.2.0/23".parse()?,
-    ///         "192.168.2.0/24".parse()?,
-    ///     ]
-    /// );
-    /// # Ok(())
-    /// # }
-    /// # #[cfg(not(feature = "ipnet"))]
-    /// # fn main() {}
-    /// ```
-    pub fn union<'a, R>(&'a self, other: impl AsView<'a, P, R>) -> Union<'a, P, (), R> {
-        self.view().union(other)
-    }
-
-    /// Return an iterator that traverses both trees simultaneously and yields the intersection of
-    /// both sets in lexicographic order. See [`crate::TrieView::intersection`] for more
-    /// information.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set_a: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     "192.168.0.0/22".parse()?,
-    ///     "192.168.0.0/24".parse()?,
-    ///     "192.168.2.0/23".parse()?,
-    /// ]);
-    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     "192.168.0.0/22".parse()?,
-    ///     "192.168.0.0/24".parse()?,
-    ///     "192.168.2.0/24".parse()?,
-    /// ]);
-    /// assert_eq!(
-    ///     set_a.intersection(&set_b).map(|(p, _, _)| *p).collect::<Vec<_>>(),
-    ///     vec!["192.168.0.0/22".parse()?, "192.168.0.0/24".parse()?]
-    /// );
-    /// # Ok(())
-    /// # }
-    /// # #[cfg(not(feature = "ipnet"))]
-    /// # fn main() {}
-    /// ```
-    pub fn intersection<'a, R>(
-        &'a self,
-        other: impl AsView<'a, P, R>,
-    ) -> Intersection<'a, P, (), R> {
-        self.view().intersection(other)
-    }
-
-    /// Return an iterator that traverses both trees simultaneously and yields the difference of
-    /// both sets in lexicographic order. See [`crate::TrieView::difference`] for more information.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set_a: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     "192.168.0.0/22".parse()?,
-    ///     "192.168.0.0/24".parse()?,
-    ///     "192.168.2.0/23".parse()?,
-    ///     "192.168.2.0/24".parse()?,
-    /// ]);
-    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     "192.168.0.0/22".parse()?,
-    ///     "192.168.0.0/24".parse()?,
-    ///     "192.168.2.0/24".parse()?,
-    /// ]);
-    /// assert_eq!(
-    ///     set_a.difference(&set_b).map(|x| *x.prefix).collect::<Vec<_>>(),
-    ///     vec!["192.168.2.0/23".parse()?]
-    /// );
-    /// # Ok(())
-    /// # }
-    /// # #[cfg(not(feature = "ipnet"))]
-    /// # fn main() {}
-    /// ```
-    pub fn difference<'a, R>(&'a self, other: impl AsView<'a, P, R>) -> Difference<'a, P, (), R> {
-        self.view().difference(other)
-    }
-
-    /// Return an iterator that traverses both trees simultaneously and yields the difference of
-    /// both sets in lexicographic order. Only elements of `self` are yielded that are not covered
-    /// by any prefix in `other`. See [`crate::TrieView::covering_difference`] for more information.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set_a: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     "192.168.0.0/22".parse()?,
-    ///     "192.168.0.0/24".parse()?,
-    ///     "192.168.2.0/23".parse()?,
-    ///     "192.168.2.0/24".parse()?,
-    /// ]);
-    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     "192.168.2.0/23".parse()?,
-    /// ]);
-    /// assert_eq!(
-    ///     set_a.covering_difference(&set_b).map(|(p, _)| *p).collect::<Vec<_>>(),
-    ///     vec!["192.168.0.0/22".parse()?, "192.168.0.0/24".parse()?]
-    /// );
-    /// # Ok(())
-    /// # }
-    /// # #[cfg(not(feature = "ipnet"))]
-    /// # fn main() {}
-    /// ```
-    pub fn covering_difference<'a, R>(
-        &'a self,
-        other: impl AsView<'a, P, R>,
-    ) -> CoveringDifference<'a, P, (), R> {
-        self.view().covering_difference(other)
     }
 
     /// Get an iterator over the node itself and all children. All elements returned have a prefix
