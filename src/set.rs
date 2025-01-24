@@ -49,6 +49,25 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.contains_key(prefix)
     }
 
+    /// Get a reference to the stored prefix. This function allows you to retrieve the host part of
+    /// the prefix. The returned prefix will always have the same network address and prefix length.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// set.insert("192.168.0.254/24".parse()?);
+    /// assert_eq!(set.get(&"192.168.0.0/24".parse()?), Some(&"192.168.0.254/24".parse()?));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn get<'a>(&'a self, prefix: &P) -> Option<&'a P> {
+        self.0.get_key_value(prefix).map(|(p, _)| p)
+    }
+
     /// Get the longest prefix in the set that contains the given preifx.
     ///
     /// ```
@@ -98,6 +117,9 @@ impl<P: Prefix> PrefixSet<P> {
     /// Returns whether the value was newly inserted. That is:
     /// - If the set did not previously contain this value, `true` is returned.
     /// - If the set already contained this value, `false` is returned.
+    ///
+    /// This operation will always replace the currently stored prefix. This allows you to store
+    /// additional information in the host aprt of the prefix.
     ///
     /// ```
     /// # use prefix_trie::*;

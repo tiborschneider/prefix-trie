@@ -36,6 +36,19 @@ impl<P, T> Node<P, T> {
 /// mutability is only ever provided in `get_mut`.
 pub(crate) struct Table<P, T>(UnsafeCell<Vec<Node<P, T>>>);
 
+// Safety:
+// - Sending a PrefixMap over thread boundary is fine. No-one besides us can have the raw pointer,
+//   otherwise, the map would be borrowed.
+// - Sending a reference of PrefixMap over thread boundaries (i.e., TrieView is Send) is safe,
+//   because we ensure that the existence of a TrieView on a sub-tree implies the absence of a
+//   TrieViewMut that overlaps with that sub-tree.
+// - Sending a mutable reference of PrefixMap over thread boundaries (i.e., TrieView is Send) is
+//   safe, because we ensure that the existence of a TrieViewMut on a sub-tree implies the absence
+//   of any other TrieView or TrieViewMut that overlaps with that sub-tree.
+// The same argument holds for Sync.
+unsafe impl<P: Send, T: Send> Send for Table<P, T> {}
+unsafe impl<P: Sync, T: Sync> Sync for Table<P, T> {}
+
 impl<P, T> AsRef<Vec<Node<P, T>>> for Table<P, T> {
     fn as_ref(&self) -> &Vec<Node<P, T>> {
         // Safety: We own an immutable reference to the table.
@@ -128,15 +141,13 @@ impl<P, T> Table<P, T> {
         // new implementation based on manually offsetting the pointers:
         unsafe {
             // do the bounds check
-            let raw = self.0.get().as_mut().unwrap();
-            // do the bounds check
-            if idx >= raw.len() {
-                panic!(
-                    "index out of bounds: the len is {} but the index is {idx}",
-                    raw.len()
-                );
+            let len = self.0.get().as_ref().unwrap().len();
+            if idx >= len {
+                panic!("index out of bounds: the len is {len} but the index is {idx}");
             }
-            raw.as_mut_ptr().add(idx).as_mut().unwrap()
+            let ptr_to_slice = self.0.get().as_ref().unwrap().as_ptr();
+            let ptr_to_elem = ptr_to_slice.add(idx);
+            (ptr_to_elem as *mut Node<P, T>).as_mut().unwrap()
         }
     }
 }

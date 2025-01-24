@@ -9,7 +9,7 @@ use ipnetwork::{Ipv4Network, Ipv6Network};
 use num_traits::{CheckedShr, PrimInt, Unsigned, Zero};
 
 /// Trait for defining prefixes.
-pub trait Prefix: Sized {
+pub trait Prefix: Sized + std::fmt::Debug {
     /// How can the prefix be represented. This must be one of `u8`, `u16`, `u32`, `u64`, or `u128`.
     type R: Unsigned + PrimInt + Zero + CheckedShr;
 
@@ -259,7 +259,7 @@ impl Prefix for Ipv6Cidr {
 
 impl<R> Prefix for (R, u8)
 where
-    R: Unsigned + PrimInt + Zero + CheckedShr,
+    R: Unsigned + PrimInt + Zero + CheckedShr + std::fmt::Debug,
 {
     type R = R;
 
@@ -273,10 +273,6 @@ where
 
     fn from_repr_len(repr: R, len: u8) -> Self {
         (repr, len)
-    }
-
-    fn eq(&self, other: &Self) -> bool {
-        self == other
     }
 }
 

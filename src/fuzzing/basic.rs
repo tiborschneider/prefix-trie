@@ -39,6 +39,28 @@ fn _new_mods(list: Vec<Operation<TestPrefix, i32>>) -> bool {
     pmap.into_iter().eq(hmap.into_iter().sorted())
 }
 
+qc!(new_mods_entry, _new_mods_entry);
+fn _new_mods_entry(list: Vec<Operation<TestPrefix, i32>>) -> bool {
+    let mut pmap = PrefixMap::new();
+    let mut hmap = HashMap::new();
+
+    for op in list {
+        match op {
+            Operation::Add(p, t) => {
+                let _ = pmap.entry(p).insert(t);
+                hmap.insert(p, t);
+            }
+            Operation::Remove(p) => {
+                pmap.remove(&p);
+                hmap.remove(&p);
+            }
+        }
+    }
+
+    // assert that the iterator of both is the same
+    pmap.into_iter().eq(hmap.into_iter().sorted())
+}
+
 qc!(equality, _equality);
 fn _equality(list: Vec<Operation<TestPrefix, i32>>) -> bool {
     let mut map = PrefixMap::default();

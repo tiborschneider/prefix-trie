@@ -112,7 +112,8 @@ where
         }
     }
 
-    /// Get the value of an element by matching exactly on the prefix.
+    /// Get the value of an element by matching exactly on the prefix. Notice, that the returned
+    /// prefix may differ from the one provided in the host-part of the address.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -329,6 +330,9 @@ where
     /// Insert a new item into the prefix-map. This function may return any value that existed
     /// before.
     ///
+    /// In case the node already exists in the tree, its prefix will be replaced by the provided
+    /// argument. This allows you to store additional information in the host part of the prefix.
+    ///
     /// ```
     /// # use prefix_trie::*;
     /// # #[cfg(feature = "ipnet")]
@@ -350,6 +354,8 @@ where
                 DirectionForInsert::Reached => {
                     let mut inc = 0;
                     let node = &mut self.table[idx];
+                    // replace the prefix
+                    node.prefix = prefix;
                     let old_value = node.value.take();
                     if old_value.is_none() {
                         inc = 1;
@@ -385,7 +391,10 @@ where
         }
     }
 
-    /// Gets the given key’s corresponding entry in the map for in-place manipulation.
+    /// Gets the given key’s corresponding entry in the map for in-place manipulation. In case you
+    /// eventually insert an element into the map, this operation will also replace the prefix in
+    /// the node with the existing one. That is if you store additional information in the host part
+    /// of the address (the one that is masked out).
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -410,6 +419,7 @@ where
                 DirectionForInsert::Reached if self.table[idx].value.is_some() => {
                     return Entry::Occupied(OccupiedEntry {
                         node: &mut self.table[idx],
+                        prefix,
                     })
                 }
                 direction => {

@@ -111,8 +111,8 @@ pub(crate) mod inner;
 mod prefix;
 #[cfg(feature = "serde")]
 mod serde;
-#[cfg(test)]
 #[cfg(feature = "ipnet")]
+#[cfg(test)]
 mod test;
 
 pub mod map;

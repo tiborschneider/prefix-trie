@@ -23,6 +23,7 @@ pub struct VacantEntry<'a, P, T> {
 /// present on the tree.
 pub struct OccupiedEntry<'a, P, T> {
     pub(super) node: &'a mut Node<P, T>,
+    pub(super) prefix: P, // needed to replace the prefix on the thing if we perform insert.
 }
 
 impl<P, T> Entry<'_, P, T> {
@@ -99,7 +100,8 @@ impl<'a, P, T> Entry<'a, P, T>
 where
     P: Prefix,
 {
-    /// Replace the current entry, and return the entry that was stored before.
+    /// Replace the current entry, and return the entry that was stored before. This will also
+    /// replace the key with the one provided to the `entry` function.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -125,7 +127,7 @@ where
                 e._insert(v);
                 None
             }
-            Entry::Occupied(e) => e.node.value.replace(v),
+            Entry::Occupied(e) => Some(e.insert(v)),
         }
     }
 
@@ -256,6 +258,7 @@ where
                 // `map` mutably in the next line.
                 self.map.count += 1;
                 let node = &mut self.map.table[self.idx];
+                node.prefix = self.prefix;
                 debug_assert!(node.value.is_none());
                 node.value = Some(v);
                 node
@@ -289,7 +292,8 @@ where
 }
 
 impl<P, T> OccupiedEntry<'_, P, T> {
-    /// Gets a reference to the key in the entry.
+    /// Gets a reference to the key in the entry. This is the key that is currently stored, and not
+    /// the key that was used in the insert.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -298,7 +302,7 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
-    /// match pm.entry("192.168.1.0/24".parse()?) {
+    /// match pm.entry("192.168.1.1/24".parse()?) {
     ///     Entry::Occupied(e) => assert_eq!(e.key(), &"192.168.1.0/24".parse()?),
     ///     Entry::Vacant(_) => unreachable!(),
     /// }
@@ -336,6 +340,10 @@ impl<P, T> OccupiedEntry<'_, P, T> {
 
     /// Gets a mutable reference to the value in the entry.
     ///
+    /// This call will not modify the prefix stored in the tree. In case the prefix used to create
+    /// the entry is different from the stored one (has additional information in the host part),
+    /// and you wish that prefix to be overwritten, use `insert`.
+    ///
     /// ```
     /// # use prefix_trie::*;
     /// use prefix_trie::map::Entry;
@@ -358,7 +366,8 @@ impl<P, T> OccupiedEntry<'_, P, T> {
         self.node.value.as_mut().unwrap()
     }
 
-    /// Insert a new value into the entry, returning the old value.
+    /// Insert a new value into the entry, returning the old value. This operation will also replace
+    /// the prefix with the provided one.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -378,11 +387,13 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn insert(&mut self, value: T) -> T {
+    pub fn insert(self, value: T) -> T {
+        self.node.prefix = self.prefix;
         self.node.value.replace(value).unwrap()
     }
 
-    /// Remove the current value and return it.
+    /// Remove the current value and return it. The tree will not be modified (the same effect as
+    /// `PrefixMap::remove_keep_tree`).
     ///
     /// ```
     /// # use prefix_trie::*;
