@@ -111,7 +111,6 @@ mod prefix;
 #[cfg(feature = "serde")]
 mod serde;
 #[cfg(test)]
-#[cfg(feature = "ipnet")]
 mod test;
 
 pub mod map;
