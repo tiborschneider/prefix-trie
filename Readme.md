@@ -10,8 +10,9 @@
 
 This crate provides a simple prefix tree for IP prefixes. Any lookup performs longest-prefix
 match. This crate supports both IPv4 and IPv6 (from either [ipnet](https://docs.rs/ipnet/2.10.0)
-or [ipnetwork](https://crates.io/crates/ipnetwork)). It also supports any tuple `(R, u8)`, where 
-`R` is any unsigned primitive integer (`u8`, `u16`, `u32`, `u64`, `u128`, or `usize`).
+or [ipnetwork](https://crates.io/crates/ipnetwork) or [cidr](https://crates.io/crates/cidr)).
+It also  supports any tuple `(R, u8)`, where `R` is any unsigned primitive integer (`u8`, `u16`,
+`u32`, `u64`, `u128`, or `usize`).
 
 ## Comparison with related projects
 
