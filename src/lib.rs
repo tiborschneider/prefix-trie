@@ -110,6 +110,7 @@ pub(crate) mod inner;
 mod prefix;
 #[cfg(feature = "serde")]
 mod serde;
+#[cfg(feature = "ipnet")]
 #[cfg(test)]
 mod test;
 
