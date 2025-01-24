@@ -1305,6 +1305,9 @@ impl<P, T> TrieViewMut<'_, P, T> {
     /// points at a virtual node, returning `Err(value)`. In such a case, you may want to go to the
     /// next node (e.g., using [`TrieViewMut::split`]).
     ///
+    /// This operation will only modify the value, and keep the prefix unchanged (in contrast to
+    /// `PrefixMap::insert`).
+    ///
     /// This is an implementation detail of mutable views. Since you can have multiple different
     /// mutable views pointing to different parts in the tree, it is not safe to modify the tree
     /// structure itself.

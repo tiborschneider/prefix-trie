@@ -7,7 +7,7 @@ use ipnetwork::{Ipv4Network, Ipv6Network};
 use num_traits::{CheckedShr, PrimInt, Unsigned, Zero};
 
 /// Trait for defining prefixes.
-pub trait Prefix: Sized {
+pub trait Prefix: Sized + std::fmt::Debug {
     /// How can the prefix be represented. This must be one of `u8`, `u16`, `u32`, `u64`, or `u128`.
     type R: Unsigned + PrimInt + Zero + CheckedShr;
 
@@ -99,10 +99,6 @@ impl Prefix for Ipv4Net {
         Ipv4Net::new(repr.into(), len).unwrap()
     }
 
-    fn eq(&self, other: &Self) -> bool {
-        self == other
-    }
-
     fn mask(&self) -> u32 {
         self.network().into()
     }
@@ -140,10 +136,6 @@ impl Prefix for Ipv6Net {
 
     fn from_repr_len(repr: u128, len: u8) -> Self {
         Ipv6Net::new(repr.into(), len).unwrap()
-    }
-
-    fn eq(&self, other: &Self) -> bool {
-        self == other
     }
 
     fn mask(&self) -> u128 {
@@ -185,10 +177,6 @@ impl Prefix for Ipv4Network {
         Ipv4Network::new(repr.into(), len).unwrap()
     }
 
-    fn eq(&self, other: &Self) -> bool {
-        self == other
-    }
-
     fn mask(&self) -> u32 {
         self.network().into()
     }
@@ -210,10 +198,6 @@ impl Prefix for Ipv6Network {
         Ipv6Network::new(repr.into(), len).unwrap()
     }
 
-    fn eq(&self, other: &Self) -> bool {
-        self == other
-    }
-
     fn mask(&self) -> u128 {
         self.network().into()
     }
@@ -221,7 +205,7 @@ impl Prefix for Ipv6Network {
 
 impl<R> Prefix for (R, u8)
 where
-    R: Unsigned + PrimInt + Zero + CheckedShr,
+    R: Unsigned + PrimInt + Zero + CheckedShr + std::fmt::Debug,
 {
     type R = R;
 
@@ -235,10 +219,6 @@ where
 
     fn from_repr_len(repr: R, len: u8) -> Self {
         (repr, len)
-    }
-
-    fn eq(&self, other: &Self) -> bool {
-        self == other
     }
 }
 

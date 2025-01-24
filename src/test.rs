@@ -628,3 +628,77 @@ fn test_remove_iter_mut() {
     println!("{:?}", *x[1].0);
     println!("{:?}", *x[1].1);
 }
+
+#[test]
+fn insert_with_host_part() {
+    let mut set = PrefixSet::new();
+    set.insert(ip("192.168.0.254/24"));
+    set.insert(ip("192.168.1.254/24"));
+    // Now, we have a branching node at 192.168.0.0/23 with that address.
+    set.insert(ip("192.168.0.254/23"));
+    // This will not overwrite the address
+    assert_eq!(
+        Vec::from_iter(set),
+        vec![
+            ip("192.168.0.254/23"),
+            ip("192.168.0.254/24"),
+            ip("192.168.1.254/24"),
+        ]
+    );
+}
+
+#[test]
+fn replace_with_host_part() {
+    let mut set = PrefixSet::new();
+    set.insert(ip("192.168.0.0/24"));
+    set.insert(ip("192.168.0.1/24"));
+    // This will not overwrite the address
+    assert_eq!(Vec::from_iter(set), vec![ip("192.168.0.1/24"),]);
+}
+
+#[test]
+fn entry_with_host_part() {
+    let mut set = PrefixMap::new();
+    set.insert(ip("192.168.0.254/24"), 1);
+    set.insert(ip("192.168.1.254/24"), 2);
+    println!("{set:?}");
+    // Now, we have a branching node at 192.168.0.0/23 with that address.
+    set.entry(ip("192.168.0.254/23")).or_insert(3);
+    println!("{set:?}");
+    // This will not overwrite the address
+    assert_eq!(
+        Vec::from_iter(set),
+        vec![
+            (ip("192.168.0.254/23"), 3),
+            (ip("192.168.0.254/24"), 1),
+            (ip("192.168.1.254/24"), 2),
+        ]
+    );
+}
+
+#[test]
+fn replace_entry_with_host_part() {
+    let mut map = PrefixMap::new();
+    map.insert(ip("192.168.0.0/24"), 0);
+    map.entry(ip("192.168.0.1/24")).insert(0);
+    // This will not overwrite the address
+    assert_eq!(Vec::from_iter(map), vec![(ip("192.168.0.1/24"), 0)]);
+}
+
+#[test]
+fn from_iter_with_host_part() {
+    let set = PrefixSet::from_iter([
+        ip("192.168.0.254/24"),
+        ip("192.168.1.0/24"),
+        ip("192.168.0.254/23"),
+        ip("192.168.1.254/24"),
+    ]);
+    assert_eq!(
+        Vec::from_iter(set),
+        vec![
+            ip("192.168.0.254/23"),
+            ip("192.168.0.254/24"),
+            ip("192.168.1.254/24"),
+        ]
+    );
+}
