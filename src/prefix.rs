@@ -1,7 +1,7 @@
 //! Description of the generic type `Prefix`.
 
 #[cfg(feature = "cidr")]
-use cidr::{Ipv4Cidr, Ipv6Cidr, Ipv4Inet, Ipv6Inet};
+use cidr::{Ipv4Cidr, Ipv6Cidr};
 #[cfg(feature = "ipnet")]
 use ipnet::{Ipv4Net, Ipv6Net};
 #[cfg(feature = "ipnetwork")]
