@@ -737,4 +737,12 @@ mod t {
     #[cfg(feature = "cidr")]
     #[instantiate_tests(<cidr::Ipv6Cidr>)]
     mod ipv6cidr {}
+
+    #[cfg(feature = "cidr")]
+    #[instantiate_tests(<cidr::Ipv4Inet>)]
+    mod ipv4inet {}
+
+    #[cfg(feature = "cidr")]
+    #[instantiate_tests(<cidr::Ipv6Inet>)]
+    mod ipv6inet {}
 }

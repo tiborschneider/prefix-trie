@@ -1,7 +1,7 @@
 //! Description of the generic type `Prefix`.
 
 #[cfg(feature = "cidr")]
-use cidr::{Ipv4Cidr, Ipv6Cidr};
+use cidr::{Ipv4Cidr, Ipv4Inet, Ipv6Cidr, Ipv6Inet};
 #[cfg(feature = "ipnet")]
 use ipnet::{Ipv4Net, Ipv6Net};
 #[cfg(feature = "ipnetwork")]
@@ -225,10 +225,6 @@ impl Prefix for Ipv4Cidr {
     fn mask(&self) -> Self::R {
         self.first_address().into()
     }
-
-    fn eq(&self, other: &Self) -> bool {
-        self == other
-    }
 }
 
 #[cfg(feature = "cidr")]
@@ -251,9 +247,47 @@ impl Prefix for Ipv6Cidr {
     fn mask(&self) -> Self::R {
         self.first_address().into()
     }
+}
 
-    fn eq(&self, other: &Self) -> bool {
-        self == other
+#[cfg(feature = "cidr")]
+impl Prefix for Ipv4Inet {
+    type R = u32;
+
+    fn repr(&self) -> Self::R {
+        self.address().into()
+    }
+
+    fn prefix_len(&self) -> u8 {
+        self.network_length()
+    }
+
+    fn from_repr_len(repr: Self::R, len: u8) -> Self {
+        Self::new(repr.into(), len).unwrap()
+    }
+
+    fn mask(&self) -> Self::R {
+        self.network().first_address().into()
+    }
+}
+
+#[cfg(feature = "cidr")]
+impl Prefix for Ipv6Inet {
+    type R = u128;
+
+    fn repr(&self) -> Self::R {
+        self.address().into()
+    }
+
+    fn prefix_len(&self) -> u8 {
+        self.network_length()
+    }
+
+    fn from_repr_len(repr: Self::R, len: u8) -> Self {
+        Self::new(repr.into(), len).unwrap()
+    }
+
+    fn mask(&self) -> Self::R {
+        self.network().first_address().into()
     }
 }
 
@@ -376,6 +410,27 @@ mod test {
         }
 
         #[test]
+        fn keep_host_addr<P: Prefix + 'static>() {
+            #[allow(unused_mut)]
+            let mut prefix_is_masked = false;
+            #[cfg(feature = "cidr")]
+            {
+                let p_id = std::any::TypeId::of::<P>();
+                // Ipv4Cidr and Ipv6Cidr addresses are always masked.
+                prefix_is_masked = p_id == std::any::TypeId::of::<cidr::Ipv4Cidr>()
+                    || p_id == std::any::TypeId::of::<cidr::Ipv6Cidr>();
+            }
+            let mask = 0xffff0000u32;
+            for mut x in [0x01001234u32, 0x010fabcdu32, 0xffff5678u32] {
+                let prefix: P = new(x, 16);
+                if prefix_is_masked {
+                    x &= mask;
+                }
+                assert_eq!(<u32 as NumCast>::from(prefix.repr()), Some(x));
+            }
+        }
+
+        #[test]
         fn mask<P: Prefix>() {
             let mask = 0xffff0000u32;
             for x in [0x01001234u32, 0x010fabcdu32, 0xffff5678u32] {
@@ -435,6 +490,30 @@ mod test {
 
         #[instantiate_tests(<Ipv6Net>)]
         mod ipv6net {}
+
+        #[cfg(feature = "ipnetwork")]
+        #[instantiate_tests(<Ipv4Network>)]
+        mod ipv4network {}
+
+        #[cfg(feature = "ipnetwork")]
+        #[instantiate_tests(<Ipv6Network>)]
+        mod ipv6network {}
+
+        #[cfg(feature = "cidr")]
+        #[instantiate_tests(<Ipv4Cidr>)]
+        mod ipv4cidr {}
+
+        #[cfg(feature = "cidr")]
+        #[instantiate_tests(<Ipv4Inet>)]
+        mod ipv4inet {}
+
+        #[cfg(feature = "cidr")]
+        #[instantiate_tests(<Ipv6Cidr>)]
+        mod ipv6cidr {}
+
+        #[cfg(feature = "cidr")]
+        #[instantiate_tests(<Ipv6Inet>)]
+        mod ipv6inet {}
 
         #[instantiate_tests(<(u32, u8)>)]
         mod u32_u8 {}
