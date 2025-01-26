@@ -412,6 +412,7 @@ mod test {
         #[test]
         fn keep_host_addr<P: Prefix + 'static>() {
             #[allow(unused_mut)]
+            #[allow(unused_assignments)]
             let mut prefix_is_masked = false;
             #[cfg(feature = "cidr")]
             {

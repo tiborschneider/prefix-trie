@@ -214,3 +214,62 @@ impl<P: Copy, T: Copy> MyCopy for Option<(&P, &T)> {
         self.map(|(p, t)| (*p, *t))
     }
 }
+
+qc!(self_union_mut, _self_union_mut);
+fn _self_union_mut(mut map: PrefixMap<TestPrefix, i32>) -> bool {
+    let original_map = map.clone();
+    // go to the first split
+    let mut view = map.view_mut();
+    let (mut left, right) = loop {
+        match view.split() {
+            (None, None) => return true,
+            (None, Some(v)) | (Some(v), None) => view = v,
+            (Some(left), Some(right)) => break (left, right),
+        }
+    };
+
+    let left_prefix = left.prefix();
+    let right_prefix = right.prefix();
+
+    let want = original_map
+        .iter()
+        .map(|(p, t)| {
+            (
+                *p,
+                if left_prefix.contains(p) || right_prefix.contains(p) {
+                    t.saturating_mul(2)
+                } else {
+                    *t
+                },
+            )
+        })
+        .sorted()
+        .collect::<Vec<_>>();
+
+    // take the union of both left and right and multiply each entry by 2
+    for (_, l, r) in left.union_mut(right) {
+        match (l, r) {
+            (None, None) | (Some(_), Some(_)) => return false,
+            (None, Some(t)) | (Some(t), None) => *t = t.saturating_mul(2),
+        }
+    }
+
+    let got = map.into_iter().collect::<Vec<_>>();
+    want == got
+}
+
+qc!(self_intersection_mut, _self_intersection_mut);
+fn _self_intersection_mut(mut map: PrefixMap<TestPrefix, i32>) -> bool {
+    // go to the first split
+    let mut view = map.view_mut();
+    let (mut left, right) = loop {
+        match view.split() {
+            (None, None) => return true,
+            (None, Some(v)) | (Some(v), None) => view = v,
+            (Some(left), Some(right)) => break (left, right),
+        }
+    };
+
+    // take the union of both left and right and multiply each entry by 2
+    left.intersection_mut(right).count() == 0
+}
