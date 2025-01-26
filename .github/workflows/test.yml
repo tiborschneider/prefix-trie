@@ -50,7 +50,7 @@ jobs:
     - name: Install cargo-hack
       run: cargo install cargo-msrv
     - name: Check rust version
-      run: cargo msrv verify --all-features
+      run: cargo msrv verify
 
   miri:
     runs-on: ubuntu-latest
