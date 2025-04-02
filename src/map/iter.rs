@@ -524,13 +524,13 @@ where
 
 /// An iterator that yields all items in a `PrefixMap` that covers a given prefix (including the
 /// prefix itself if preseint). See [`PrefixMap::cover`] for how to create this iterator.
-pub struct Cover<'a, P, T> {
+pub struct Cover<'a, 'p, P, T> {
     pub(super) table: &'a Table<P, T>,
     pub(super) idx: Option<usize>,
-    pub(super) prefix: P,
+    pub(super) prefix: &'p P,
 }
 
-impl<'a, P, T> Iterator for Cover<'a, P, T>
+impl<'a, P, T> Iterator for Cover<'a, '_, P, T>
 where
     P: Prefix,
 {
@@ -550,7 +550,7 @@ where
 
         loop {
             let map::Direction::Enter { next, .. } =
-                self.table.get_direction(self.idx.unwrap(), &self.prefix)
+                self.table.get_direction(self.idx.unwrap(), self.prefix)
             else {
                 return None;
             };
@@ -566,9 +566,9 @@ where
 /// An iterator that yields all keys (prefixes) in a `PrefixMap` that covers a given prefix
 /// (including the prefix itself if preseint). See [`PrefixMap::cover_keys`] for how to create this
 /// iterator.
-pub struct CoverKeys<'a, P, T>(pub(super) Cover<'a, P, T>);
+pub struct CoverKeys<'a, 'p, P, T>(pub(super) Cover<'a, 'p, P, T>);
 
-impl<'a, P, T> Iterator for CoverKeys<'a, P, T>
+impl<'a, P, T> Iterator for CoverKeys<'a, '_, P, T>
 where
     P: Prefix,
 {
@@ -581,9 +581,9 @@ where
 
 /// An iterator that yields all values in a `PrefixMap` that covers a given prefix (including the
 /// prefix itself if preseint). See [`PrefixMap::cover_values`] for how to create this iterator.
-pub struct CoverValues<'a, P, T>(pub(super) Cover<'a, P, T>);
+pub struct CoverValues<'a, 'p, P, T>(pub(super) Cover<'a, 'p, P, T>);
 
-impl<'a, P, T> Iterator for CoverValues<'a, P, T>
+impl<'a, P, T> Iterator for CoverValues<'a, '_, P, T>
 where
     P: Prefix,
 {
