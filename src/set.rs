@@ -319,13 +319,13 @@ impl<P: Prefix> PrefixSet<P> {
     /// set.insert("10.1.2.0/24".parse()?); // disjoint prefixes are not covered
     /// set.insert("10.1.1.0/25".parse()?); // more specific prefixes are not covered
     /// set.insert("11.0.0.0/8".parse()?);  // Branch points that don't contain values are skipped
-    /// assert_eq!(set.cover(&p2).collect::<Vec<_>>(), vec![&p0, &p1, &p2]);
+    /// assert_eq!(set.cover(p2).collect::<Vec<_>>(), vec![&p0, &p1, &p2]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover<'a>(&'a self, prefix: &'a P) -> CoverKeys<'a, P, ()> {
+    pub fn cover(&self, prefix: P) -> CoverKeys<'_, P, ()> {
         self.0.cover_keys(prefix)
     }
 }

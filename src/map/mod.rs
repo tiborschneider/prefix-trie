@@ -647,7 +647,7 @@ where
     /// pm.insert("10.1.1.0/25".parse()?, 4); // more specific prefixes are not covered
     /// pm.insert("11.0.0.0/8".parse()?, 5);  // Branch points that don't contain values are skipped
     /// assert_eq!(
-    ///     pm.cover(&p2).collect::<Vec<_>>(),
+    ///     pm.cover(p2).collect::<Vec<_>>(),
     ///     vec![(&p0, &0), (&p1, &1), (&p2, &2)]
     /// );
     /// # Ok(())
@@ -665,13 +665,13 @@ where
     /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
     /// let root = "0.0.0.0/0".parse()?;
     /// pm.insert(root, 0);
-    /// assert_eq!(pm.cover(&"10.0.0.0/8".parse()?).collect::<Vec<_>>(), vec![(&root, &0)]);
+    /// assert_eq!(pm.cover("10.0.0.0/8".parse()?).collect::<Vec<_>>(), vec![(&root, &0)]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover<'a>(&'a self, prefix: &'a P) -> Cover<'a, P, T> {
+    pub fn cover(&self, prefix: P) -> Cover<'_, P, T> {
         Cover {
             table: &self.table,
             idx: None,
@@ -699,13 +699,13 @@ where
     /// pm.insert("10.1.2.0/24".parse()?, 3); // disjoint prefixes are not covered
     /// pm.insert("10.1.1.0/25".parse()?, 4); // more specific prefixes are not covered
     /// pm.insert("11.0.0.0/8".parse()?, 5);  // Branch points that don't contain values are skipped
-    /// assert_eq!(pm.cover_keys(&p2).collect::<Vec<_>>(), vec![&p0, &p1, &p2]);
+    /// assert_eq!(pm.cover_keys(p2).collect::<Vec<_>>(), vec![&p0, &p1, &p2]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover_keys<'a>(&'a self, prefix: &'a P) -> CoverKeys<'a, P, T> {
+    pub fn cover_keys(&self, prefix: P) -> CoverKeys<'_, P, T> {
         CoverKeys(Cover {
             table: &self.table,
             idx: None,
@@ -733,13 +733,13 @@ where
     /// pm.insert("10.1.2.0/24".parse()?, 3); // disjoint prefixes are not covered
     /// pm.insert("10.1.1.0/25".parse()?, 4); // more specific prefixes are not covered
     /// pm.insert("11.0.0.0/8".parse()?, 5);  // Branch points that don't contain values are skipped
-    /// assert_eq!(pm.cover_values(&p2).collect::<Vec<_>>(), vec![&0, &1, &2]);
+    /// assert_eq!(pm.cover_values(p2).collect::<Vec<_>>(), vec![&0, &1, &2]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover_values<'a>(&'a self, prefix: &'a P) -> CoverValues<'a, P, T> {
+    pub fn cover_values(&self, prefix: P) -> CoverValues<'_, P, T> {
         CoverValues(Cover {
             table: &self.table,
             idx: None,

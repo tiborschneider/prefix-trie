@@ -527,7 +527,7 @@ where
 pub struct Cover<'a, P, T> {
     pub(super) table: &'a Table<P, T>,
     pub(super) idx: Option<usize>,
-    pub(super) prefix: &'a P,
+    pub(super) prefix: P,
 }
 
 impl<'a, P, T> Iterator for Cover<'a, P, T>
@@ -550,7 +550,7 @@ where
 
         loop {
             let map::Direction::Enter { next, .. } =
-                self.table.get_direction(self.idx.unwrap(), self.prefix)
+                self.table.get_direction(self.idx.unwrap(), &self.prefix)
             else {
                 return None;
             };
