@@ -325,7 +325,7 @@ impl<P: Prefix> PrefixSet<P> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover<'a>(&'a self, prefix: &'a P) -> CoverKeys<'a, P, ()> {
+    pub fn cover<'a, 'p>(&'a self, prefix: &'p P) -> CoverKeys<'a, 'p, P, ()> {
         self.0.cover_keys(prefix)
     }
 }

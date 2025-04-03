@@ -671,7 +671,7 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover<'a>(&'a self, prefix: &'a P) -> Cover<'a, P, T> {
+    pub fn cover<'a, 'p>(&'a self, prefix: &'p P) -> Cover<'a, 'p, P, T> {
         Cover {
             table: &self.table,
             idx: None,
@@ -705,7 +705,7 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover_keys<'a>(&'a self, prefix: &'a P) -> CoverKeys<'a, P, T> {
+    pub fn cover_keys<'a, 'p>(&'a self, prefix: &'p P) -> CoverKeys<'a, 'p, P, T> {
         CoverKeys(Cover {
             table: &self.table,
             idx: None,
@@ -739,7 +739,7 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover_values<'a>(&'a self, prefix: &'a P) -> CoverValues<'a, P, T> {
+    pub fn cover_values<'a, 'p>(&'a self, prefix: &'p P) -> CoverValues<'a, 'p, P, T> {
         CoverValues(Cover {
             table: &self.table,
             idx: None,
