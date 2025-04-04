@@ -73,7 +73,7 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn get(&self, prefix: &P) -> Option<&T> {
+    pub fn get<'a>(&'a self, prefix: &P) -> Option<&'a T> {
         let mut idx = 0;
         loop {
             match self.table.get_direction(idx, prefix) {
@@ -101,7 +101,7 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn get_mut(&mut self, prefix: &P) -> Option<&mut T> {
+    pub fn get_mut<'a>(&'a mut self, prefix: &P) -> Option<&'a mut T> {
         let mut idx = 0;
         loop {
             match self.table.get_direction(idx, prefix) {
@@ -128,7 +128,7 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn get_key_value(&self, prefix: &P) -> Option<(&P, &T)> {
+    pub fn get_key_value<'a>(&'a self, prefix: &P) -> Option<(&'a P, &'a T)> {
         let mut idx = 0;
         loop {
             match self.table.get_direction(idx, prefix) {
@@ -186,7 +186,7 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn get_lpm_mut(&mut self, prefix: &P) -> Option<(&P, &mut T)> {
+    pub fn get_lpm_mut<'a>(&'a mut self, prefix: &P) -> Option<(&'a P, &'a mut T)> {
         let mut idx = 0;
         let mut best_match: Option<usize> = None;
         loop {
@@ -253,7 +253,7 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn get_lpm_prefix(&self, prefix: &P) -> Option<&P> {
+    pub fn get_lpm_prefix<'a>(&'a self, prefix: &P) -> Option<&'a P> {
         let mut idx = 0;
         let mut best_match: Option<&P> = None;
         loop {
@@ -323,7 +323,7 @@ where
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
-    pub fn get_spm_prefix(&self, prefix: &P) -> Option<&P> {
+    pub fn get_spm_prefix<'a>(&'a self, prefix: &P) -> Option<&'a P> {
         self.get_spm(prefix).map(|(p, _)| p)
     }
 
