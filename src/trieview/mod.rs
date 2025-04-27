@@ -163,6 +163,26 @@ impl<P: std::fmt::Debug, T: std::fmt::Debug> std::fmt::Debug for TrieView<'_, P,
     }
 }
 
+impl<P, L, Rhs> PartialEq<Rhs> for TrieView<'_, P, L>
+where
+    P: Prefix + PartialEq,
+    L: PartialEq<Rhs::T>,
+    Rhs: crate::AsView<P = P>,
+{
+    fn eq(&self, other: &Rhs) -> bool {
+        self.iter()
+            .zip(other.view().iter())
+            .all(|((lp, lt), (rp, rt))| lt == rt && lp == rp)
+    }
+}
+
+impl<P, T> Eq for TrieView<'_, P, T>
+where
+    P: Prefix + Eq + Clone,
+    T: Eq,
+{
+}
+
 impl<'a, P, T> TrieView<'a, P, T>
 where
     P: Prefix,
@@ -712,6 +732,27 @@ impl<P: std::fmt::Debug, T: std::fmt::Debug> std::fmt::Debug for TrieViewMut<'_,
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ViewMut").field(self.prefix()).finish()
     }
+}
+
+impl<P, L, Rhs> PartialEq<Rhs> for TrieViewMut<'_, P, L>
+where
+    P: Prefix + PartialEq + Clone,
+    L: PartialEq<Rhs::T>,
+    Rhs: crate::AsView<P = P>,
+{
+    fn eq(&self, other: &Rhs) -> bool {
+        self.view()
+            .iter()
+            .zip(other.view().iter())
+            .all(|((lp, lt), (rp, rt))| lt == rt && lp == rp)
+    }
+}
+
+impl<P, T> Eq for TrieViewMut<'_, P, T>
+where
+    P: Prefix + Eq + Clone,
+    T: Eq,
+{
 }
 
 impl<P, T> TrieViewMut<'_, P, T>
