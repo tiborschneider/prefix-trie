@@ -5,12 +5,6 @@ use crate::{
     Prefix,
 };
 
-mod entry;
-mod iter;
-
-pub use entry::*;
-pub use iter::*;
-
 /// Prefix map implemented as a prefix tree.
 ///
 /// You can perform union, intersection, and (covering) difference operations by first creating a
@@ -913,3 +907,10 @@ where
     T: Eq,
 {
 }
+
+// Include the entry and iter module last, to ensure correct docs.
+mod entry;
+mod iter;
+
+pub use entry::*;
+pub use iter::*;

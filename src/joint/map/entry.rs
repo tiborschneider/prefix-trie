@@ -1,9 +1,9 @@
 //! Code for inserting elements and the entry pattern.
 
-use super::*;
+use crate::joint::JointPrefix;
 
 /// A mutable view into a single entry in a map, which may either be vacant or occupied.
-pub enum Entry<'a, P, T> {
+pub enum Entry<'a, P: JointPrefix, T> {
     /// The entry is not present in the tree.
     Vacant(VacantEntry<'a, P, T>),
     /// The entry is already present in the tree.
@@ -12,28 +12,30 @@ pub enum Entry<'a, P, T> {
 
 /// A mutable view into a missing entry. The information within this structure describes a path
 /// towards that missing node, and how to insert it.
-pub struct VacantEntry<'a, P, T> {
-    pub(super) map: &'a mut PrefixMap<P, T>,
-    pub(super) prefix: P,
-    pub(super) idx: usize,
-    pub(super) direction: DirectionForInsert<P>,
+pub enum VacantEntry<'a, P: JointPrefix, T> {
+    /// Vacant entry for the first prefix variant
+    P1(crate::map::VacantEntry<'a, P::P1, T>),
+    /// Vacant entry for the second prefix variant
+    P2(crate::map::VacantEntry<'a, P::P2, T>),
 }
 
 /// A mutable view into an occupied entry. An occupied entry represents a node that is already
 /// present on the tree.
-pub struct OccupiedEntry<'a, P, T> {
-    pub(crate) node: &'a mut Node<P, T>,
-    pub(super) prefix: P, // needed to replace the prefix on the thing if we perform insert.
+pub enum OccupiedEntry<'a, P: JointPrefix, T> {
+    /// Occupied entry for the first prefix variant
+    P1(crate::map::OccupiedEntry<'a, P::P1, T>),
+    /// Occupied entry for the second prefix variant
+    P2(crate::map::OccupiedEntry<'a, P::P2, T>),
 }
 
-impl<P, T> Entry<'_, P, T> {
+impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
     /// Get the value if it exists
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// assert_eq!(pm.entry("192.168.1.0/24".parse()?).get(), Some(&1));
     /// assert_eq!(pm.entry("192.168.2.0/24".parse()?).get(), None);
@@ -45,17 +47,17 @@ impl<P, T> Entry<'_, P, T> {
     pub fn get(&self) -> Option<&T> {
         match self {
             Entry::Vacant(_) => None,
-            Entry::Occupied(e) => e.node.value.as_ref(),
+            Entry::Occupied(e) => Some(e.get()),
         }
     }
 
     /// Get the value if it exists
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// pm.entry("192.168.1.0/24".parse()?).get_mut().map(|x| *x += 1);
     /// pm.entry("192.168.2.0/24".parse()?).get_mut().map(|x| *x += 1);
@@ -69,45 +71,40 @@ impl<P, T> Entry<'_, P, T> {
     pub fn get_mut(&mut self) -> Option<&mut T> {
         match self {
             Entry::Vacant(_) => None,
-            Entry::Occupied(e) => e.node.value.as_mut(),
+            Entry::Occupied(e) => Some(e.get_mut()),
         }
     }
 
     /// get the key of the current entry
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
-    /// assert_eq!(pm.entry("192.168.1.0/24".parse()?).key(), &"192.168.1.0/24".parse()?);
-    /// assert_eq!(pm.entry("192.168.2.0/24".parse()?).key(), &"192.168.2.0/24".parse()?);
+    /// assert_eq!(pm.entry("192.168.1.0/24".parse()?).key(), "192.168.1.0/24".parse()?);
+    /// assert_eq!(pm.entry("192.168.2.0/24".parse()?).key(), "192.168.2.0/24".parse()?);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn key(&self) -> &P {
+    pub fn key(&self) -> P {
         match self {
-            Entry::Vacant(e) => &e.prefix,
-            Entry::Occupied(e) => &e.node.prefix,
+            Entry::Vacant(e) => e.key(),
+            Entry::Occupied(e) => e.key(),
         }
     }
-}
 
-impl<'a, P, T> Entry<'a, P, T>
-where
-    P: Prefix,
-{
     /// Replace the current entry, and return the entry that was stored before. This will also
     /// replace the key with the one provided to the `entry` function.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     ///
     /// assert_eq!(pm.entry("192.168.1.0/24".parse()?).insert(10), Some(1));
@@ -124,7 +121,7 @@ where
     pub fn insert(self, v: T) -> Option<T> {
         match self {
             Entry::Vacant(e) => {
-                e._insert(v);
+                e.insert(v);
                 None
             }
             Entry::Occupied(e) => Some(e.insert(v)),
@@ -135,10 +132,10 @@ where
     /// reference to the value in the entry.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     ///
     /// assert_eq!(pm.entry("192.168.1.0/24".parse()?).or_insert(10), &1);
@@ -154,8 +151,11 @@ where
     #[inline(always)]
     pub fn or_insert(self, default: T) -> &'a mut T {
         match self {
-            Entry::Vacant(e) => e._insert(default).value.as_mut().unwrap(),
-            Entry::Occupied(e) => e.node.value.get_or_insert(default),
+            Entry::Vacant(e) => e.insert(default),
+            Entry::Occupied(e) => match e {
+                OccupiedEntry::P1(e) => e.node.value.get_or_insert(default),
+                OccupiedEntry::P2(e) => e.node.value.get_or_insert(default),
+            },
         }
     }
 
@@ -163,10 +163,10 @@ where
     /// and returns a mutable reference to the value in the entry.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     ///
     /// assert_eq!(pm.entry("192.168.1.0/24".parse()?).or_insert_with(|| 10), &1);
@@ -182,8 +182,11 @@ where
     #[inline(always)]
     pub fn or_insert_with<F: FnOnce() -> T>(self, default: F) -> &'a mut T {
         match self {
-            Entry::Vacant(e) => e._insert(default()).value.as_mut().unwrap(),
-            Entry::Occupied(e) => e.node.value.get_or_insert_with(default),
+            Entry::Vacant(e) => e.insert(default()),
+            Entry::Occupied(e) => match e {
+                OccupiedEntry::P1(e) => e.node.value.get_or_insert_with(default),
+                OccupiedEntry::P2(e) => e.node.value.get_or_insert_with(default),
+            },
         }
     }
 
@@ -191,10 +194,10 @@ where
     /// map.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// assert_eq!(pm.entry("192.168.1.0/24".parse()?).and_modify(|x| *x += 1).get(), Some(&2));
     /// assert_eq!(pm.entry("192.168.2.0/24".parse()?).and_modify(|x| *x += 1).get(), None);
@@ -207,27 +210,33 @@ where
     pub fn and_modify<F: FnOnce(&mut T)>(self, f: F) -> Self {
         match self {
             Entry::Vacant(e) => Entry::Vacant(e),
-            Entry::Occupied(e) => {
-                e.node.value.as_mut().map(f);
-                Entry::Occupied(e)
-            }
+            Entry::Occupied(e) => match e {
+                OccupiedEntry::P1(e) => {
+                    e.node.value.as_mut().map(f);
+                    Entry::Occupied(OccupiedEntry::P1(e))
+                }
+                OccupiedEntry::P2(e) => {
+                    e.node.value.as_mut().map(f);
+                    Entry::Occupied(OccupiedEntry::P2(e))
+                }
+            },
         }
     }
 }
 
 impl<'a, P, T> Entry<'a, P, T>
 where
-    P: Prefix,
+    P: JointPrefix,
     T: Default,
 {
     /// Ensures a value is in the entry by inserting the default value if empty, and returns a
     /// mutable reference to the value in the entry.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     ///
     /// assert_eq!(pm.entry("192.168.1.0/24".parse()?).or_default(), &1);
@@ -247,63 +256,19 @@ where
     }
 }
 
-impl<'a, P, T> VacantEntry<'a, P, T>
-where
-    P: Prefix,
-{
-    fn _insert(self, v: T) -> &'a mut Node<P, T> {
-        match self.direction {
-            DirectionForInsert::Reached => {
-                // increment the count, as node.value will be `None`. We do it here as we borrow
-                // `map` mutably in the next line.
-                self.map.count += 1;
-                let node = &mut self.map.table[self.idx];
-                node.prefix = self.prefix;
-                debug_assert!(node.value.is_none());
-                node.value = Some(v);
-                node
-            }
-            DirectionForInsert::NewLeaf { right } => {
-                let new = self.map.new_node(self.prefix, Some(v));
-                self.map.table.set_child(self.idx, new, right);
-                &mut self.map.table[new]
-            }
-            DirectionForInsert::NewChild { right, child_right } => {
-                let new = self.map.new_node(self.prefix, Some(v));
-                let child = self.map.table.set_child(self.idx, new, right).unwrap();
-                self.map.table.set_child(new, child, child_right);
-                &mut self.map.table[new]
-            }
-            DirectionForInsert::NewBranch {
-                branch_prefix,
-                right,
-                prefix_right,
-            } => {
-                let branch = self.map.new_node(branch_prefix, None);
-                let new = self.map.new_node(self.prefix, Some(v));
-                let child = self.map.table.set_child(self.idx, branch, right).unwrap();
-                self.map.table.set_child(branch, new, prefix_right);
-                self.map.table.set_child(branch, child, !prefix_right);
-                &mut self.map.table[new]
-            }
-            DirectionForInsert::Enter { .. } => unreachable!(),
-        }
-    }
-}
-
-impl<P, T> OccupiedEntry<'_, P, T> {
+impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
     /// Gets a reference to the key in the entry. This is the key that is currently stored, and not
     /// the key that was used in the insert.
     ///
     /// ```
-    /// # use prefix_trie::*;
-    /// use prefix_trie::map::Entry;
+    /// # use prefix_trie::joint::*;
+    /// use prefix_trie::joint::map::Entry;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// match pm.entry("192.168.1.1/24".parse()?) {
-    ///     Entry::Occupied(e) => assert_eq!(e.key(), &"192.168.1.0/24".parse()?),
+    ///     Entry::Occupied(e) => assert_eq!(e.key(), "192.168.1.0/24".parse()?),
     ///     Entry::Vacant(_) => unreachable!(),
     /// }
     /// # Ok(())
@@ -311,19 +276,22 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn key(&self) -> &P {
-        &self.node.prefix
+    pub fn key(&self) -> P {
+        match self {
+            OccupiedEntry::P1(e) => P::from_p1(e.key()),
+            OccupiedEntry::P2(e) => P::from_p2(e.key()),
+        }
     }
 
     /// Gets a reference to the value in the entry.
     ///
     /// ```
-    /// # use prefix_trie::*;
-    /// use prefix_trie::map::Entry;
+    /// # use prefix_trie::joint::*;
+    /// use prefix_trie::joint::map::Entry;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// match pm.entry("192.168.1.0/24".parse()?) {
     ///     Entry::Occupied(e) => assert_eq!(e.get(), &1),
@@ -335,7 +303,10 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn get(&self) -> &T {
-        self.node.value.as_ref().unwrap()
+        match self {
+            OccupiedEntry::P1(e) => e.get(),
+            OccupiedEntry::P2(e) => e.get(),
+        }
     }
 
     /// Gets a mutable reference to the value in the entry.
@@ -345,12 +316,12 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// and you wish that prefix to be overwritten, use `insert`.
     ///
     /// ```
-    /// # use prefix_trie::*;
-    /// use prefix_trie::map::Entry;
+    /// # use prefix_trie::joint::*;
+    /// use prefix_trie::joint::map::Entry;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// match pm.entry("192.168.1.0/24".parse()?) {
     ///     Entry::Occupied(mut e) => *e.get_mut() += 1,
@@ -363,19 +334,22 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn get_mut(&mut self) -> &mut T {
-        self.node.value.as_mut().unwrap()
+        match self {
+            OccupiedEntry::P1(e) => e.get_mut(),
+            OccupiedEntry::P2(e) => e.get_mut(),
+        }
     }
 
     /// Insert a new value into the entry, returning the old value. This operation will also replace
     /// the prefix with the provided one.
     ///
     /// ```
-    /// # use prefix_trie::*;
-    /// use prefix_trie::map::Entry;
+    /// # use prefix_trie::joint::*;
+    /// use prefix_trie::joint::map::Entry;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// match pm.entry("192.168.1.0/24".parse()?) {
     ///     Entry::Occupied(mut e) => assert_eq!(e.insert(10), 1),
@@ -388,20 +362,22 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn insert(self, value: T) -> T {
-        self.node.prefix = self.prefix;
-        self.node.value.replace(value).unwrap()
+        match self {
+            OccupiedEntry::P1(e) => e.insert(value),
+            OccupiedEntry::P2(e) => e.insert(value),
+        }
     }
 
     /// Remove the current value and return it. The tree will not be modified (the same effect as
-    /// `PrefixMap::remove_keep_tree`).
+    /// `JointPrefixMap::remove_keep_tree`).
     ///
     /// ```
-    /// # use prefix_trie::*;
-    /// use prefix_trie::map::Entry;
+    /// # use prefix_trie::joint::*;
+    /// use prefix_trie::joint::map::Entry;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, i32> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, i32> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// match pm.entry("192.168.1.0/24".parse()?) {
     ///     Entry::Occupied(mut e) => assert_eq!(e.remove(), 1),
@@ -414,21 +390,24 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn remove(&mut self) -> T {
-        self.node.value.take().unwrap()
+        match self {
+            OccupiedEntry::P1(e) => e.remove(),
+            OccupiedEntry::P2(e) => e.remove(),
+        }
     }
 }
 
-impl<P, T> VacantEntry<'_, P, T> {
+impl<'a, P: JointPrefix, T> VacantEntry<'a, P, T> {
     /// Gets a reference to the key in the entry.
     ///
     /// ```
-    /// # use prefix_trie::*;
-    /// use prefix_trie::map::Entry;
+    /// # use prefix_trie::joint::*;
+    /// use prefix_trie::joint::map::Entry;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, i32> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, i32> = JointPrefixMap::new();
     /// match pm.entry("192.168.1.0/24".parse()?) {
-    ///     Entry::Vacant(e) => assert_eq!(e.key(), &"192.168.1.0/24".parse()?),
+    ///     Entry::Vacant(e) => assert_eq!(e.key(), "192.168.1.0/24".parse()?),
     ///     Entry::Occupied(_) => unreachable!(),
     /// }
     /// # Ok(())
@@ -436,24 +415,22 @@ impl<P, T> VacantEntry<'_, P, T> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn key(&self) -> &P {
-        &self.prefix
+    pub fn key(&self) -> P {
+        match self {
+            VacantEntry::P1(e) => P::from_p1(e.key()),
+            VacantEntry::P2(e) => P::from_p2(e.key()),
+        }
     }
-}
 
-impl<'a, P, T> VacantEntry<'a, P, T>
-where
-    P: Prefix,
-{
     /// Get a mutable reference to the value. If the value is yet empty, set it to the given default
     /// value.
     ///
     /// ```
-    /// # use prefix_trie::*;
-    /// use prefix_trie::map::Entry;
+    /// # use prefix_trie::joint::*;
+    /// use prefix_trie::joint::map::Entry;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, i32> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, i32> = JointPrefixMap::new();
     /// match pm.entry("192.168.1.0/24".parse()?) {
     ///     Entry::Vacant(mut e) => assert_eq!(e.insert(10), &10),
     ///     Entry::Occupied(_) => unreachable!(),
@@ -465,19 +442,21 @@ where
     /// # fn main() {}
     /// ```
     pub fn insert(self, default: T) -> &'a mut T {
-        let node = self._insert(default);
-        node.value.as_mut().unwrap()
+        match self {
+            VacantEntry::P1(e) => e.insert(default),
+            VacantEntry::P2(e) => e.insert(default),
+        }
     }
 
     /// Get a mutable reference to the value. If the value is yet empty, set it to the return value
     /// from the given function.
     ///
     /// ```
-    /// # use prefix_trie::*;
-    /// use prefix_trie::map::Entry;
+    /// # use prefix_trie::joint::*;
+    /// use prefix_trie::joint::map::Entry;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, i32> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, i32> = JointPrefixMap::new();
     /// match pm.entry("192.168.1.0/24".parse()?) {
     ///     Entry::Vacant(mut e) => assert_eq!(e.insert_with(|| 10), &10),
     ///     Entry::Occupied(_) => unreachable!(),
@@ -489,25 +468,27 @@ where
     /// # fn main() {}
     /// ```
     pub fn insert_with<F: FnOnce() -> T>(self, default: F) -> &'a mut T {
-        let node = self._insert(default());
-        node.value.as_mut().unwrap()
+        match self {
+            VacantEntry::P1(e) => e.insert_with(default),
+            VacantEntry::P2(e) => e.insert_with(default),
+        }
     }
 }
 
 impl<'a, P, T> VacantEntry<'a, P, T>
 where
-    P: Prefix,
+    P: JointPrefix,
     T: Default,
 {
     /// Get a mutable reference to the value. If the value is yet empty, set it to the default value
     /// using `Default::default()`.
     ///
     /// ```
-    /// # use prefix_trie::*;
-    /// use prefix_trie::map::Entry;
+    /// # use prefix_trie::joint::*;
+    /// use prefix_trie::joint::map::Entry;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, i32> = PrefixMap::new();
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, i32> = JointPrefixMap::new();
     /// match pm.entry("192.168.1.0/24".parse()?) {
     ///     Entry::Vacant(e) => assert_eq!(e.default(), &0),
     ///     Entry::Occupied(_) => unreachable!(),
@@ -519,7 +500,9 @@ where
     /// # fn main() {}
     /// ```
     pub fn default(self) -> &'a mut T {
-        let node = self._insert(Default::default());
-        node.value.as_mut().unwrap()
+        match self {
+            VacantEntry::P1(e) => e.default(),
+            VacantEntry::P2(e) => e.default(),
+        }
     }
 }
