@@ -7,10 +7,18 @@ use crate::*;
 use super::Node;
 
 /// An iterator over all entries of a [`PrefixMap`] in lexicographic order.
-#[derive(Clone)]
 pub struct Iter<'a, P, T> {
     table: Option<&'a Table<P, T>>,
     nodes: Vec<usize>,
+}
+
+impl<P, T> Clone for Iter<'_, P, T> {
+    fn clone(&self) -> Self {
+        Self {
+            table: self.table,
+            nodes: self.nodes.clone(),
+        }
+    }
 }
 
 impl<P, T> Default for Iter<'_, P, T> {

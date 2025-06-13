@@ -115,6 +115,7 @@ mod serde;
 #[cfg(test)]
 mod test;
 
+pub mod joint;
 pub mod map;
 pub mod set;
 pub mod trieview;
