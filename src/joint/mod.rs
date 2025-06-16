@@ -2,9 +2,13 @@
 //! functions. You can access each individual table of the prefix map, allowing you to perform the
 //! usual operations set operations.
 //!
+//! Both the [`JointPrefixMap`] and [`JointPrefixSet`] allow users to directly access the two
+//! underlying datastructures (`t1` for IPv4 and and `t2` for IPv6). You can then use the interface
+//! provided by [`crate::trieview`], and interact with specific sets / maps.
+//!
 //! Unfortunately, a joint prefix map always returns owned instances of the (joint) prefix, and,
 //! thus, always creates copied of the prefixes. This should not be any problem, as IPv4 and IPv6
-//! prefixes implement `Copy`. However, this might become an issue when using larger types.
+//! prefixes implement `Copy`.
 
 macro_rules! fork {
     ($self:ident, $prefix:ident, $func:ident $(, $args:expr),*) => {

@@ -14,6 +14,9 @@ or [ipnetwork](https://crates.io/crates/ipnetwork) or [cidr](https://crates.io/c
 It also  supports any tuple `(R, u8)`, where `R` is any unsigned primitive integer (`u8`, `u16`,
 `u32`, `u64`, `u128`, or `usize`).
 
+This crate also provides a `JointPrefixMap` and `JointPrefixSet` that contains two tables, one for 
+IPv4 and one for IPv6.
+
 ## Comparison with related projects
 
 [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap)
