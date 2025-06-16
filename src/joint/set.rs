@@ -109,9 +109,9 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
     /// set.insert("192.168.1.0/24".parse()?);
     /// set.insert("192.168.0.0/23".parse()?);
-    /// assert_eq!(set.get_spm(&"192.168.1.1/32".parse()?), Some(&"192.168.0.0/23".parse()?));
-    /// assert_eq!(set.get_spm(&"192.168.1.0/24".parse()?), Some(&"192.168.0.0/23".parse()?));
-    /// assert_eq!(set.get_spm(&"192.168.0.0/23".parse()?), Some(&"192.168.0.0/23".parse()?));
+    /// assert_eq!(set.get_spm(&"192.168.1.1/32".parse()?), Some("192.168.0.0/23".parse()?));
+    /// assert_eq!(set.get_spm(&"192.168.1.0/24".parse()?), Some("192.168.0.0/23".parse()?));
+    /// assert_eq!(set.get_spm(&"192.168.0.0/23".parse()?), Some("192.168.0.0/23".parse()?));
     /// assert_eq!(set.get_spm(&"192.168.2.0/24".parse()?), None);
     /// # Ok(())
     /// # }
@@ -298,8 +298,8 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// assert_eq!(
     ///     set.children(&"192.168.0.0/23".parse()?).collect::<Vec<_>>(),
     ///     vec![
-    ///         &"192.168.0.0/23".parse()?,
-    ///         &"192.168.0.0/24".parse()?,
+    ///         "192.168.0.0/23".parse()?,
+    ///         "192.168.0.0/24".parse()?,
     ///     ]
     /// );
     /// # Ok(())
@@ -340,7 +340,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// set.insert("10.1.2.0/24".parse()?); // disjoint prefixes are not covered
     /// set.insert("10.1.1.0/25".parse()?); // more specific prefixes are not covered
     /// set.insert("11.0.0.0/8".parse()?);  // Branch points that don't contain values are skipped
-    /// assert_eq!(set.cover(&p2).collect::<Vec<_>>(), vec![&p0, &p1, &p2]);
+    /// assert_eq!(set.cover(&p2).collect::<Vec<_>>(), vec![p0, p1, p2]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
