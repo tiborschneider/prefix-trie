@@ -504,3 +504,18 @@ impl<P: JointPrefix> FromIterator<P> for JointPrefixSet<P> {
         set
     }
 }
+
+/// An iterator over the union of two [`JointPrefixSet`]s. The iterator yields first prefixes of
+/// `P1`, followed by those of `P2`.
+pub struct Union<'a, P: JointPrefix> {
+    t1: Option<crate::trieview::Union<'a, P::P1, (), ()>>,
+    t2: Option<crate::trieview::Union<'a, P::P2, (), ()>>,
+}
+
+impl<P: JointPrefix> Iterator for Union<'_, P> {
+    type Item = P;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some()
+    }
+}
