@@ -2,6 +2,7 @@
 //! [`super::JointPrefixMap`].
 
 use crate::PrefixSet;
+use either::{Left, Right};
 
 use super::{map::CoverKeys, JointPrefix};
 
@@ -371,11 +372,11 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// ```
     pub fn children<'a>(&'a self, prefix: &P) -> Iter<'a, P> {
         Iter(match prefix.p1_or_p2_ref() {
-            Ok(p1) => super::map::Iter {
+            Left(p1) => super::map::Iter {
                 i1: Some(self.t1.0.children(p1)),
                 i2: None,
             },
-            Err(p2) => super::map::Iter {
+            Right(p2) => super::map::Iter {
                 i1: None,
                 i2: Some(self.t2.0.children(p2)),
             },
@@ -410,8 +411,8 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// ```
     pub fn cover<'a, 'p>(&'a self, prefix: &'p P) -> CoverKeys<'a, 'p, P, ()> {
         CoverKeys(match prefix.p1_or_p2_ref() {
-            Ok(p1) => super::map::Cover::P1(self.t1.0.cover(p1)),
-            Err(p2) => super::map::Cover::P2(self.t2.0.cover(p2)),
+            Left(p1) => super::map::Cover::P1(self.t1.0.cover(p1)),
+            Right(p2) => super::map::Cover::P2(self.t2.0.cover(p2)),
         })
     }
 }

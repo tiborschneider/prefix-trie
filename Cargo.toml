@@ -36,6 +36,7 @@ ipnetwork = { version = "0.20", optional = true }
 cidr = { version = "0.3", optional = true }
 num-traits = "0.2"
 serde = { version = "1", optional = true}
+either = "1"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }

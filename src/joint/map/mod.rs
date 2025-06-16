@@ -1,8 +1,9 @@
 //! Module that defines the JointPrefixMap
 
+use super::JointPrefix;
 use crate::PrefixMap;
 
-use super::JointPrefix;
+use either::{Left, Right};
 
 /// A Joint prefix map, implemented as two separate prefix trees.
 #[derive(Clone)]
@@ -321,11 +322,11 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// ```
     pub fn entry(&mut self, prefix: P) -> Entry<'_, P, T> {
         match prefix.p1_or_p2() {
-            Ok(p1) => match self.t1.entry(p1) {
+            Left(p1) => match self.t1.entry(p1) {
                 crate::map::Entry::Vacant(e) => Entry::Vacant(VacantEntry::P1(e)),
                 crate::map::Entry::Occupied(e) => Entry::Occupied(OccupiedEntry::P1(e)),
             },
-            Err(p2) => match self.t2.entry(p2) {
+            Right(p2) => match self.t2.entry(p2) {
                 crate::map::Entry::Vacant(e) => Entry::Vacant(VacantEntry::P2(e)),
                 crate::map::Entry::Occupied(e) => Entry::Occupied(OccupiedEntry::P2(e)),
             },
@@ -516,8 +517,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// ```
     pub fn cover<'a, 'p>(&'a self, prefix: &'p P) -> Cover<'a, 'p, P, T> {
         match prefix.p1_or_p2_ref() {
-            Ok(p1) => Cover::P1(self.t1.cover(p1)),
-            Err(p2) => Cover::P2(self.t2.cover(p2)),
+            Left(p1) => Cover::P1(self.t1.cover(p1)),
+            Right(p2) => Cover::P2(self.t2.cover(p2)),
         }
     }
 
