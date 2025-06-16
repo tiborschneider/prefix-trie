@@ -38,12 +38,41 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// Returns the number of elements stored in `self`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// set.insert("192.168.1.0/24".parse()?, 1u32);
+    /// set.insert("192.168.1.0/25".parse()?, 2u32);
+    /// set.insert("2001::1:0:0/96".parse()?, 3u32);
+    /// assert_eq!(set.len(), 3);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.t1.len() + self.t2.len()
     }
 
     /// Returns `true` if the map contains no elements.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// assert!(set.is_empty());
+    /// set.insert("2001::1:0:0/96".parse()?, 1u32);
+    /// assert!(!set.is_empty());
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -57,12 +86,13 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
-    /// pm.insert("2001::1:0:0:0:0/96".parse()?, 2);
+    /// pm.insert("2001::1:0:0/96".parse()?, 2);
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&1));
     /// assert_eq!(pm.get(&"192.168.2.0/24".parse()?), None);
     /// assert_eq!(pm.get(&"192.168.0.0/23".parse()?), None);
     /// assert_eq!(pm.get(&"192.168.1.128/25".parse()?), None);
-    /// assert_eq!(pm.get(&"2001::1:0:0:0:0/96".parse()?), Some(&2));
+    /// assert_eq!(pm.get(&"2001::1:0:0/96".parse()?), Some(&2));
+    /// assert_eq!(pm.get(&"0ca8:1::/24".parse()?), None);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -255,9 +285,9 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// assert_eq!(pm.insert("192.168.0.0/23".parse()?, 1), None);
     /// assert_eq!(pm.insert("192.168.1.0/24".parse()?, 2), None);
     /// assert_eq!(pm.insert("192.168.1.0/24".parse()?, 3), Some(2));
-    /// assert_eq!(pm.insert("2001::1:0:0:0:0/96".parse()?, 4), None);
-    /// assert_eq!(pm.insert("2001::1:0:0:0:0/97".parse()?, 5), None);
-    /// assert_eq!(pm.insert("2001::1:0:0:0:0/97".parse()?, 6), Some(5));
+    /// assert_eq!(pm.insert("2001::1:0:0/96".parse()?, 4), None);
+    /// assert_eq!(pm.insert("2001::1:0:0/97".parse()?, 5), None);
+    /// assert_eq!(pm.insert("2001::1:0:0/97".parse()?, 6), Some(5));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -277,11 +307,13 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
-    /// pm.insert("192.168.0.0/23".parse()?, vec![1]);
-    /// pm.entry("192.168.0.0/23".parse()?).or_default().push(2);
-    /// pm.entry("192.168.0.0/24".parse()?).or_default().push(3);
-    /// assert_eq!(pm.get(&"192.168.0.0/23".parse()?), Some(&vec![1, 2]));
-    /// assert_eq!(pm.get(&"192.168.0.0/24".parse()?), Some(&vec![3]));
+    /// pm.insert("192.168.1.0/24".parse()?, vec![1]);
+    /// pm.entry("192.168.1.0/24".parse()?).or_default().push(2);
+    /// pm.entry("192.168.1.0/25".parse()?).or_default().push(3);
+    /// pm.entry("c0a8:1::/24".parse()?).or_default().push(4);
+    /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&vec![1, 2]));
+    /// assert_eq!(pm.get(&"192.168.1.0/25".parse()?), Some(&vec![3]));
+    /// assert_eq!(pm.get(&"c0a8:1::/24".parse()?), Some(&vec![4]));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -389,9 +421,11 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.0.0/24".parse()?, 1);
     /// pm.insert("192.168.1.0/24".parse()?, 2);
+    /// pm.insert("2001::1:0:0/96".parse()?, 3);
     /// pm.clear();
     /// assert_eq!(pm.get(&"192.168.0.0/24".parse()?), None);
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), None);
+    /// assert_eq!(pm.get(&"2001::1:0:0/96".parse()?), None);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -413,11 +447,15 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// pm.insert("192.168.1.0/24".parse()?, 2);
     /// pm.insert("192.168.2.0/24".parse()?, 3);
     /// pm.insert("192.168.2.0/25".parse()?, 4);
-    /// pm.retain(|_, t| *t % 2 == 0);
+    /// pm.insert("2001::1:0:0/24".parse()?, 5);
+    /// pm.insert("2001::1:0:0/25".parse()?, 6);
+    /// pm.retain(|_, t| *t % 2 == 0); // only keep the even values.
     /// assert_eq!(pm.get(&"192.168.0.0/24".parse()?), None);
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&2));
     /// assert_eq!(pm.get(&"192.168.2.0/24".parse()?), None);
     /// assert_eq!(pm.get(&"192.168.2.0/25".parse()?), Some(&4));
+    /// assert_eq!(pm.get(&"2001::1:0:0/24".parse()?), None);
+    /// assert_eq!(pm.get(&"2001::1:0:0/25".parse()?), Some(&6));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
