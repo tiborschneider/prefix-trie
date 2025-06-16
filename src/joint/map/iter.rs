@@ -216,13 +216,15 @@ impl<'a, P: JointPrefix, T> Iterator for ValuesMut<'a, P, T> {
 
 impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// An iterator visiting all key-value pairs in lexicographic order. The iterator element type
-    /// is `(&P, &T)`.
+    /// is `(&P, &T)`. Elements of the first prefix are yielded before those of the second prefix.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::1:0:0/97".parse()?, 6);
+    /// pm.insert("2001::1:0:0/96".parse()?, 7);
     /// pm.insert("192.168.0.0/22".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// pm.insert("192.168.2.0/23".parse()?, 3);
@@ -236,6 +238,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     ///         ("192.168.0.0/24".parse()?, &4),
     ///         ("192.168.2.0/23".parse()?, &3),
     ///         ("192.168.2.0/24".parse()?, &5),
+    ///         ("2001::1:0:0/96".parse()?, &7),
+    ///         ("2001::1:0:0/97".parse()?, &6),
     ///     ]
     /// );
     /// # Ok(())
@@ -256,13 +260,16 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         }
     }
 
-    /// An iterator visiting all keys in lexicographic order. The iterator element type is `&P`.
+    /// An iterator visiting all keys in lexicographic order. The iterator element type is
+    /// `&P`. Elements of the first prefix are yielded before those of the second one.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::1:0:0/97".parse()?, 6);
+    /// pm.insert("2001::1:0:0/96".parse()?, 7);
     /// pm.insert("192.168.0.0/22".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// pm.insert("192.168.2.0/23".parse()?, 3);
@@ -276,6 +283,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     ///         "192.168.0.0/24".parse()?,
     ///         "192.168.2.0/23".parse()?,
     ///         "192.168.2.0/24".parse()?,
+    ///         "2001::1:0:0/96".parse()?,
+    ///         "2001::1:0:0/97".parse()?,
     ///     ]
     /// );
     /// # Ok(())
@@ -297,19 +306,22 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         }
     }
 
-    /// An iterator visiting all values in lexicographic order. The iterator element type is `&P`.
+    /// An iterator visiting all values in lexicographic order. The iterator element type is
+    /// `&P`. Elements of the first prefix are yielded before those of the second one.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::1:0:0/97".parse()?, 6);
+    /// pm.insert("2001::1:0:0/96".parse()?, 7);
     /// pm.insert("192.168.0.0/22".parse()?, 1);
     /// pm.insert("192.168.0.0/23".parse()?, 2);
     /// pm.insert("192.168.2.0/23".parse()?, 3);
     /// pm.insert("192.168.0.0/24".parse()?, 4);
     /// pm.insert("192.168.2.0/24".parse()?, 5);
-    /// assert_eq!(pm.values().collect::<Vec<_>>(), vec![&1, &2, &4, &3, &5]);
+    /// assert_eq!(pm.values().collect::<Vec<_>>(), vec![&1, &2, &4, &3, &5, &7, &6]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -343,7 +355,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// to both keys and values, i.e., type `(&'a P, &'a T)`. The iterator yields elements in
     /// lexicographic order.
     ///
-    /// **Note**: Consider using [`AsView::view_at`] as an alternative.
+    /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -385,7 +397,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// iterator yields references to the keys, and mutable references to the values, i.e., type
     /// `(&'a P, &'a mut T)`. The iterator yields elements in lexicographic order.
     ///
-    /// **Note**: Consider using [`AsViewMut::view_mut_at`] as an alternative.
+    /// **Note**: Consider using [`crate::AsViewMut::view_mut_at`] as an alternative.
     ///
     /// ```
     /// # use prefix_trie::joint::*;

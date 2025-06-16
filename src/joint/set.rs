@@ -1,4 +1,5 @@
-//! JointPrefixSet, that is implemened as a simple binary tree, based on the [`JointPrefixMap`].
+//! JointPrefixSet, that is implemened as a simple binary tree, based on the
+//! [`super::JointPrefixMap`].
 
 use crate::PrefixSet;
 
@@ -7,8 +8,8 @@ use super::{map::CoverKeys, JointPrefix};
 /// Set of prefixes, organized in a tree. This strucutre gives efficient access to the longest
 /// prefix in the set that contains another prefix.
 ///
-/// You can perform union, intersection, and (covering) difference operations by first creating a
-/// view over the map using [`crate::AsView`] or [`crate::AsViewMut`].
+/// Access the individual sets `self.t1` and `self.t2` to perform set operations (using
+/// [`crate::AsView`]).
 #[derive(Clone)]
 pub struct JointPrefixSet<P: JointPrefix> {
     /// PrefixSet that corresponds to the first prefix type
@@ -27,12 +28,41 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     }
 
     /// Returns the number of elements stored in `self`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+    /// set.insert("192.168.1.0/24".parse()?);
+    /// set.insert("192.168.1.0/25".parse()?);
+    /// set.insert("2001::1:0:0/96".parse()?);
+    /// assert_eq!(set.len(), 3);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.t1.len() + self.t2.len()
     }
 
     /// Returns `true` if the set contains no elements.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+    /// assert!(set.is_empty());
+    /// set.insert("2001::1:0:0/96".parse()?);
+    /// assert!(!set.is_empty());
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -50,6 +80,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// assert!(!set.contains(&"192.168.2.0/24".parse()?));
     /// assert!(!set.contains(&"192.168.0.0/23".parse()?));
     /// assert!(!set.contains(&"192.168.1.128/25".parse()?));
+    /// assert!(!set.contains(&"c0a8:1::/24".parse()?));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -209,11 +240,13 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// set.insert("192.168.0.0/24".parse()?);
     /// set.insert("192.168.2.0/23".parse()?);
     /// set.insert("192.168.2.0/24".parse()?);
+    /// set.insert("c0a8::/24".parse()?);
     /// set.remove_children(&"192.168.0.0/23".parse()?);
     /// assert!(!set.contains(&"192.168.0.0/23".parse()?));
     /// assert!(!set.contains(&"192.168.0.0/24".parse()?));
     /// assert!(set.contains(&"192.168.2.0/23".parse()?));
     /// assert!(set.contains(&"192.168.2.0/24".parse()?));
+    /// assert!(set.contains(&"c0a8::/24".parse()?));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -232,9 +265,11 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
     /// set.insert("192.168.0.0/24".parse()?);
     /// set.insert("192.168.1.0/24".parse()?);
+    /// set.insert("2001::1:0:0/96".parse()?);
     /// set.clear();
     /// assert!(!set.contains(&"192.168.0.0/24".parse()?));
     /// assert!(!set.contains(&"192.168.1.0/24".parse()?));
+    /// assert!(!set.contains(&"2001::1:0:0/96".parse()?));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -245,7 +280,30 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         self.t2.clear();
     }
 
-    /// Iterate over all prefixes in the set
+    /// Iterate over all prefixes in the set. It iterates over the first, and then over the second
+    /// set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+    /// set.insert("192.168.1.0/24".parse()?);
+    /// set.insert("192.168.0.0/24".parse()?);
+    /// set.insert("2001::1:0:0/96".parse()?);
+    /// assert_eq!(
+    ///     set.iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         "192.168.0.0/24".parse()?,
+    ///         "192.168.1.0/24".parse()?,
+    ///         "2001::1:0:0/96".parse()?
+    ///     ],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     pub fn iter(&self) -> Iter<'_, P> {
         self.into_iter()
     }
@@ -261,11 +319,15 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// set.insert("192.168.1.0/24".parse()?);
     /// set.insert("192.168.2.0/24".parse()?);
     /// set.insert("192.168.2.0/25".parse()?);
+    /// set.insert("2001::/24".parse()?);
+    /// set.insert("2001::/25".parse()?);
     /// set.retain(|p| p.prefix_len() == 24);
     /// assert!(set.contains(&"192.168.0.0/24".parse()?));
     /// assert!(set.contains(&"192.168.1.0/24".parse()?));
     /// assert!(set.contains(&"192.168.2.0/24".parse()?));
     /// assert!(!set.contains(&"192.168.2.0/25".parse()?));
+    /// assert!(set.contains(&"2001::/24".parse()?));
+    /// assert!(!set.contains(&"2001::/25".parse()?));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
