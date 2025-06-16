@@ -1,6 +1,7 @@
 //! JointPrefixSet, that is implemened as a simple binary tree, based on the
 //! [`super::JointPrefixMap`].
 
+use crate::AsView;
 use crate::PrefixSet;
 use either::{Left, Right};
 
@@ -415,6 +416,177 @@ impl<P: JointPrefix> JointPrefixSet<P> {
             Right(p2) => super::map::Cover::P2(self.t2.0.cover(p2)),
         })
     }
+
+    /// Iterate over the union of two joint prefix sets. This is roughly equivalent to calling
+    /// `self.t1.view().union(&other.t1).chain(self.t2.view().union(&other.t2))`.
+    ///
+    /// If a prefix is present in both trees, the iterator will yield both elements. Otherwise, the
+    /// iterator will yield the element of one map together with the longest prefix match in
+    /// the other map. Elements are of type [`P`].
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # use prefix_trie::joint::map::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut set_a: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::from_iter([
+    ///     net!("2001::1:0:0/96"),
+    ///     net!("192.168.0.0/22"),
+    ///     net!("192.168.0.0/24"),
+    /// ]);
+    /// let mut set_b: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::from_iter([
+    ///     net!("192.168.0.0/22"),
+    ///     net!("192.168.0.0/23"),
+    /// ]);
+    /// assert_eq!(
+    ///     set_a.union(&set_b).collect::<Vec<_>>(),
+    ///     vec![
+    ///         net!("192.168.0.0/22"),
+    ///         net!("192.168.0.0/23"),
+    ///         net!("192.168.0.0/24"),
+    ///         net!("2001::1:0:0/96"),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    pub fn union<'a>(&'a self, other: &'a JointPrefixSet<P>) -> Union<'a, P> {
+        Union(super::map::Union {
+            i1: Some(self.t1.view().union(&other.t1)),
+            i2: Some(self.t2.view().union(&other.t2)),
+        })
+    }
+
+    /// Iterate over the intersection of two joint prefix sets. This is roughly equivalent to
+    /// calling `self.t1.view().intersection(&other.t1).chain(self.t2.view().intersection(&other.t2))`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut set_a: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::from_iter([
+    ///     net!("192.168.0.0/20"),
+    ///     net!("192.168.0.0/22"),
+    ///     net!("192.168.0.0/24"),
+    ///     net!("192.168.2.0/23"),
+    ///     net!("2001::1:0:0/96"),
+    ///     net!("2001::1:0:0/97"),
+    /// ]);
+    /// let mut set_b: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::from_iter([
+    ///     net!("192.168.0.0/20"),
+    ///     net!("192.168.0.0/22"),
+    ///     net!("192.168.0.0/23"),
+    ///     net!("192.168.0.0/24"),
+    ///     net!("192.168.2.0/24"),
+    ///     net!("2001::1:0:0/96"),
+    ///     net!("2001::0:0:0/97"),
+    /// ]);
+    /// assert_eq!(
+    ///     set_a.intersection(&set_b).collect::<Vec<_>>(),
+    ///     vec![
+    ///         net!("192.168.0.0/20"),
+    ///         net!("192.168.0.0/22"),
+    ///         net!("192.168.0.0/24"),
+    ///         net!("2001::1:0:0/96"),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    pub fn intersection<'a>(&'a self, other: &'a JointPrefixSet<P>) -> Intersection<'a, P> {
+        Intersection(super::map::Intersection {
+            i1: Some(self.t1.view().intersection(&other.t1)),
+            i2: Some(self.t2.view().intersection(&other.t2)),
+        })
+    }
+
+    /// Iterate over the all elements in `self` that are not present in `other`. Each item will
+    /// return a reference to the prefix and value in `self`, as well as the longest prefix match of
+    /// `other`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut set_a: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::from_iter([
+    ///     net!("192.168.0.0/20"),
+    ///     net!("192.168.0.0/22"),
+    ///     net!("192.168.0.0/24"),
+    ///     net!("192.168.2.0/23"),
+    ///     net!("2001::1:0:0/96"),
+    ///     net!("2001::1:0:0/97"),
+    /// ]);
+    /// let mut set_b: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::from_iter([
+    ///     net!("192.168.0.0/20"),
+    ///     net!("192.168.0.0/22"),
+    ///     net!("192.168.0.0/23"),
+    ///     net!("192.168.2.0/24"),
+    ///     net!("2001::1:0:0/96"),
+    /// ]);
+    /// assert_eq!(
+    ///     set_a.difference(&set_b).collect::<Vec<_>>(),
+    ///     vec![
+    ///         (net!("192.168.0.0/24"), Some(net!("192.168.0.0/23"))),
+    ///         (net!("192.168.2.0/23"), Some(net!("192.168.0.0/22"))),
+    ///         (net!("2001::1:0:0/97"), Some(net!("2001::1:0:0/96"))),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    pub fn difference<'a>(&'a self, other: &'a JointPrefixSet<P>) -> Difference<'a, P> {
+        Difference(super::map::Difference {
+            i1: Some(self.t1.view().difference(&other.t1)),
+            i2: Some(self.t2.view().difference(&other.t2)),
+        })
+    }
+
+    /// Iterate over the all elements in `self` that are not covered by `other`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut set_a: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::from_iter([
+    ///     net!("192.168.0.0/20"),
+    ///     net!("192.168.0.0/22"),
+    ///     net!("192.168.0.0/24"),
+    ///     net!("192.168.2.0/23"),
+    ///     net!("2001::0:0:0/95"),
+    ///     net!("2001::1:0:0/96"),
+    ///     net!("2001::1:0:0/97"),
+    /// ]);
+    /// let mut set_b: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::from_iter([
+    ///     net!("192.168.0.0/21"),
+    ///     net!("192.168.0.0/22"),
+    ///     net!("192.168.0.0/23"),
+    ///     net!("192.168.2.0/24"),
+    ///     net!("2001::1:0:0/96"),
+    /// ]);
+    /// assert_eq!(
+    ///     set_a.covering_difference(&set_b).collect::<Vec<_>>(),
+    ///     vec![net!("192.168.0.0/20"), net!("2001::0:0:0/95")]
+    /// );
+    /// # }
+    /// ```
+    pub fn covering_difference<'a>(
+        &'a self,
+        other: &'a JointPrefixSet<P>,
+    ) -> CoveringDifference<'a, P> {
+        CoveringDifference(super::map::CoveringDifference {
+            i1: Some(self.t1.view().covering_difference(&other.t1)),
+            i2: Some(self.t2.view().covering_difference(&other.t2)),
+        })
+    }
 }
 
 impl<P: JointPrefix> Default for JointPrefixSet<P> {
@@ -507,15 +679,50 @@ impl<P: JointPrefix> FromIterator<P> for JointPrefixSet<P> {
 
 /// An iterator over the union of two [`JointPrefixSet`]s. The iterator yields first prefixes of
 /// `P1`, followed by those of `P2`.
-pub struct Union<'a, P: JointPrefix> {
-    t1: Option<crate::trieview::Union<'a, P::P1, (), ()>>,
-    t2: Option<crate::trieview::Union<'a, P::P2, (), ()>>,
-}
+pub struct Union<'a, P: JointPrefix>(super::map::Union<'a, P, (), ()>);
 
 impl<P: JointPrefix> Iterator for Union<'_, P> {
     type Item = P;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some()
+        self.0.next().map(|x| x.into_prefix())
+    }
+}
+
+/// An iterator over the intersection of two [`JointPrefixSet`]s. The iterator yields first prefixes of
+/// `P1`, followed by those of `P2`.
+pub struct Intersection<'a, P: JointPrefix>(super::map::Intersection<'a, P, (), ()>);
+
+impl<P: JointPrefix> Iterator for Intersection<'_, P> {
+    type Item = P;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(p, _, _)| p)
+    }
+}
+
+/// An iterator over the difference of two [`JointPrefixSet`]s. The iterator yields prefixes that
+/// are in `self`, but ont in `other`. The iterator also yields the longest prefix match in `other`
+/// (if it exists). The iterator yields first prefixes of `P1`, followed by those of `P2`.
+pub struct Difference<'a, P: JointPrefix>(super::map::Difference<'a, P, (), ()>);
+
+impl<P: JointPrefix> Iterator for Difference<'_, P> {
+    type Item = (P, Option<P>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|x| (x.prefix, x.right.map(|(p, _)| p)))
+    }
+}
+
+/// An iterator over the covering difference of two [`JointPrefixSet`]s. The iterator yields
+/// prefixes that are in `self`, but not covered by any prefix in `other`. The iterator yields first
+/// prefixes of `P1`, followed by those of `P2`.
+pub struct CoveringDifference<'a, P: JointPrefix>(super::map::CoveringDifference<'a, P, (), ()>);
+
+impl<P: JointPrefix> Iterator for CoveringDifference<'_, P> {
+    type Item = P;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(p, _)| p)
     }
 }

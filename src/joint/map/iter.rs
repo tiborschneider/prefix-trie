@@ -733,8 +733,8 @@ impl<'a, P: JointPrefix, T> Iterator for CoverValues<'a, '_, P, T> {
 /// An iterator over the union of two [`JointPrefixMap`]s. The iterator yields first prefixes of
 /// `P1`, followed by those of `P2`.
 pub struct Union<'a, P: JointPrefix, L, R> {
-    i1: Option<crate::trieview::Union<'a, P::P1, L, R>>,
-    i2: Option<crate::trieview::Union<'a, P::P2, L, R>>,
+    pub(crate) i1: Option<crate::trieview::Union<'a, P::P1, L, R>>,
+    pub(crate) i2: Option<crate::trieview::Union<'a, P::P2, L, R>>,
 }
 
 impl<'a, P: JointPrefix, L, R> Iterator for Union<'a, P, L, R> {
@@ -793,6 +793,15 @@ pub enum UnionItem<'a, P, L, R> {
 }
 
 impl<'a, P, L, R> UnionItem<'a, P, L, R> {
+    /// Get the prefix of the current element (in the exact match).
+    pub fn into_prefix(self) -> P {
+        match self {
+            UnionItem::Left { prefix, .. }
+            | UnionItem::Right { prefix, .. }
+            | UnionItem::Both { prefix, .. } => prefix,
+        }
+    }
+
     /// Get the prefix of the current element (in the exact match).
     pub fn prefix(&self) -> &P {
         match self {
@@ -908,8 +917,8 @@ impl<'a, P: JointPrefix, L, R> UnionItem<'a, P, L, R> {
 /// An iterator over the intersection of two [`JointPrefixMap`]s. The iterator yields first prefixes
 /// of `P1`, followed by those of `P2`.
 pub struct Intersection<'a, P: JointPrefix, L, R> {
-    i1: Option<crate::trieview::Intersection<'a, P::P1, L, R>>,
-    i2: Option<crate::trieview::Intersection<'a, P::P2, L, R>>,
+    pub(crate) i1: Option<crate::trieview::Intersection<'a, P::P1, L, R>>,
+    pub(crate) i2: Option<crate::trieview::Intersection<'a, P::P2, L, R>>,
 }
 
 impl<'a, P: JointPrefix, L, R> Iterator for Intersection<'a, P, L, R> {
@@ -935,8 +944,8 @@ impl<'a, P: JointPrefix, L, R> Iterator for Intersection<'a, P, L, R> {
 /// An iterator over the difference of two [`JointPrefixMap`]s, i.e., prefixes that are in `self`
 /// but not in `other`. The iterator yields first prefixes of `P1`, followed by those of `P2`.
 pub struct Difference<'a, P: JointPrefix, L, R> {
-    i1: Option<crate::trieview::Difference<'a, P::P1, L, R>>,
-    i2: Option<crate::trieview::Difference<'a, P::P2, L, R>>,
+    pub(crate) i1: Option<crate::trieview::Difference<'a, P::P1, L, R>>,
+    pub(crate) i2: Option<crate::trieview::Difference<'a, P::P2, L, R>>,
 }
 
 impl<'a, P: JointPrefix, L, R> Iterator for Difference<'a, P, L, R> {
@@ -963,8 +972,8 @@ impl<'a, P: JointPrefix, L, R> Iterator for Difference<'a, P, L, R> {
 /// are not covered by `other`. The iterator yields first prefixes of `P1`, followed by those of
 /// `P2`.
 pub struct CoveringDifference<'a, P: JointPrefix, L, R> {
-    i1: Option<crate::trieview::CoveringDifference<'a, P::P1, L, R>>,
-    i2: Option<crate::trieview::CoveringDifference<'a, P::P2, L, R>>,
+    pub(crate) i1: Option<crate::trieview::CoveringDifference<'a, P::P1, L, R>>,
+    pub(crate) i2: Option<crate::trieview::CoveringDifference<'a, P::P2, L, R>>,
 }
 
 impl<'a, P: JointPrefix, L, R> Iterator for CoveringDifference<'a, P, L, R> {
