@@ -185,7 +185,7 @@ where
     /// );
     /// # }
     /// ```
-    pub fn union<R>(&self, other: impl AsView<'a, P, R>) -> Union<'a, P, L, R> {
+    pub fn union<R>(&self, other: &'a impl AsView<P = P, T = R>) -> Union<'a, P, L, R> {
         let other = other.view();
         Union {
             table_l: self.table,

@@ -132,7 +132,7 @@ where
     /// let sub_a = map_a.view_at(net!("192.168.0.0/22")).unwrap();
     /// let sub_b = map_b.view_at(net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(
-    ///     sub_a.difference(sub_b).collect::<Vec<_>>(),
+    ///     sub_a.difference(&sub_b).collect::<Vec<_>>(),
     ///     vec![
     ///         DifferenceItem { prefix: &net!("192.168.0.0/24"), value: &3, right: Some((&net!("192.168.0.0/23"), &"c"))},
     ///         DifferenceItem { prefix: &net!("192.168.2.0/23"), value: &4, right: Some((&net!("192.168.0.0/22"), &"b"))},
@@ -140,7 +140,7 @@ where
     /// );
     /// # }
     /// ```
-    pub fn difference<R>(&self, other: impl AsView<'a, P, R>) -> Difference<'a, P, L, R> {
+    pub fn difference<R>(&self, other: &'a impl AsView<P = P, T = R>) -> Difference<'a, P, L, R> {
         let other = other.view();
         Difference {
             table_l: self.table,
@@ -186,7 +186,7 @@ where
     /// ```
     pub fn covering_difference<R>(
         &self,
-        other: impl AsView<'a, P, R>,
+        other: &'a impl AsView<P = P, T = R>,
     ) -> CoveringDifference<'a, P, L, R> {
         let other = other.view();
         CoveringDifference {
@@ -237,7 +237,7 @@ where
     ///
     /// let mut sub_a = map_a.view_mut_at(net!("192.168.0.0/22")).unwrap();
     /// let sub_b = map_b.view_at(net!("192.168.0.0/22")).unwrap();
-    /// sub_a.difference_mut(sub_b).for_each(|x| *x.value += 10);
+    /// sub_a.difference_mut(&sub_b).for_each(|x| *x.value += 10);
     ///
     /// assert_eq!(
     ///     map_a.into_iter().collect::<Vec<_>>(),
@@ -250,10 +250,10 @@ where
     /// );
     /// # }
     /// ```
-    pub fn difference_mut<'b, R>(
-        &'b mut self,
-        other: impl AsView<'b, P, R>,
-    ) -> DifferenceMut<'b, P, L, R> {
+    pub fn difference_mut<'a, R>(
+        &'a mut self,
+        other: &'a impl AsView<P = P, T = R>,
+    ) -> DifferenceMut<'a, P, L, R> {
         let other = other.view();
         let nodes = extend_lpm(
             other.table,
@@ -304,10 +304,10 @@ where
     /// );
     /// # }
     /// ```
-    pub fn covering_difference_mut<'b, R>(
-        &'b mut self,
-        other: impl AsView<'b, P, R>,
-    ) -> CoveringDifferenceMut<'b, P, L, R> {
+    pub fn covering_difference_mut<'a, R>(
+        &'a mut self,
+        other: &'a impl AsView<P = P, T = R>,
+    ) -> CoveringDifferenceMut<'a, P, L, R> {
         let other = other.view();
         let nodes = next_indices(
             self.table,

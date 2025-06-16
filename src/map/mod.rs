@@ -894,13 +894,16 @@ where
     }
 }
 
-impl<P, T> PartialEq for PrefixMap<P, T>
+impl<P, L, Rhs> PartialEq<Rhs> for PrefixMap<P, L>
 where
     P: Prefix + PartialEq,
-    T: PartialEq,
+    L: PartialEq<Rhs::T>,
+    Rhs: crate::AsView<P = P>,
 {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().zip(other.iter()).all(|(a, b)| a == b)
+    fn eq(&self, other: &Rhs) -> bool {
+        self.iter()
+            .zip(other.view().iter())
+            .all(|((lp, lt), (rp, rt))| lt == rt && lp == rp)
     }
 }
 

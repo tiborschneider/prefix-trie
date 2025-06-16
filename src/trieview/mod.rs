@@ -11,25 +11,45 @@ use crate::{
 };
 
 /// A trait for creating a [`TrieView`] of `self`.
-pub trait AsView<'a, P: Prefix, T>: Sized {
+pub trait AsView: Sized {
+    /// The prefix type of the returned view
+    type P: Prefix;
+    /// The value type of the returned view
+    type T;
+
     /// Get a TrieView rooted at the origin (referencing the entire trie).
-    fn view(self) -> TrieView<'a, P, T>;
+    fn view(&self) -> TrieView<'_, Self::P, Self::T>;
 
     /// Get a TrieView rooted at the given `prefix`. If that `prefix` is not part of the trie, `None`
     /// is returned. Calling this function is identical to `self.view().find(prefix)`.
-    fn view_at(self, prefix: P) -> Option<TrieView<'a, P, T>> {
+    fn view_at(&self, prefix: Self::P) -> Option<TrieView<'_, Self::P, Self::T>> {
         self.view().find(prefix)
     }
 }
 
-impl<'a, P: Prefix, T> AsView<'a, P, T> for TrieView<'a, P, T> {
-    fn view(self) -> TrieView<'a, P, T> {
-        self
+impl<'a, P: Prefix + Clone, T> AsView for TrieView<'a, P, T> {
+    type P = P;
+    type T = T;
+
+    fn view(&self) -> TrieView<'a, P, T> {
+        self.clone()
     }
 }
 
-impl<'b: 'a, 'a, P: Prefix + Clone, T> AsView<'a, P, T> for &'a TrieViewMut<'b, P, T> {
-    fn view(self) -> TrieView<'a, P, T> {
+impl<'a, P: Prefix + Clone, T> AsView for &TrieView<'a, P, T> {
+    type P = P;
+    type T = T;
+
+    fn view(&self) -> TrieView<'a, P, T> {
+        (*self).clone()
+    }
+}
+
+impl<'b: 'a, 'a, P: Prefix + Clone, T> AsView for &'a TrieViewMut<'b, P, T> {
+    type P = P;
+    type T = T;
+
+    fn view(&self) -> TrieView<'a, P, T> {
         TrieView {
             table: self.table,
             loc: self.loc.clone(),
@@ -37,8 +57,23 @@ impl<'b: 'a, 'a, P: Prefix + Clone, T> AsView<'a, P, T> for &'a TrieViewMut<'b, 
     }
 }
 
-impl<'a, P: Prefix, T> AsView<'a, P, T> for &'a PrefixMap<P, T> {
-    fn view(self) -> TrieView<'a, P, T> {
+impl<P: Prefix + Clone, T> AsView for TrieViewMut<'_, P, T> {
+    type P = P;
+    type T = T;
+
+    fn view(&self) -> TrieView<'_, P, T> {
+        TrieView {
+            table: self.table,
+            loc: self.loc.clone(),
+        }
+    }
+}
+
+impl<P: Prefix, T> AsView for PrefixMap<P, T> {
+    type P = P;
+    type T = T;
+
+    fn view(&self) -> TrieView<'_, P, T> {
         TrieView {
             table: &self.table,
             loc: ViewLoc::Node(0),
@@ -46,8 +81,35 @@ impl<'a, P: Prefix, T> AsView<'a, P, T> for &'a PrefixMap<P, T> {
     }
 }
 
-impl<'a, P: Prefix> AsView<'a, P, ()> for &'a PrefixSet<P> {
-    fn view(self) -> TrieView<'a, P, ()> {
+impl<'a, P: Prefix, T> AsView for &'a PrefixMap<P, T> {
+    type P = P;
+    type T = T;
+
+    fn view<'b>(&'b self) -> TrieView<'a, P, T> {
+        TrieView {
+            table: &self.table,
+            loc: ViewLoc::Node(0),
+        }
+    }
+}
+
+impl<P: Prefix> AsView for PrefixSet<P> {
+    type P = P;
+    type T = ();
+
+    fn view(&self) -> TrieView<'_, P, ()> {
+        TrieView {
+            table: &self.0.table,
+            loc: ViewLoc::Node(0),
+        }
+    }
+}
+
+impl<'a, P: Prefix> AsView for &'a PrefixSet<P> {
+    type P = P;
+    type T = ();
+
+    fn view<'b>(&'b self) -> TrieView<'a, P, ()> {
         TrieView {
             table: &self.0.table,
             loc: ViewLoc::Node(0),
@@ -99,6 +161,26 @@ impl<P: std::fmt::Debug, T: std::fmt::Debug> std::fmt::Debug for TrieView<'_, P,
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("View").field(self.prefix()).finish()
     }
+}
+
+impl<P, L, Rhs> PartialEq<Rhs> for TrieView<'_, P, L>
+where
+    P: Prefix + PartialEq,
+    L: PartialEq<Rhs::T>,
+    Rhs: crate::AsView<P = P>,
+{
+    fn eq(&self, other: &Rhs) -> bool {
+        self.iter()
+            .zip(other.view().iter())
+            .all(|((lp, lt), (rp, rt))| lt == rt && lp == rp)
+    }
+}
+
+impl<P, T> Eq for TrieView<'_, P, T>
+where
+    P: Prefix + Eq + Clone,
+    T: Eq,
+{
 }
 
 impl<'a, P, T> TrieView<'a, P, T>
@@ -650,6 +732,27 @@ impl<P: std::fmt::Debug, T: std::fmt::Debug> std::fmt::Debug for TrieViewMut<'_,
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ViewMut").field(self.prefix()).finish()
     }
+}
+
+impl<P, L, Rhs> PartialEq<Rhs> for TrieViewMut<'_, P, L>
+where
+    P: Prefix + PartialEq + Clone,
+    L: PartialEq<Rhs::T>,
+    Rhs: crate::AsView<P = P>,
+{
+    fn eq(&self, other: &Rhs) -> bool {
+        self.view()
+            .iter()
+            .zip(other.view().iter())
+            .all(|((lp, lt), (rp, rt))| lt == rt && lp == rp)
+    }
+}
+
+impl<P, T> Eq for TrieViewMut<'_, P, T>
+where
+    P: Prefix + Eq + Clone,
+    T: Eq,
+{
 }
 
 impl<P, T> TrieViewMut<'_, P, T>
