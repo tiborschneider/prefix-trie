@@ -1,5 +1,7 @@
 //! Module that contains the implementation for the iterators
 
+use either::{Left, Right};
+
 use crate::joint::JointPrefix;
 
 use super::JointPrefixMap;
@@ -381,11 +383,11 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// ```
     pub fn children<'a>(&'a self, prefix: &P) -> Iter<'a, P, T> {
         match prefix.p1_or_p2_ref() {
-            Ok(p1) => Iter {
+            Left(p1) => Iter {
                 i1: Some(self.t1.children(p1)),
                 i2: None,
             },
-            Err(p2) => Iter {
+            Right(p2) => Iter {
                 i1: None,
                 i2: Some(self.t2.children(p2)),
             },
@@ -427,11 +429,11 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// ```
     pub fn children_mut<'a>(&'a mut self, prefix: &P) -> IterMut<'a, P, T> {
         match prefix.p1_or_p2_ref() {
-            Ok(p1) => IterMut {
+            Left(p1) => IterMut {
                 i1: Some(self.t1.children_mut(p1)),
                 i2: None,
             },
-            Err(p2) => IterMut {
+            Right(p2) => IterMut {
                 i1: None,
                 i2: Some(self.t2.children_mut(p2)),
             },
@@ -466,11 +468,11 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// ```
     pub fn into_children(self, prefix: &P) -> IntoIter<P, T> {
         match prefix.p1_or_p2_ref() {
-            Ok(p1) => IntoIter {
+            Left(p1) => IntoIter {
                 i1: Some(self.t1.into_children(p1)),
                 i2: None,
             },
-            Err(p2) => IntoIter {
+            Right(p2) => IntoIter {
                 i1: None,
                 i2: Some(self.t2.into_children(p2)),
             },
