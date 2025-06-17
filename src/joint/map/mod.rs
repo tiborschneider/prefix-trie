@@ -44,11 +44,12 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
-    /// set.insert("192.168.1.0/24".parse()?, 1u32);
-    /// set.insert("192.168.1.0/25".parse()?, 2u32);
-    /// set.insert("2001::1:0:0/96".parse()?, 3u32);
-    /// assert_eq!(set.len(), 3);
+    /// let mut map: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::default();
+    /// map.insert("192.168.1.0/24".parse()?, 1u32);
+    /// map.insert("192.168.1.0/25".parse()?, 2u32);
+    /// map.insert("2001::1:0:0/96".parse()?, 3u32);
+    /// # let map = map.clone();
+    /// assert_eq!(map.len(), 3);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -65,10 +66,10 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
-    /// assert!(set.is_empty());
-    /// set.insert("2001::1:0:0/96".parse()?, 1u32);
-    /// assert!(!set.is_empty());
+    /// let mut map: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// assert!(map.is_empty());
+    /// map.insert("2001::1:0:0/96".parse()?, 1u32);
+    /// assert!(!map.is_empty());
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]

@@ -35,10 +35,11 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// # use prefix_trie::joint::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::default();
     /// set.insert("192.168.1.0/24".parse()?);
     /// set.insert("192.168.1.0/25".parse()?);
     /// set.insert("2001::1:0:0/96".parse()?);
+    /// # let set = set.clone();
     /// assert_eq!(set.len(), 3);
     /// # Ok(())
     /// # }
@@ -422,7 +423,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     ///
     /// If a prefix is present in both trees, the iterator will yield both elements. Otherwise, the
     /// iterator will yield the element of one map together with the longest prefix match in
-    /// the other map. Elements are of type [`P`].
+    /// the other map. Elements are of type `P`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
