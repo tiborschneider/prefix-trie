@@ -1249,7 +1249,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     /// ```
     pub fn into_left(self) -> Option<(P, &'a L)> {
         match self {
-            UnionItem::Right { left, .. } => left.map(|(p, l)| (p, l)),
+            UnionItem::Right { left, .. } => left,
             UnionItem::Left { prefix, left, .. } | UnionItem::Both { prefix, left, .. } => {
                 Some((prefix, left))
             }
@@ -1332,7 +1332,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     /// ```
     pub fn into_right(self) -> Option<(P, &'a R)> {
         match self {
-            UnionItem::Left { right, .. } => right.map(|(p, r)| (p, r)),
+            UnionItem::Left { right, .. } => right,
             UnionItem::Right { prefix, right, .. } | UnionItem::Both { prefix, right, .. } => {
                 Some((prefix, right))
             }

@@ -267,9 +267,8 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
-    /// match pm.entry("192.168.1.1/24".parse()?) {
-    ///     Entry::Occupied(e) => assert_eq!(e.key(), "192.168.1.0/24".parse()?),
-    ///     Entry::Vacant(_) => unreachable!(),
+    /// if let Entry::Occupied(e) = pm.entry("192.168.1.1/24".parse()?) {
+    ///     assert_eq!(e.key(), "192.168.1.0/24".parse()?);
     /// }
     /// # Ok(())
     /// # }
@@ -293,9 +292,8 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
     ///
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
-    /// match pm.entry("192.168.1.0/24".parse()?) {
-    ///     Entry::Occupied(e) => assert_eq!(e.get(), &1),
-    ///     Entry::Vacant(_) => unreachable!(),
+    /// if let Entry::Occupied(e) = pm.entry("192.168.1.0/24".parse()?) {
+    ///     assert_eq!(e.get(), &1);
     /// }
     /// # Ok(())
     /// # }
@@ -323,9 +321,8 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
     ///
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
-    /// match pm.entry("192.168.1.0/24".parse()?) {
-    ///     Entry::Occupied(mut e) => *e.get_mut() += 1,
-    ///     Entry::Vacant(_) => unreachable!(),
+    /// if let Entry::Occupied(mut e) = pm.entry("192.168.1.0/24".parse()?) {
+    ///     *e.get_mut() += 1;
     /// }
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&2));
     /// # Ok(())
@@ -351,9 +348,8 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
     ///
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
-    /// match pm.entry("192.168.1.0/24".parse()?) {
-    ///     Entry::Occupied(mut e) => assert_eq!(e.insert(10), 1),
-    ///     Entry::Vacant(_) => unreachable!(),
+    /// if let Entry::Occupied(mut e) = pm.entry("192.168.1.0/24".parse()?) {
+    ///     assert_eq!(e.insert(10), 1);
     /// }
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&10));
     /// # Ok(())
@@ -379,9 +375,8 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
     ///
     /// let mut pm: JointPrefixMap<ipnet::IpNet, i32> = JointPrefixMap::new();
     /// pm.insert("192.168.1.0/24".parse()?, 1);
-    /// match pm.entry("192.168.1.0/24".parse()?) {
-    ///     Entry::Occupied(mut e) => assert_eq!(e.remove(), 1),
-    ///     Entry::Vacant(_) => unreachable!(),
+    /// if let Entry::Occupied(mut e) = pm.entry("192.168.1.0/24".parse()?) {
+    ///     assert_eq!(e.remove(), 1);
     /// }
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), None);
     /// # Ok(())
@@ -406,9 +401,8 @@ impl<'a, P: JointPrefix, T> VacantEntry<'a, P, T> {
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, i32> = JointPrefixMap::new();
-    /// match pm.entry("192.168.1.0/24".parse()?) {
-    ///     Entry::Vacant(e) => assert_eq!(e.key(), "192.168.1.0/24".parse()?),
-    ///     Entry::Occupied(_) => unreachable!(),
+    /// if let Entry::Vacant(e) = pm.entry("192.168.1.0/24".parse()?) {
+    ///     assert_eq!(e.key(), "192.168.1.0/24".parse()?);
     /// }
     /// # Ok(())
     /// # }
@@ -431,9 +425,8 @@ impl<'a, P: JointPrefix, T> VacantEntry<'a, P, T> {
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, i32> = JointPrefixMap::new();
-    /// match pm.entry("192.168.1.0/24".parse()?) {
-    ///     Entry::Vacant(mut e) => assert_eq!(e.insert(10), &10),
-    ///     Entry::Occupied(_) => unreachable!(),
+    /// if let Entry::Vacant(mut e) = pm.entry("192.168.1.0/24".parse()?) {
+    ///     assert_eq!(e.insert(10), &10);
     /// }
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&10));
     /// # Ok(())
@@ -457,9 +450,8 @@ impl<'a, P: JointPrefix, T> VacantEntry<'a, P, T> {
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, i32> = JointPrefixMap::new();
-    /// match pm.entry("192.168.1.0/24".parse()?) {
-    ///     Entry::Vacant(mut e) => assert_eq!(e.insert_with(|| 10), &10),
-    ///     Entry::Occupied(_) => unreachable!(),
+    /// if let Entry::Vacant(mut e) = pm.entry("192.168.1.0/24".parse()?) {
+    ///     assert_eq!(e.insert_with(|| 10), &10);
     /// }
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&10));
     /// # Ok(())
@@ -489,9 +481,8 @@ where
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, i32> = JointPrefixMap::new();
-    /// match pm.entry("192.168.1.0/24".parse()?) {
-    ///     Entry::Vacant(e) => assert_eq!(e.default(), &0),
-    ///     Entry::Occupied(_) => unreachable!(),
+    /// if let Entry::Vacant(e) = pm.entry("192.168.1.0/24".parse()?) {
+    ///     assert_eq!(e.default(), &0);
     /// }
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&0));
     /// # Ok(())
