@@ -1204,20 +1204,20 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     /// # {
     /// let mut map_a: JointPrefixMap<ipnet::IpNet, usize> = JointPrefixMap::from_iter([
     ///     (net!("2001::1:0:0/96"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
+    ///     (net!("2001::2:0:0/96"), 2),
+    ///     (net!("2001::2:0:0/98"), 3),
     /// ]);
     /// let mut map_b: JointPrefixMap<ipnet::IpNet, &'static str> = JointPrefixMap::from_iter([
-    ///     (net!("192.168.0.0/22"), "a"),
-    ///     (net!("192.168.0.0/23"), "b"),
+    ///     (net!("2001::2:0:0/96"), "a"),
+    ///     (net!("2001::2:0:0/97"), "b"),
     /// ]);
     /// assert_eq!(
     ///     map_a.union(&map_b).map(|x| x.into_left()).collect::<Vec<_>>(),
     ///     vec![
-    ///         Some((net!("192.168.0.0/22"), &2)),
-    ///         Some((net!("192.168.0.0/22"), &2)),
-    ///         Some((net!("192.168.0.0/24"), &3)),
     ///         Some((net!("2001::1:0:0/96"), &1)),
+    ///         Some((net!("2001::2:0:0/96"), &2)),
+    ///         Some((net!("2001::2:0:0/96"), &2)),
+    ///         Some((net!("2001::2:0:0/98"), &3)),
     ///     ]
     /// );
     /// # }
@@ -1287,20 +1287,20 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     /// # {
     /// let mut map_a: JointPrefixMap<ipnet::IpNet, usize> = JointPrefixMap::from_iter([
     ///     (net!("2001::1:0:0/96"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
+    ///     (net!("2001::2:0:0/96"), 2),
+    ///     (net!("2001::2:0:0/98"), 3),
     /// ]);
     /// let mut map_b: JointPrefixMap<ipnet::IpNet, &'static str> = JointPrefixMap::from_iter([
-    ///     (net!("192.168.0.0/22"), "a"),
-    ///     (net!("192.168.0.0/23"), "b"),
+    ///     (net!("2001::2:0:0/96"), "a"),
+    ///     (net!("2001::2:0:0/97"), "b"),
     /// ]);
     /// assert_eq!(
     ///     map_a.union(&map_b).map(|x| x.into_right()).collect::<Vec<_>>(),
     ///     vec![
-    ///         Some((net!("192.168.0.0/22"), &"a")),
-    ///         Some((net!("192.168.0.0/23"), &"b")),
-    ///         Some((net!("192.168.0.0/23"), &"b")),
     ///         None,
+    ///         Some((net!("2001::2:0:0/96"), &"a")),
+    ///         Some((net!("2001::2:0:0/97"), &"b")),
+    ///         Some((net!("2001::2:0:0/97"), &"b")),
     ///     ]
     /// );
     /// # }
