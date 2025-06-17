@@ -667,6 +667,31 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
+    ///
+    /// If the prefix is not present in the tree, and there are no children, the iterator will be
+    /// empty:
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::/32".parse()?, 1);
+    /// pm.insert("2001::/48".parse()?, 2);
+    /// assert_eq!(
+    ///     pm.clone().into_children(&"2001::/24".parse()?).collect::<Vec<_>>(),
+    ///     vec![
+    ///         ("2001::/32".parse()?, 1),
+    ///         ("2001::/48".parse()?, 2),
+    ///     ]
+    /// );
+    /// assert_eq!(pm.clone().into_children(&"2001::/96".parse()?).collect::<Vec<_>>(), vec![]);
+    /// assert_eq!(pm.clone().into_children(&"1111::/24".parse()?).collect::<Vec<_>>(), vec![]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     pub fn into_children(self, prefix: &P) -> IntoIter<P, T> {
         match prefix.p1_or_p2_ref() {
             Left(p1) => IntoIter {
