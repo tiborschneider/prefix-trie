@@ -14,12 +14,58 @@ pub struct Iter<'a, P: JointPrefix, T> {
 }
 
 impl<P: JointPrefix, T> Default for Iter<'_, P, T> {
+    /// The default iterator is empty.
+    ///
+    /// ```
+    /// use prefix_trie::joint;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// assert_eq!(joint::map::Iter::<ipnet::IpNet, usize>::default().count(), 0);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     fn default() -> Self {
         Self { i1: None, i2: None }
     }
 }
 
 impl<P: JointPrefix, T> Clone for Iter<'_, P, T> {
+    /// You can clone an iterator, which maintains its state.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::1:0:0/96".parse()?, 1);
+    /// pm.insert("192.168.0.0/22".parse()?, 2);
+    /// pm.insert("192.168.0.0/23".parse()?, 3);
+    /// let mut iter = pm.iter();
+    ///
+    /// assert_eq!(iter.next(), Some(("192.168.0.0/22".parse()?, &2)));
+    ///
+    /// let clone = iter.clone();
+    /// assert_eq!(
+    ///     iter.collect::<Vec<_>>(),
+    ///     vec![
+    ///         ("192.168.0.0/23".parse()?, &3),
+    ///         ("2001::1:0:0/96".parse()?, &1),
+    ///     ]
+    /// );
+    /// assert_eq!(
+    ///     clone.collect::<Vec<_>>(),
+    ///     vec![
+    ///         ("192.168.0.0/23".parse()?, &3),
+    ///         ("2001::1:0:0/96".parse()?, &1),
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     fn clone(&self) -> Self {
         Self {
             i1: self.i1.clone(),
@@ -171,6 +217,18 @@ pub struct IterMut<'a, P: JointPrefix, T> {
 }
 
 impl<P: JointPrefix, T> Default for IterMut<'_, P, T> {
+    /// The default iterator is empty.
+    ///
+    /// ```
+    /// use prefix_trie::joint;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// assert_eq!(joint::map::IterMut::<ipnet::IpNet, usize>::default().count(), 0);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     fn default() -> Self {
         Self { i1: None, i2: None }
     }
@@ -256,6 +314,36 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// Get a mutable iterator over all key-value pairs. The order of this iterator is lexicographic.
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::1:0:0/97".parse()?, 6);
+    /// pm.insert("2001::1:0:0/96".parse()?, 7);
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// pm.iter_mut().for_each(|(_, v)| *v += 1);
+    /// assert_eq!(
+    ///     pm.iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         ("192.168.0.0/22".parse()?, &2),
+    ///         ("192.168.0.0/23".parse()?, &3),
+    ///         ("192.168.0.0/24".parse()?, &5),
+    ///         ("192.168.2.0/23".parse()?, &4),
+    ///         ("192.168.2.0/24".parse()?, &6),
+    ///         ("2001::1:0:0/96".parse()?, &8),
+    ///         ("2001::1:0:0/97".parse()?, &7),
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     pub fn iter_mut(&mut self) -> IterMut<'_, P, T> {
         IterMut {
             i1: Some(self.t1.iter_mut()),
@@ -302,6 +390,36 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
 
     /// Creates a consuming iterator visiting all keys in lexicographic order. The iterator element
     /// type is `P`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::1:0:0/97".parse()?, 6);
+    /// pm.insert("2001::1:0:0/96".parse()?, 7);
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// assert_eq!(
+    ///     pm.into_keys().collect::<Vec<_>>(),
+    ///     vec![
+    ///         "192.168.0.0/22".parse()?,
+    ///         "192.168.0.0/23".parse()?,
+    ///         "192.168.0.0/24".parse()?,
+    ///         "192.168.2.0/23".parse()?,
+    ///         "192.168.2.0/24".parse()?,
+    ///         "2001::1:0:0/96".parse()?,
+    ///         "2001::1:0:0/97".parse()?,
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn into_keys(self) -> IntoKeys<P, T> {
         IntoKeys {
@@ -337,6 +455,25 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
 
     /// Creates a consuming iterator visiting all values in lexicographic order. The iterator
     /// element type is `P`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::1:0:0/97".parse()?, 6);
+    /// pm.insert("2001::1:0:0/96".parse()?, 7);
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// assert_eq!(pm.into_values().collect::<Vec<_>>(), vec![1, 2, 4, 3, 5, 7, 6]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn into_values(self) -> IntoValues<P, T> {
         IntoValues {
@@ -345,6 +482,26 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// Get a mutable iterator over all values. The order of this iterator is lexicographic.
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::1:0:0/97".parse()?, 6);
+    /// pm.insert("2001::1:0:0/96".parse()?, 7);
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    ///
+    /// pm.values_mut().for_each(|v| *v += 1);
+    /// assert_eq!(pm.values().collect::<Vec<_>>(), vec![&2, &3, &5, &4, &6, &8, &7]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     pub fn values_mut(&mut self) -> ValuesMut<'_, P, T> {
         ValuesMut {
             inner: self.iter_mut(),
@@ -377,6 +534,31 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     ///         ("192.168.0.0/24".parse()?, &4),
     ///     ]
     /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    ///
+    /// If the prefix is not present in the tree, and there are no children, the iterator will be
+    /// empty:
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::/32".parse()?, 1);
+    /// pm.insert("2001::/48".parse()?, 2);
+    /// assert_eq!(
+    ///     pm.children(&"2001::/24".parse()?).collect::<Vec<_>>(),
+    ///     vec![
+    ///         ("2001::/32".parse()?, &1),
+    ///         ("2001::/48".parse()?, &2),
+    ///     ]
+    /// );
+    /// assert_eq!(pm.children(&"2001::/96".parse()?).collect::<Vec<_>>(), vec![]);
+    /// assert_eq!(pm.children(&"1111::/24".parse()?).collect::<Vec<_>>(), vec![]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -423,6 +605,24 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     ///         ("192.168.2.0/24".parse()?, 5),
     ///     ]
     /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    ///
+    /// If the prefix is not present in the tree, and there are no children, the iterator will be
+    /// empty:
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("2001::/32".parse()?, 1);
+    /// pm.insert("2001::/48".parse()?, 2);
+    /// assert_eq!(pm.children_mut(&"2001::/96".parse()?).collect::<Vec<_>>(), vec![]);
+    /// assert_eq!(pm.children_mut(&"1111::/24".parse()?).collect::<Vec<_>>(), vec![]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -794,7 +994,36 @@ pub enum UnionItem<'a, P, L, R> {
 
 impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     /// Get the prefix of the current element (in the exact match).
-    pub fn into_prefix(self) -> P {
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # use prefix_trie::joint::map::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: JointPrefixMap<ipnet::IpNet, usize> = JointPrefixMap::from_iter([
+    ///     (net!("2001::1:0:0/96"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    /// ]);
+    /// let mut map_b: JointPrefixMap<ipnet::IpNet, &'static str> = JointPrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), "a"),
+    ///     (net!("192.168.0.0/23"), "b"),
+    /// ]);
+    /// assert_eq!(
+    ///     map_a.union(&map_b).map(|x| *x.prefix()).collect::<Vec<_>>(),
+    ///     vec![
+    ///         net!("192.168.0.0/22"),
+    ///         net!("192.168.0.0/23"),
+    ///         net!("192.168.0.0/24"),
+    ///         net!("2001::1:0:0/96"),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    pub fn prefix(&self) -> &P {
         match self {
             UnionItem::Left { prefix, .. }
             | UnionItem::Right { prefix, .. }
@@ -803,7 +1032,36 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     }
 
     /// Get the prefix of the current element (in the exact match).
-    pub fn prefix(&self) -> &P {
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # use prefix_trie::joint::map::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: JointPrefixMap<ipnet::IpNet, usize> = JointPrefixMap::from_iter([
+    ///     (net!("2001::1:0:0/96"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    /// ]);
+    /// let mut map_b: JointPrefixMap<ipnet::IpNet, &'static str> = JointPrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), "a"),
+    ///     (net!("192.168.0.0/23"), "b"),
+    /// ]);
+    /// assert_eq!(
+    ///     map_a.union(&map_b).map(|x| x.into_prefix()).collect::<Vec<_>>(),
+    ///     vec![
+    ///         net!("192.168.0.0/22"),
+    ///         net!("192.168.0.0/23"),
+    ///         net!("192.168.0.0/24"),
+    ///         net!("2001::1:0:0/96"),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    pub fn into_prefix(self) -> P {
         match self {
             UnionItem::Left { prefix, .. }
             | UnionItem::Right { prefix, .. }
@@ -814,7 +1072,72 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     /// Get the element in both the left and right map, but only if they are both present. By
     /// doing `a.union(b).filter_map(|x| x.both)`, you get an iterator that yields only elements
     /// that are present in both tries.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # use prefix_trie::joint::map::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: JointPrefixMap<ipnet::IpNet, usize> = JointPrefixMap::from_iter([
+    ///     (net!("2001::1:0:0/96"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    /// ]);
+    /// let mut map_b: JointPrefixMap<ipnet::IpNet, &'static str> = JointPrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), "a"),
+    ///     (net!("192.168.0.0/23"), "b"),
+    /// ]);
+    /// assert_eq!(
+    ///     map_a
+    ///         .union(&map_b)
+    ///         .filter_map(|x| x.both().map(|(p, l, r)| (*p, l, r)))
+    ///         .collect::<Vec<_>>(),
+    ///     vec![(net!("192.168.0.0/22"), &2, &"a")]
+    /// );
+    /// # }
+    /// ```
     pub fn both(&self) -> Option<(&P, &'a L, &'a R)> {
+        match self {
+            UnionItem::Left { .. } | UnionItem::Right { .. } => None,
+            UnionItem::Both {
+                prefix,
+                left,
+                right,
+            } => Some((prefix, left, right)),
+        }
+    }
+
+    /// Get the element in both the left and right map, but only if they are both present. By
+    /// doing `a.union(b).filter_map(|x| x.both)`, you get an iterator that yields only elements
+    /// that are present in both tries.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # use prefix_trie::joint::map::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: JointPrefixMap<ipnet::IpNet, usize> = JointPrefixMap::from_iter([
+    ///     (net!("2001::1:0:0/96"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    /// ]);
+    /// let mut map_b: JointPrefixMap<ipnet::IpNet, &'static str> = JointPrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), "a"),
+    ///     (net!("192.168.0.0/23"), "b"),
+    /// ]);
+    /// assert_eq!(
+    ///     map_a.union(&map_b).filter_map(|x| x.into_both()).collect::<Vec<_>>(),
+    ///     vec![(net!("192.168.0.0/22"), &2, &"a")]
+    /// );
+    /// # }
+    /// ```
+    pub fn into_both(self) -> Option<(P, &'a L, &'a R)> {
         match self {
             UnionItem::Left { .. } | UnionItem::Right { .. } => None,
             UnionItem::Both {
@@ -827,6 +1150,38 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
 
     /// Get the value of the left item (`self`). This either returns the exact match or the
     /// longest-prefix match.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # use prefix_trie::joint::map::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: JointPrefixMap<ipnet::IpNet, usize> = JointPrefixMap::from_iter([
+    ///     (net!("2001::1:0:0/96"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    /// ]);
+    /// let mut map_b: JointPrefixMap<ipnet::IpNet, &'static str> = JointPrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), "a"),
+    ///     (net!("192.168.0.0/23"), "b"),
+    /// ]);
+    /// assert_eq!(
+    ///     map_a
+    ///         .union(&map_b)
+    ///         .map(|x| x.left().map(|(p, l)| (*p, l)))
+    ///         .collect::<Vec<_>>(),
+    ///     vec![
+    ///         Some((net!("192.168.0.0/22"), &2)),
+    ///         Some((net!("192.168.0.0/22"), &2)),
+    ///         Some((net!("192.168.0.0/24"), &3)),
+    ///         Some((net!("2001::1:0:0/96"), &1)),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
     pub fn left(&self) -> Option<(&P, &'a L)> {
         match self {
             UnionItem::Right { left, .. } => left.as_ref().map(|(p, l)| (p, *l)),
@@ -836,11 +1191,123 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
         }
     }
 
+    /// Get the value of the left item (`self`). This either returns the exact match or the
+    /// longest-prefix match.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # use prefix_trie::joint::map::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: JointPrefixMap<ipnet::IpNet, usize> = JointPrefixMap::from_iter([
+    ///     (net!("2001::1:0:0/96"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    /// ]);
+    /// let mut map_b: JointPrefixMap<ipnet::IpNet, &'static str> = JointPrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), "a"),
+    ///     (net!("192.168.0.0/23"), "b"),
+    /// ]);
+    /// assert_eq!(
+    ///     map_a.union(&map_b).map(|x| x.into_left()).collect::<Vec<_>>(),
+    ///     vec![
+    ///         Some((net!("192.168.0.0/22"), &2)),
+    ///         Some((net!("192.168.0.0/22"), &2)),
+    ///         Some((net!("192.168.0.0/24"), &3)),
+    ///         Some((net!("2001::1:0:0/96"), &1)),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    pub fn into_left(self) -> Option<(P, &'a L)> {
+        match self {
+            UnionItem::Right { left, .. } => left.map(|(p, l)| (p, l)),
+            UnionItem::Left { prefix, left, .. } | UnionItem::Both { prefix, left, .. } => {
+                Some((prefix, left))
+            }
+        }
+    }
+
     /// Get the value of the right item (`other`). This either returns the exact match or the
     /// longest-prefix match.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # use prefix_trie::joint::map::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: JointPrefixMap<ipnet::IpNet, usize> = JointPrefixMap::from_iter([
+    ///     (net!("2001::1:0:0/96"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    /// ]);
+    /// let mut map_b: JointPrefixMap<ipnet::IpNet, &'static str> = JointPrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), "a"),
+    ///     (net!("192.168.0.0/23"), "b"),
+    /// ]);
+    /// assert_eq!(
+    ///     map_a
+    ///         .union(&map_b)
+    ///         .map(|x| x.right().map(|(p, r)| (*p, r)))
+    ///         .collect::<Vec<_>>(),
+    ///     vec![
+    ///         Some((net!("192.168.0.0/22"), &"a")),
+    ///         Some((net!("192.168.0.0/23"), &"b")),
+    ///         Some((net!("192.168.0.0/23"), &"b")),
+    ///         None,
+    ///     ]
+    /// );
+    /// # }
+    /// ```
     pub fn right(&self) -> Option<(&P, &'a R)> {
         match self {
             UnionItem::Left { right, .. } => right.as_ref().map(|(p, r)| (p, *r)),
+            UnionItem::Right { prefix, right, .. } | UnionItem::Both { prefix, right, .. } => {
+                Some((prefix, right))
+            }
+        }
+    }
+
+    /// Get the value of the right item (`other`). This either returns the exact match or the
+    /// longest-prefix match.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # use prefix_trie::joint::map::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::IpNet>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map_a: JointPrefixMap<ipnet::IpNet, usize> = JointPrefixMap::from_iter([
+    ///     (net!("2001::1:0:0/96"), 1),
+    ///     (net!("192.168.0.0/22"), 2),
+    ///     (net!("192.168.0.0/24"), 3),
+    /// ]);
+    /// let mut map_b: JointPrefixMap<ipnet::IpNet, &'static str> = JointPrefixMap::from_iter([
+    ///     (net!("192.168.0.0/22"), "a"),
+    ///     (net!("192.168.0.0/23"), "b"),
+    /// ]);
+    /// assert_eq!(
+    ///     map_a.union(&map_b).map(|x| x.into_right()).collect::<Vec<_>>(),
+    ///     vec![
+    ///         Some((net!("192.168.0.0/22"), &"a")),
+    ///         Some((net!("192.168.0.0/23"), &"b")),
+    ///         Some((net!("192.168.0.0/23"), &"b")),
+    ///         None,
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    pub fn into_right(self) -> Option<(P, &'a R)> {
+        match self {
+            UnionItem::Left { right, .. } => right.map(|(p, r)| (p, r)),
             UnionItem::Right { prefix, right, .. } | UnionItem::Both { prefix, right, .. } => {
                 Some((prefix, right))
             }
