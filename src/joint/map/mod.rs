@@ -2,6 +2,9 @@
 
 use super::JointPrefix;
 use crate::PrefixMap;
+#[cfg(test)]
+#[cfg(feature = "ipnet")]
+mod test;
 
 use either::{Left, Right};
 
