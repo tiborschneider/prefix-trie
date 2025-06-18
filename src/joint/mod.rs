@@ -57,6 +57,7 @@ mod prefix;
 pub mod set;
 
 #[cfg(test)]
+#[cfg(feature = "ipnet")]
 mod test;
 
 pub use map::JointPrefixMap;
