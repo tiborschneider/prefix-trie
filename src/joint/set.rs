@@ -12,7 +12,7 @@ use super::{map::CoverKeys, JointPrefix};
 ///
 /// Access the individual sets `self.t1` and `self.t2` to perform set operations (using
 /// [`crate::AsView`]).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct JointPrefixSet<P: JointPrefix> {
     /// PrefixSet that corresponds to the first prefix type
     pub t1: PrefixSet<P::P1>,
@@ -600,6 +600,21 @@ impl<P> PartialEq for JointPrefixSet<P>
 where
     P: JointPrefix + PartialEq,
 {
+    /// Compare two prefix sets to contain the same prefixes. This also compares the host-part of
+    /// the prefix:
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set1: JointPrefixSet<ipnet::IpNet> = ["10.0.0.0/8".parse()?].into_iter().collect();
+    /// let mut set2: JointPrefixSet<ipnet::IpNet> = ["10.0.0.1/8".parse()?].into_iter().collect();
+    /// assert_ne!(set1, set2);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     fn eq(&self, other: &Self) -> bool {
         self.iter().zip(other.iter()).all(|(a, b)| a == b)
     }
@@ -611,12 +626,52 @@ impl<P> Eq for JointPrefixSet<P> where P: JointPrefix + Eq {}
 pub struct Iter<'a, P: JointPrefix>(super::map::Iter<'a, P, ()>);
 
 impl<P: JointPrefix> Default for Iter<'_, P> {
+    /// The default iterator is empty.
+    ///
+    /// ```
+    /// use prefix_trie::joint;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// assert_eq!(joint::set::Iter::<ipnet::IpNet>::default().count(), 0);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
 impl<P: JointPrefix> Clone for Iter<'_, P> {
+    /// You can clone an iterator, which maintains its state.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+    /// set.insert("2001::1:0:0/96".parse()?);
+    /// set.insert("192.168.0.0/22".parse()?);
+    /// set.insert("192.168.0.0/23".parse()?);
+    /// let mut iter = set.iter();
+    ///
+    /// assert_eq!(iter.next(), Some("192.168.0.0/22".parse()?));
+    ///
+    /// let clone = iter.clone();
+    /// assert_eq!(
+    ///     iter.collect::<Vec<_>>(),
+    ///     vec!["192.168.0.0/23".parse()?, "2001::1:0:0/96".parse()?]
+    /// );
+    /// assert_eq!(
+    ///     clone.collect::<Vec<_>>(),
+    ///     vec!["192.168.0.0/23".parse()?, "2001::1:0:0/96".parse()?]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }

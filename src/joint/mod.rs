@@ -56,6 +56,9 @@ pub mod map;
 mod prefix;
 pub mod set;
 
+#[cfg(test)]
+mod test;
+
 pub use map::JointPrefixMap;
 pub use prefix::JointPrefix;
 pub use set::JointPrefixSet;

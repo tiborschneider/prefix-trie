@@ -27,9 +27,9 @@ jobs:
     - name: install grcov
       run: cargo install grcov
     - name: run tests
-      run: LLVM_PROFILE_FILE="your_name-%p-%m.profraw" cargo test --verbose
+      run: LLVM_PROFILE_FILE="your_name-%p-%m.profraw" cargo test --all-features --verbose
     - name: Generate coverage report
-      run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "examples" --ignore "/*" --ignore "src/*/test.rs" -o lcov.info
+      run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "examples" --ignore "/*" --ignore "src/*test.rs" --ignore "src/fuzzing/*" -o lcov.info
     - name: Upload coverage
       uses: codecov/codecov-action@v5
       env:

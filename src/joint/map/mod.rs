@@ -9,7 +9,7 @@ mod test;
 use either::{Left, Right};
 
 /// A Joint prefix map, implemented as two separate prefix trees.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct JointPrefixMap<P, T>
 where
     P: JointPrefix,
