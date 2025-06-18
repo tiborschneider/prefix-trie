@@ -120,6 +120,25 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
+    ///
+    /// This function *will replace* the prefix in the map with the one provided to the `entry` call:
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.1.1/24".parse()?, 1);
+    /// pm.entry("192.168.1.2/24".parse()?).insert(2);
+    /// assert_eq!(
+    ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
+    ///     Some((&"192.168.1.2/24".parse()?, &2)) // prefix is overwritten
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn insert(self, v: T) -> Option<T> {
         match self {
@@ -146,6 +165,25 @@ where
     ///
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&1));
     /// assert_eq!(pm.get(&"192.168.2.0/24".parse()?), Some(&20));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    ///
+    /// This function will *not* replace the prefix in the map if it already exists.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.1.1/24".parse()?, 1);
+    /// pm.entry("192.168.1.2/24".parse()?).or_insert(2);
+    /// assert_eq!(
+    ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
+    ///     Some((&"192.168.1.1/24".parse()?, &1)) // prefix is not overwritten.
+    /// );
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -179,6 +217,25 @@ where
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
+    ///
+    /// This function will *not* replace the prefix in the map if it already exists.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.1.1/24".parse()?, 1);
+    /// pm.entry("192.168.1.2/24".parse()?).or_insert_with(|| 2);
+    /// assert_eq!(
+    ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
+    ///     Some((&"192.168.1.1/24".parse()?, &1)) // prefix is not overwritten.
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn or_insert_with<F: FnOnce() -> T>(self, default: F) -> &'a mut T {
         match self {
@@ -198,6 +255,25 @@ where
     /// pm.insert("192.168.1.0/24".parse()?, 1);
     /// assert_eq!(pm.entry("192.168.1.0/24".parse()?).and_modify(|x| *x += 1).get(), Some(&2));
     /// assert_eq!(pm.entry("192.168.2.0/24".parse()?).and_modify(|x| *x += 1).get(), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    ///
+    /// This function will *not* replace the prefix in the map if it already exists.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.1.1/24".parse()?, 1);
+    /// pm.entry("192.168.1.2/24".parse()?).and_modify(|x| *x += 1);
+    /// assert_eq!(
+    ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
+    ///     Some((&"192.168.1.1/24".parse()?, &2)) // prefix is not overwritten.
+    /// );
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -235,6 +311,25 @@ where
     ///
     /// assert_eq!(pm.get(&"192.168.1.0/24".parse()?), Some(&1));
     /// assert_eq!(pm.get(&"192.168.2.0/24".parse()?), Some(&0));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    ///
+    /// This function will *not* replace the prefix in the map if it already exists.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.1.1/24".parse()?, 1);
+    /// pm.entry("192.168.1.2/24".parse()?).or_default();
+    /// assert_eq!(
+    ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
+    ///     Some((&"192.168.1.1/24".parse()?, &1)) // prefix is not overwritten.
+    /// );
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
