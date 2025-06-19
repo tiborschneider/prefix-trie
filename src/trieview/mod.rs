@@ -259,6 +259,9 @@ where
     ///         &net!("192.168.2.0/23"),
     ///     ]
     /// );
+    ///
+    /// // If the prefix does not exist, the function returns `None`:
+    /// assert_eq!(map.view().find_exact(&net!("10.0.0.0/8")), None);
     /// # }
     /// ```
     pub fn find_exact(&self, prefix: &P) -> Option<TrieView<'a, P, T>> {
@@ -829,6 +832,21 @@ where
     /// );
     /// # }
     /// ```
+    ///
+    /// If the node does not exist, then the function returns the original view:
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::from_iter([(net!("192.168.0.0/20"), 1)]);
+    /// let view_mut = map.view_mut();
+    /// let view = view_mut.find_exact(&net!("10.0.0.0/8")).unwrap_err();
+    /// assert_eq!(view.view().iter().collect::<Vec<_>>(), vec![(&net!("192.168.0.0/20"), &1)]);
+    /// # }
+    /// ```
     pub fn find_exact(self, prefix: &P) -> Result<Self, Self> {
         let mut idx = self.loc.idx();
         loop {
@@ -881,6 +899,21 @@ where
     ///         (net!("192.168.4.0/22"), 5),
     ///     ]
     /// );
+    /// # }
+    /// ```
+    ///
+    /// If the node does not exist, then the function returns the original view:
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::from_iter([(net!("192.168.0.0/20"), 1)]);
+    /// let view_mut = map.view_mut();
+    /// let view = view_mut.find_lpm(&net!("10.0.0.0/8")).unwrap_err();
+    /// assert_eq!(view.view().iter().collect::<Vec<_>>(), vec![(&net!("192.168.0.0/20"), &1)]);
     /// # }
     /// ```
     pub fn find_lpm(self, prefix: &P) -> Result<Self, Self> {
@@ -1405,7 +1438,7 @@ impl<P, T> TrieViewMut<'_, P, T> {
     ///     (net!("192.168.0.0/22"), 2),
     ///     (net!("192.168.0.0/24"), 3),
     ///     (net!("192.168.2.0/23"), 4),
-    ///     (net!("192.168.4.0/22"), 5),
+    ///     (net!("192.168.8.0/22"), 5),
     /// ]);
     /// let mut view = map.view_mut_at(net!("192.168.0.0/22")).unwrap();
     /// assert_eq!(view.set(20), Ok(Some(2)));
@@ -1418,17 +1451,33 @@ impl<P, T> TrieViewMut<'_, P, T> {
     ///     ]
     /// );
     /// assert_eq!(
-    ///     map.into_iter().collect::<Vec<_>>(),
+    ///     map.iter().collect::<Vec<_>>(),
     ///     vec![
-    ///         (net!("192.168.0.0/20"), 1),
-    ///         (net!("192.168.0.0/22"), 20),
-    ///         (net!("192.168.0.0/24"), 3),
-    ///         (net!("192.168.2.0/23"), 4),
-    ///         (net!("192.168.4.0/22"), 5),
+    ///         (&net!("192.168.0.0/20"), &1),
+    ///         (&net!("192.168.0.0/22"), &20),
+    ///         (&net!("192.168.0.0/24"), &3),
+    ///         (&net!("192.168.2.0/23"), &4),
+    ///         (&net!("192.168.8.0/22"), &5),
     ///     ]
     /// );
     /// # }
     /// ```
+    ///
+    /// Calling `set` on a view that points to a virtual node will fail:
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
+    ///     (net!("192.168.0.0/24"), 1),
+    ///     (net!("192.168.2.0/24"), 2),
+    /// ]);
+    /// assert_eq!(map.view_mut_at(net!("192.168.0.0/23")).unwrap().set(10), Err(10));
+    /// # }
     pub fn set(&mut self, value: T) -> Result<Option<T>, T> {
         match self.node_mut() {
             Some(n) => Ok(n.value.replace(value)),
