@@ -4,6 +4,20 @@
 //! This module allows you to perform Set operations (union, intersection, difference) on
 //! [`PrefixMap`]s and [`PrefixSet`]s, optionally of only a trie-view.
 
+#[cfg(test)]
+#[cfg(feature = "ipnet")]
+mod test;
+
+mod difference;
+mod intersection;
+mod union;
+pub use difference::{
+    CoveringDifference, CoveringDifferenceMut, Difference, DifferenceItem, DifferenceMut,
+    DifferenceMutItem,
+};
+pub use intersection::{Intersection, IntersectionMut};
+pub use union::{Union, UnionItem, UnionMut};
+
 use crate::{
     inner::{Direction, DirectionForInsert, Node, Table},
     map::{Iter, IterMut, Keys, Values, ValuesMut},
@@ -1470,13 +1484,3 @@ impl<'a, P, T> IntoIterator for TrieViewMut<'a, P, T> {
         unsafe { IterMut::new(self.table, vec![self.loc.idx()]) }
     }
 }
-
-mod difference;
-mod intersection;
-mod union;
-pub use difference::{
-    CoveringDifference, CoveringDifferenceMut, Difference, DifferenceItem, DifferenceMut,
-    DifferenceMutItem,
-};
-pub use intersection::{Intersection, IntersectionMut};
-pub use union::{Union, UnionItem, UnionMut};
