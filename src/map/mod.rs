@@ -5,6 +5,13 @@ use crate::{
     Prefix,
 };
 
+// Include the entry and iter module last, to ensure correct docs.
+mod entry;
+mod iter;
+
+pub use entry::*;
+pub use iter::*;
+
 /// Prefix map implemented as a prefix tree.
 ///
 /// You can perform union, intersection, and (covering) difference operations by first creating a
@@ -742,6 +749,252 @@ where
     }
 }
 
+impl<P, T> PrefixMap<P, T> {
+    /// An iterator visiting all key-value pairs in lexicographic order. The iterator element type
+    /// is `(&P, &T)`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// assert_eq!(
+    ///     pm.iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         (&"192.168.0.0/22".parse()?, &1),
+    ///         (&"192.168.0.0/23".parse()?, &2),
+    ///         (&"192.168.0.0/24".parse()?, &4),
+    ///         (&"192.168.2.0/23".parse()?, &3),
+    ///         (&"192.168.2.0/24".parse()?, &5),
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn iter(&self) -> Iter<'_, P, T> {
+        self.into_iter()
+    }
+
+    /// Get a mutable iterator over all key-value pairs. The order of this iterator is lexicographic.
+    pub fn iter_mut(&mut self) -> IterMut<'_, P, T> {
+        // Safety: We get the pointer to the table by and construct the `IterMut`. Its lifetime is
+        // now tied to the mutable borrow of `self`, so we are allowed to access elements of that
+        // table mutably.
+        unsafe { IterMut::new(&self.table, vec![0]) }
+    }
+
+    /// An iterator visiting all keys in lexicographic order. The iterator element type is `&P`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// assert_eq!(
+    ///     pm.keys().collect::<Vec<_>>(),
+    ///     vec![
+    ///         &"192.168.0.0/22".parse()?,
+    ///         &"192.168.0.0/23".parse()?,
+    ///         &"192.168.0.0/24".parse()?,
+    ///         &"192.168.2.0/23".parse()?,
+    ///         &"192.168.2.0/24".parse()?,
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn keys(&self) -> Keys<'_, P, T> {
+        Keys { inner: self.iter() }
+    }
+
+    /// Creates a consuming iterator visiting all keys in lexicographic order. The iterator element
+    /// type is `P`.
+    #[inline(always)]
+    pub fn into_keys(self) -> IntoKeys<P, T> {
+        IntoKeys {
+            inner: IntoIter {
+                table: self.table.into_inner(),
+                nodes: vec![0],
+            },
+        }
+    }
+
+    /// An iterator visiting all values in lexicographic order. The iterator element type is `&P`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// assert_eq!(pm.values().collect::<Vec<_>>(), vec![&1, &2, &4, &3, &5]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn values(&self) -> Values<'_, P, T> {
+        Values { inner: self.iter() }
+    }
+
+    /// Creates a consuming iterator visiting all values in lexicographic order. The iterator
+    /// element type is `P`.
+    #[inline(always)]
+    pub fn into_values(self) -> IntoValues<P, T> {
+        IntoValues {
+            inner: IntoIter {
+                table: self.table.into_inner(),
+                nodes: vec![0],
+            },
+        }
+    }
+
+    /// Get a mutable iterator over all values. The order of this iterator is lexicographic.
+    pub fn values_mut(&mut self) -> ValuesMut<'_, P, T> {
+        ValuesMut {
+            inner: self.iter_mut(),
+        }
+    }
+}
+
+impl<P, T> PrefixMap<P, T>
+where
+    P: Prefix,
+{
+    /// Get an iterator over the node itself and all children. All elements returned have a prefix
+    /// that is contained within `prefix` itself (or are the same). The iterator yields references
+    /// to both keys and values, i.e., type `(&'a P, &'a T)`. The iterator yields elements in
+    /// lexicographic order.
+    ///
+    /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// assert_eq!(
+    ///     pm.children(&"192.168.0.0/23".parse()?).collect::<Vec<_>>(),
+    ///     vec![
+    ///         (&"192.168.0.0/23".parse()?, &2),
+    ///         (&"192.168.0.0/24".parse()?, &4),
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn children<'a>(&'a self, prefix: &P) -> Iter<'a, P, T> {
+        let nodes = iter::lpm_children_iter_start(&self.table, prefix);
+        Iter {
+            table: Some(&self.table),
+            nodes,
+        }
+    }
+
+    /// Get an iterator of mutable references of the node itself and all its children. All elements
+    /// returned have a prefix that is contained within `prefix` itself (or are the same). The
+    /// iterator yields references to the keys, and mutable references to the values, i.e., type
+    /// `(&'a P, &'a mut T)`. The iterator yields elements in lexicographic order.
+    ///
+    /// **Note**: Consider using [`crate::AsViewMut::view_mut_at`] as an alternative.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.0.0/24".parse()?, 3);
+    /// pm.insert("192.168.2.0/23".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// pm.children_mut(&"192.168.0.0/23".parse()?).for_each(|(_, x)| *x *= 10);
+    /// assert_eq!(
+    ///     pm.into_iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         ("192.168.0.0/22".parse()?, 1),
+    ///         ("192.168.0.0/23".parse()?, 20),
+    ///         ("192.168.0.0/24".parse()?, 30),
+    ///         ("192.168.2.0/23".parse()?, 4),
+    ///         ("192.168.2.0/24".parse()?, 5),
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn children_mut<'a>(&'a mut self, prefix: &P) -> IterMut<'a, P, T> {
+        let nodes = lpm_children_iter_start(&self.table, prefix);
+        IterMut {
+            table: Some(&self.table),
+            nodes,
+        }
+    }
+
+    /// Get an iterator over the node itself and all children with a value. All elements returned
+    /// have a prefix that is contained within `prefix` itself (or are the same). This function will
+    /// consume `self`, returning an iterator over all owned children.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/23".parse()?, 2);
+    /// pm.insert("192.168.2.0/23".parse()?, 3);
+    /// pm.insert("192.168.0.0/24".parse()?, 4);
+    /// pm.insert("192.168.2.0/24".parse()?, 5);
+    /// assert_eq!(
+    ///     pm.into_children(&"192.168.0.0/23".parse()?).collect::<Vec<_>>(),
+    ///     vec![
+    ///         ("192.168.0.0/23".parse()?, 2),
+    ///         ("192.168.0.0/24".parse()?, 4),
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn into_children(self, prefix: &P) -> IntoIter<P, T> {
+        let nodes = lpm_children_iter_start(&self.table, prefix);
+        IntoIter {
+            table: self.table.into_inner(),
+            nodes,
+        }
+    }
+}
+
 /// Private function implementations
 impl<P, T> PrefixMap<P, T>
 where
@@ -907,10 +1160,3 @@ where
     T: Eq,
 {
 }
-
-// Include the entry and iter module last, to ensure correct docs.
-mod entry;
-mod iter;
-
-pub use entry::*;
-pub use iter::*;
