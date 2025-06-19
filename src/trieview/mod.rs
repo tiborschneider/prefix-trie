@@ -59,18 +59,6 @@ impl<'a, P: Prefix + Clone, T> AsView for &TrieView<'a, P, T> {
     }
 }
 
-impl<'b: 'a, 'a, P: Prefix + Clone, T> AsView for &'a TrieViewMut<'b, P, T> {
-    type P = P;
-    type T = T;
-
-    fn view(&self) -> TrieView<'a, P, T> {
-        TrieView {
-            table: self.table,
-            loc: self.loc.clone(),
-        }
-    }
-}
-
 impl<P: Prefix + Clone, T> AsView for TrieViewMut<'_, P, T> {
     type P = P;
     type T = T;
@@ -95,35 +83,11 @@ impl<P: Prefix, T> AsView for PrefixMap<P, T> {
     }
 }
 
-impl<'a, P: Prefix, T> AsView for &'a PrefixMap<P, T> {
-    type P = P;
-    type T = T;
-
-    fn view<'b>(&'b self) -> TrieView<'a, P, T> {
-        TrieView {
-            table: &self.table,
-            loc: ViewLoc::Node(0),
-        }
-    }
-}
-
 impl<P: Prefix> AsView for PrefixSet<P> {
     type P = P;
     type T = ();
 
     fn view(&self) -> TrieView<'_, P, ()> {
-        TrieView {
-            table: &self.0.table,
-            loc: ViewLoc::Node(0),
-        }
-    }
-}
-
-impl<'a, P: Prefix> AsView for &'a PrefixSet<P> {
-    type P = P;
-    type T = ();
-
-    fn view<'b>(&'b self) -> TrieView<'a, P, ()> {
         TrieView {
             table: &self.0.table,
             loc: ViewLoc::Node(0),
