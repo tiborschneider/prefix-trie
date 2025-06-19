@@ -331,9 +331,6 @@ where
     /// Insert a new item into the prefix-map. This function may return any value that existed
     /// before.
     ///
-    /// In case the node already exists in the tree, its prefix will be replaced by the provided
-    /// argument. This allows you to store additional information in the host part of the prefix.
-    ///
     /// ```
     /// # use prefix_trie::*;
     /// # #[cfg(feature = "ipnet")]
@@ -342,6 +339,34 @@ where
     /// assert_eq!(pm.insert("192.168.0.0/23".parse()?, 1), None);
     /// assert_eq!(pm.insert("192.168.1.0/24".parse()?, 2), None);
     /// assert_eq!(pm.insert("192.168.1.0/24".parse()?, 3), Some(2));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    ///
+    /// You can store additional information in the host-part of the prefix. This information is
+    /// preserved in the map, and can be accessed with [`Self::get_key_value`]. In case the node
+    /// already exists in the tree, its prefix will be replaced by the provided argument. The
+    /// following example illustrates this:
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    ///
+    /// pm.insert("192.168.0.1/24".parse()?, 1);
+    /// assert_eq!(
+    ///     pm.get_key_value(&"192.168.0.0/24".parse()?), // notice that the host part is zero
+    ///     Some((&"192.168.0.1/24".parse()?, &1))
+    /// );
+    ///
+    /// pm.insert("192.168.0.100/24".parse()?, 5);
+    /// assert_eq!(
+    ///     pm.get_key_value(&"192.168.0.0/24".parse()?),
+    ///     Some((&"192.168.0.100/24".parse()?, &5)) // `insert` updates the host part as well.
+    /// );
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -395,7 +420,8 @@ where
     /// Gets the given key’s corresponding entry in the map for in-place manipulation. In case you
     /// eventually insert an element into the map, this operation will also replace the prefix in
     /// the node with the existing one. That is if you store additional information in the host part
-    /// of the address (the one that is masked out).
+    /// of the address (the one that is masked out). See the documentation of the individual
+    /// functions of [`Entry`], [`OccupiedEntry`], and [`VacantEntry`].
     ///
     /// ```
     /// # use prefix_trie::*;

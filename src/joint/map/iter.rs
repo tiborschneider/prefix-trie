@@ -1,9 +1,6 @@
 //! Module that contains the implementation for the iterators
 
-use either::{Left, Right};
-
 use crate::joint::JointPrefix;
-use crate::trieview::AsView;
 
 use super::JointPrefixMap;
 
