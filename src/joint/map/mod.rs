@@ -10,6 +10,14 @@ use either::{Left, Right};
 
 /// A Joint prefix map, implemented as two separate prefix trees.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "P::P1: serde::Serialize, P::P2: serde::Serialize, T: serde::Serialize",
+        deserialize = "P::P1: serde::Deserialize<'de>, P::P2: serde::Deserialize<'de>, T: serde::Deserialize<'de>",
+    ))
+)]
 pub struct JointPrefixMap<P, T>
 where
     P: JointPrefix,
