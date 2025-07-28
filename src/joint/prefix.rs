@@ -5,12 +5,12 @@ use either::{Either, Left, Right};
 /// address.
 ///
 /// The joint prefix is implemented for [`ipnet::IpNet`], [`ipnetwork::IpNetwork`], and
-/// [`cidr::IpCidr`]. It is also implemented for [`either::Either`], for which the `Left` and
-/// `Right` types both implement [`crate::Prefix`].
+/// [`cidr::IpCidr`]. It is also implemented for [`either::Either`], for which `P1` and `P2` both
+/// implement [`crate::Prefix`].
 pub trait JointPrefix {
     /// The first prefix type, e.g., IPv4
     type P1: Prefix + Clone;
-    /// The first prefix type, e.g., IPv6
+    /// The second prefix type, e.g., IPv6
     type P2: Prefix + Clone;
 
     /// Get either `Left(P1)` or `Right(P2)`.
