@@ -124,6 +124,7 @@ where
     /// let prefix = "192.168.1.0/24".parse()?;
     /// pm.insert(prefix, 1);
     /// assert_eq!(pm.get_key_value(&prefix), Some((&prefix, &1)));
+    /// assert_eq!(pm.get_key_value(&"192.168.1.1/24".parse()?), Some((&prefix, &1)));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
