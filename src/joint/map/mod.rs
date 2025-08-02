@@ -147,6 +147,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// let prefix = "2001::/32".parse()?;
     /// pm.insert(prefix, 1);
     /// assert_eq!(pm.get_key_value(&prefix), Some((prefix, &1)));
+    /// assert_eq!(pm.get_key_value(&"2001::1/32".parse()?), Some((prefix, &1)));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
