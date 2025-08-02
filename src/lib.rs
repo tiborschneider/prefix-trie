@@ -106,6 +106,7 @@
 
 #![allow(clippy::collapsible_else_if)]
 #![deny(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 mod fmt;
 #[cfg(test)]
