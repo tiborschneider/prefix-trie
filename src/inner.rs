@@ -2,6 +2,7 @@
 
 use std::{
     cell::UnsafeCell,
+    num::NonZeroUsize,
     ops::{Index, IndexMut},
 };
 
@@ -11,11 +12,23 @@ use crate::{to_right, Prefix};
 pub(crate) struct Node<P, T> {
     pub(crate) prefix: P,
     pub(crate) value: Option<T>,
-    pub(crate) left: Option<usize>,
-    pub(crate) right: Option<usize>,
+    pub(crate) left: Option<NonZeroUsize>,
+    pub(crate) right: Option<NonZeroUsize>,
 }
 
 impl<P, T> Node<P, T> {
+    /// Get the left child index.
+    #[inline(always)]
+    pub(crate) fn left(&self) -> Option<usize> {
+        self.left.map(NonZeroUsize::get)
+    }
+
+    /// Get the right child index.
+    #[inline(always)]
+    pub(crate) fn right(&self) -> Option<usize> {
+        self.right.map(NonZeroUsize::get)
+    }
+
     /// get the tuple of prefix and value.
     pub(crate) fn prefix_value(&self) -> Option<(&P, &T)> {
         self.value.as_ref().map(|v| (&self.prefix, v))
@@ -157,20 +170,22 @@ impl<P: Prefix, T> Table<P, T> {
     #[inline(always)]
     pub(crate) fn get_child(&self, idx: usize, right: bool) -> Option<usize> {
         if right {
-            self[idx].right
+            self[idx].right()
         } else {
-            self[idx].left
+            self[idx].left()
         }
     }
 
     /// set the child of a node (either to the left or the right), and return the index of the old child.
     #[inline(always)]
     pub(crate) fn set_child(&mut self, idx: usize, child: usize, right: bool) -> Option<usize> {
+        let child = NonZeroUsize::new(child).expect("child index must be non-zero");
         if right {
             self[idx].right.replace(child)
         } else {
             self[idx].left.replace(child)
         }
+        .map(NonZeroUsize::get)
     }
 
     /// remove a child from a node (just the reference).
@@ -181,6 +196,7 @@ impl<P: Prefix, T> Table<P, T> {
         } else {
             self[idx].left.take()
         }
+        .map(NonZeroUsize::get)
     }
 
     /// Get the directions from some node `idx` to get to `prefix`.

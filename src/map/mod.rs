@@ -57,6 +57,7 @@ where
         self.count == 0
     }
 
+
     /// Get the value of an element by matching exactly on the prefix.
     ///
     /// ```
@@ -1038,10 +1039,10 @@ where
             if value.is_some() {
                 dec = 1;
             }
-            if let Some(left) = node.left.take() {
+            if let Some(left) = node.left.take().map(std::num::NonZeroUsize::get) {
                 to_free.push(left)
             }
-            if let Some(right) = node.right.take() {
+            if let Some(right) = node.right.take().map(std::num::NonZeroUsize::get) {
                 to_free.push(right)
             }
             self.free.push(idx);
@@ -1145,10 +1146,10 @@ where
         // first, do the recursion
         let mut idx_removed = false;
         let mut par_removed = false;
-        if let Some(left) = self.table[idx].left {
+        if let Some(left) = self.table[idx].left() {
             (f, idx_removed) = self._retain(left, Some(idx), false, par, par_right, f);
         }
-        if let Some(right) = self.table[idx].right {
+        if let Some(right) = self.table[idx].right() {
             if idx_removed {
                 (f, par_removed) = self._retain(right, par, par_right, grp, grp_right, f);
             } else {

@@ -333,12 +333,12 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                     let node_l = &self.table_l[l];
                     let node_r = &self.table_r[r];
                     self.extend(
-                        next_indices(self.table_l, self.table_r, node_l.right, node_r.right),
+                        next_indices(self.table_l, self.table_r, node_l.right(), node_r.right()),
                         lpm_l,
                         lpm_r,
                     );
                     self.extend(
-                        next_indices(self.table_l, self.table_r, node_l.left, node_r.left),
+                        next_indices(self.table_l, self.table_r, node_l.left(), node_r.left()),
                         lpm_l,
                         lpm_r,
                     );
@@ -359,8 +359,8 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                             self.table_l,
                             self.table_r,
                             l,
-                            node_l.left,
-                            node_l.right,
+                            node_l.left(),
+                            node_l.right(),
                             r,
                         ),
                         lpm_l,
@@ -380,8 +380,8 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                             self.table_r,
                             l,
                             r,
-                            node_r.left,
-                            node_r.right,
+                            node_r.left(),
+                            node_r.right(),
                         ),
                         lpm_l,
                         lpm_r,
@@ -394,10 +394,10 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                 }
                 UnionIndex::OnlyL(l) => {
                     let node_l = &self.table_l[l];
-                    if let Some(right) = node_l.right {
+                    if let Some(right) = node_l.right() {
                         self.extend([UnionIndex::OnlyL(right)], lpm_l, lpm_r);
                     }
-                    if let Some(left) = node_l.left {
+                    if let Some(left) = node_l.left() {
                         self.extend([UnionIndex::OnlyL(left)], lpm_l, lpm_r);
                     }
                     if let Some(x) =
@@ -408,10 +408,10 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                 }
                 UnionIndex::OnlyR(r) => {
                     let node_r = &self.table_r[r];
-                    if let Some(right) = node_r.right {
+                    if let Some(right) = node_r.right() {
                         self.extend([UnionIndex::OnlyR(right)], lpm_l, lpm_r);
                     }
-                    if let Some(left) = node_r.left {
+                    if let Some(left) = node_r.left() {
                         self.extend([UnionIndex::OnlyR(left)], lpm_l, lpm_r);
                     }
                     if let Some(x) =
@@ -443,14 +443,14 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
-                        node_l.right,
-                        node_r.right,
+                        node_l.right(),
+                        node_r.right(),
                     ));
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
-                        node_l.left,
-                        node_r.left,
+                        node_l.left(),
+                        node_r.left(),
                     ));
                     let node_l = unsafe { self.table_l.get_mut(l) };
                     let node_r = unsafe { self.table_r.get_mut(r) };
@@ -468,8 +468,8 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                         self.table_l,
                         self.table_r,
                         l,
-                        node_l.left,
-                        node_l.right,
+                        node_l.left(),
+                        node_l.right(),
                         r,
                     ));
                     let node_l = unsafe { self.table_l.get_mut(l) };
@@ -484,8 +484,8 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                         self.table_r,
                         l,
                         r,
-                        node_r.left,
-                        node_r.right,
+                        node_r.left(),
+                        node_r.right(),
                     ));
                     let node_r = unsafe { self.table_r.get_mut(r) };
                     if node_r.value.is_some() {
@@ -494,10 +494,10 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                 }
                 UnionIndex::OnlyL(l) => {
                     let node_l = unsafe { self.table_l.get_mut(l) };
-                    if let Some(right) = node_l.right {
+                    if let Some(right) = node_l.right() {
                         self.nodes.push(UnionIndex::OnlyL(right));
                     }
-                    if let Some(left) = node_l.left {
+                    if let Some(left) = node_l.left() {
                         self.nodes.push(UnionIndex::OnlyL(left));
                     }
                     if node_l.value.is_some() {
@@ -506,10 +506,10 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                 }
                 UnionIndex::OnlyR(r) => {
                     let node_r = unsafe { self.table_r.get_mut(r) };
-                    if let Some(right) = node_r.right {
+                    if let Some(right) = node_r.right() {
                         self.nodes.push(UnionIndex::OnlyR(right));
                     }
-                    if let Some(left) = node_r.left {
+                    if let Some(left) = node_r.left() {
                         self.nodes.push(UnionIndex::OnlyR(left));
                     }
                     if node_r.value.is_some() {

@@ -47,11 +47,11 @@ impl<P: Prefix> TestNode<P> {
         });
         if let Some(left) = self.left.take() {
             let left = left.build(map);
-            map.table[idx].left = Some(left);
+            map.table[idx].left = Some(std::num::NonZeroUsize::new(left).unwrap());
         }
         if let Some(right) = self.right.take() {
             let right = right.build(map);
-            map.table[idx].right = Some(right);
+            map.table[idx].right = Some(std::num::NonZeroUsize::new(right).unwrap());
         }
         idx
     }

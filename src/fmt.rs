@@ -17,7 +17,7 @@ impl<P: Debug, T: Debug> Debug for DebugPrefixMap<'_, P, T> {
         let map = self.0;
         let idx = self.1;
         let node = &map.table[idx];
-        match (node.value.as_ref(), node.left, node.right) {
+        match (node.value.as_ref(), node.left(), node.right()) {
             (None, None, None) => node.prefix.fmt(f),
             (None, None, Some(child)) | (None, Some(child), None) => f
                 .debug_map()
