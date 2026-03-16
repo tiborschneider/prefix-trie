@@ -71,7 +71,7 @@ fn _union_lpm((a, b): (PrefixMap<TestPrefix, i32>, PrefixMap<TestPrefix, i32>)) 
     let got = a
         .view()
         .union(&b)
-        .map(|x| (*x.prefix(), (x.left().copied(), x.right().copied())))
+        .map(|x| (*x.prefix(), (x.left.copied(), x.right.copied())))
         .collect::<Vec<_>>();
 
     want == got

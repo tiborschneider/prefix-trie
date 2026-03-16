@@ -17,18 +17,6 @@ pub(crate) struct Node<P, T> {
 }
 
 impl<P, T> Node<P, T> {
-    /// Get the left child index.
-    #[inline(always)]
-    pub(crate) fn left(&self) -> Option<NonZeroUsize> {
-        self.left
-    }
-
-    /// Get the right child index.
-    #[inline(always)]
-    pub(crate) fn right(&self) -> Option<NonZeroUsize> {
-        self.right
-    }
-
     /// get the tuple of prefix and value.
     pub(crate) fn prefix_value(&self) -> Option<(&P, &T)> {
         self.value.as_ref().map(|v| (&self.prefix, v))

@@ -1150,10 +1150,10 @@ where
         // first, do the recursion
         let mut idx_removed = false;
         let mut par_removed = false;
-        if let Some(left) = self.table[idx].left() {
+        if let Some(left) = self.table[idx].left {
             (f, idx_removed) = self._retain(left.get(), Some(idx), false, par, par_right, f);
         }
-        if let Some(right) = self.table[idx].right() {
+        if let Some(right) = self.table[idx].right {
             if idx_removed {
                 (f, par_removed) = self._retain(right.get(), par, par_right, grp, grp_right, f);
             } else {

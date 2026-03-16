@@ -159,36 +159,36 @@ fn _view_mut_at((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bo
 
 qc!(view_left, _view_left);
 fn _view_left((map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
-    let left_prefix_has_nodes = map.iter().any(|(p, _)| root.left().contains(p));
-    map.view_at(root).and_then(|v| v.left()).is_some() == left_prefix_has_nodes
+    let left_prefix_has_nodes = map.iter().any(|(p, _)| root.left.contains(p));
+    map.view_at(root).and_then(|v| v.left).is_some() == left_prefix_has_nodes
 }
 
 qc!(view_right, _view_right);
 fn _view_right((map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
-    let right_prefix_has_nodes = map.iter().any(|(p, _)| root.right().contains(p));
-    map.view_at(root).and_then(|v| v.right()).is_some() == right_prefix_has_nodes
+    let right_prefix_has_nodes = map.iter().any(|(p, _)| root.right.contains(p));
+    map.view_at(root).and_then(|v| v.right).is_some() == right_prefix_has_nodes
 }
 
 qc!(view_mut_left, _view_mut_left);
 fn _view_mut_left((mut m, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
-    let left_prefix_has_nodes = m.iter().any(|(p, _)| root.left().contains(p));
-    let c1 = m.view_mut_at(root).and_then(|v| v.left().ok()).is_some() == left_prefix_has_nodes;
-    let c2 = m.view_mut_at(root).map(|v| v.has_left()).unwrap_or(false) == left_prefix_has_nodes;
+    let left_prefix_has_nodes = m.iter().any(|(p, _)| root.left.contains(p));
+    let c1 = m.view_mut_at(root).and_then(|v| v.left.ok()).is_some() == left_prefix_has_nodes;
+    let c2 = m.view_mut_at(root).map(|v| v.has_left).unwrap_or(false) == left_prefix_has_nodes;
     c1 && c2
 }
 
 qc!(view_mut_right, _view_mut_right);
 fn _view_mut_right((mut m, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
-    let right_prefix_has_nodes = m.iter().any(|(p, _)| root.right().contains(p));
-    let c1 = m.view_mut_at(root).and_then(|v| v.right().ok()).is_some() == right_prefix_has_nodes;
-    let c2 = m.view_mut_at(root).map(|v| v.has_right()).unwrap_or(false) == right_prefix_has_nodes;
+    let right_prefix_has_nodes = m.iter().any(|(p, _)| root.right.contains(p));
+    let c1 = m.view_mut_at(root).and_then(|v| v.right.ok()).is_some() == right_prefix_has_nodes;
+    let c2 = m.view_mut_at(root).map(|v| v.has_right).unwrap_or(false) == right_prefix_has_nodes;
     c1 && c2
 }
 
 qc!(view_mut_split, _view_mut_split);
 fn _view_mut_split((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
-    let left_prefix_has_nodes = map.iter().any(|(p, _)| root.left().contains(p));
-    let right_prefix_has_nodes = map.iter().any(|(p, _)| root.right().contains(p));
+    let left_prefix_has_nodes = map.iter().any(|(p, _)| root.left.contains(p));
+    let right_prefix_has_nodes = map.iter().any(|(p, _)| root.right.contains(p));
     map.view_mut_at(root)
         .map(|view| view.split())
         .map(|(l, r)| (l.is_some(), r.is_some()))

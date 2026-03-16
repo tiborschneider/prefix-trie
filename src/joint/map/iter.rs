@@ -570,7 +570,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     /// assert_eq!(
     ///     map_a
     ///         .union(&map_b)
-    ///         .map(|x| x.left().map(|(p, l)| (*p, l)))
+    ///         .map(|x| x.left.map(|(p, l)| (*p, l)))
     ///         .collect::<Vec<_>>(),
     ///     vec![
     ///         Some((net!("192.168.0.0/22"), &2)),
@@ -611,7 +611,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     ///     (net!("2001::2:0:0/97"), "b"),
     /// ]);
     /// assert_eq!(
-    ///     map_a.union(&map_b).map(|x| x.into_left()).collect::<Vec<_>>(),
+    ///     map_a.union(&map_b).map(|x| x.into_left).collect::<Vec<_>>(),
     ///     vec![
     ///         Some((net!("2001::1:0:0/96"), &1)),
     ///         Some((net!("2001::2:0:0/96"), &2)),
@@ -653,7 +653,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     /// assert_eq!(
     ///     map_a
     ///         .union(&map_b)
-    ///         .map(|x| x.right().map(|(p, r)| (*p, r)))
+    ///         .map(|x| x.right.map(|(p, r)| (*p, r)))
     ///         .collect::<Vec<_>>(),
     ///     vec![
     ///         Some((net!("192.168.0.0/22"), &"a")),
@@ -694,7 +694,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     ///     (net!("2001::2:0:0/97"), "b"),
     /// ]);
     /// assert_eq!(
-    ///     map_a.union(&map_b).map(|x| x.into_right()).collect::<Vec<_>>(),
+    ///     map_a.union(&map_b).map(|x| x.into_right).collect::<Vec<_>>(),
     ///     vec![
     ///         None,
     ///         Some((net!("2001::2:0:0/96"), &"a")),

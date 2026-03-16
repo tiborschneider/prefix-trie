@@ -45,10 +45,10 @@ impl<'a, P, T> Iterator for Iter<'a, P, T> {
     fn next(&mut self) -> Option<(&'a P, &'a T)> {
         while let Some(cur) = self.nodes.pop() {
             let node = &self.table.as_ref()?[cur];
-            if let Some(right) = node.right() {
+            if let Some(right) = node.right {
                 self.nodes.push(right.get());
             }
-            if let Some(left) = node.left() {
+            if let Some(left) = node.left {
                 self.nodes.push(left.get());
             }
             if let Some(v) = &node.value {
@@ -101,10 +101,10 @@ impl<P: Prefix, T> Iterator for IntoIter<P, T> {
     fn next(&mut self) -> Option<(P, T)> {
         while let Some(cur) = self.nodes.pop() {
             let node = &mut self.table[cur];
-            if let Some(right) = node.right() {
+            if let Some(right) = node.right {
                 self.nodes.push(right.get());
             }
-            if let Some(left) = node.left() {
+            if let Some(left) = node.left {
                 self.nodes.push(left.get());
             }
             if let Some(v) = node.value.take() {
@@ -215,10 +215,10 @@ impl<'a, P, T> Iterator for IterMut<'a, P, T> {
             // iterate over a tree. Thus, each node is visited exactly once.
             let node: &'a mut Node<P, T> = unsafe { self.table.as_ref()?.get_mut(cur) };
 
-            if let Some(right) = node.right() {
+            if let Some(right) = node.right {
                 self.nodes.push(right.get());
             }
-            if let Some(left) = node.left() {
+            if let Some(left) = node.left {
                 self.nodes.push(left.get());
             }
             if node.value.is_some() {
