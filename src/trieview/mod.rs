@@ -221,7 +221,7 @@ where
                     // view at a virtual node between idx and the right child of idx.
                     return Some(Self {
                         table: self.table,
-                        loc: ViewLoc::Virtual(prefix, self.table.get_child(idx, right).unwrap()),
+                        loc: ViewLoc::Virtual(prefix, self.table.get_child(idx, right).unwrap().get()),
                     });
                 }
                 DirectionForInsert::NewLeaf { .. } | DirectionForInsert::NewBranch { .. } => {
@@ -790,7 +790,7 @@ where
                 DirectionForInsert::NewChild { right, .. } => {
                     // view at a virtual node between idx and the right child of idx.
                     let new_loc =
-                        ViewLoc::Virtual(prefix, self.table.get_child(idx, right).unwrap());
+                        ViewLoc::Virtual(prefix, self.table.get_child(idx, right).unwrap().get());
                     return unsafe { Ok(Self::new(self.table, new_loc)) };
                 }
                 DirectionForInsert::NewLeaf { .. } | DirectionForInsert::NewBranch { .. } => {

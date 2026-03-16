@@ -260,6 +260,7 @@ pub(super) fn lpm_children_iter_start<P: Prefix, T>(table: &Table<P, T>, prefix:
         let right = to_right(cur_p, prefix);
         match table.get_child(idx, right) {
             Some(c) => {
+                let c = c.get();
                 cur_p = &table[c].prefix;
                 if cur_p.contains(prefix) {
                     // continue traversal

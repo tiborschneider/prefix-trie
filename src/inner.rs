@@ -168,35 +168,37 @@ impl<P, T> Table<P, T> {
 impl<P: Prefix, T> Table<P, T> {
     /// Get the child of a node, either to the left or the right
     #[inline(always)]
-    pub(crate) fn get_child(&self, idx: usize, right: bool) -> Option<usize> {
+    pub(crate) fn get_child(&self, idx: usize, right: bool) -> Option<NonZeroUsize> {
         if right {
-            self[idx].right()
+            self[idx].right
         } else {
-            self[idx].left()
+            self[idx].left
         }
     }
 
     /// set the child of a node (either to the left or the right), and return the index of the old child.
     #[inline(always)]
-    pub(crate) fn set_child(&mut self, idx: usize, child: usize, right: bool) -> Option<usize> {
-        let child = NonZeroUsize::new(child).expect("child index must be non-zero");
+    pub(crate) fn set_child(
+        &mut self,
+        idx: usize,
+        child: NonZeroUsize,
+        right: bool,
+    ) -> Option<NonZeroUsize> {
         if right {
             self[idx].right.replace(child)
         } else {
             self[idx].left.replace(child)
         }
-        .map(NonZeroUsize::get)
     }
 
     /// remove a child from a node (just the reference).
     #[inline(always)]
-    pub(crate) fn clear_child(&mut self, idx: usize, right: bool) -> Option<usize> {
+    pub(crate) fn clear_child(&mut self, idx: usize, right: bool) -> Option<NonZeroUsize> {
         if right {
             self[idx].right.take()
         } else {
             self[idx].left.take()
         }
-        .map(NonZeroUsize::get)
     }
 
     /// Get the directions from some node `idx` to get to `prefix`.
@@ -208,8 +210,8 @@ impl<P: Prefix, T> Table<P, T> {
         } else {
             let right = to_right(cur_p, prefix);
             match self.get_child(cur, right) {
-                Some(child) if self[child].prefix.contains(prefix) => {
-                    Direction::Enter { next: child, right }
+                Some(child) if self[child.get()].prefix.contains(prefix) => {
+                    Direction::Enter { next: child.get(), right }
                 }
                 _ => Direction::Missing,
             }
@@ -225,9 +227,9 @@ impl<P: Prefix, T> Table<P, T> {
         } else {
             let right = to_right(cur_p, prefix);
             if let Some(child) = self.get_child(cur, right) {
-                let child_p = &self[child].prefix;
+                let child_p = &self[child.get()].prefix;
                 if child_p.contains(prefix) {
-                    DirectionForInsert::Enter { next: child, right }
+                    DirectionForInsert::Enter { next: child.get(), right }
                 } else if prefix.contains(child_p) {
                     DirectionForInsert::NewChild {
                         right,

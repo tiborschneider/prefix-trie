@@ -1,5 +1,7 @@
 //! Implementation of the Prefix Map.
 
+use std::num::NonZeroUsize;
+
 use crate::{
     inner::{Direction, DirectionForInsert, Node, Table},
     Prefix,
@@ -399,7 +401,7 @@ where
                 DirectionForInsert::NewChild { right, child_right } => {
                     let new = self.new_node(prefix, Some(value));
                     let child = self.table.set_child(idx, new, right).unwrap();
-                    self.table.set_child(new, child, child_right);
+                    self.table.set_child(new.get(), child, child_right);
                     return None;
                 }
                 DirectionForInsert::NewBranch {
@@ -410,8 +412,8 @@ where
                     let branch = self.new_node(branch_prefix, None);
                     let new = self.new_node(prefix, Some(value));
                     let child = self.table.set_child(idx, branch, right).unwrap();
-                    self.table.set_child(branch, new, prefix_right);
-                    self.table.set_child(branch, child, !prefix_right);
+                    self.table.set_child(branch.get(), new, prefix_right);
+                    self.table.set_child(branch.get(), child, !prefix_right);
                     return None;
                 }
             }
@@ -1033,19 +1035,19 @@ where
         self.table.clear_child(idx, right);
         while let Some(idx) = to_free.pop() {
             let mut dec = 0;
-            let node = &mut self.table[idx];
+            let node = &mut self.table[idx.get()];
             let value = node.value.take();
             // decrease the count if `value` is something
             if value.is_some() {
                 dec = 1;
             }
-            if let Some(left) = node.left.take().map(std::num::NonZeroUsize::get) {
+            if let Some(left) = node.left.take() {
                 to_free.push(left)
             }
-            if let Some(right) = node.right.take().map(std::num::NonZeroUsize::get) {
+            if let Some(right) = node.right.take() {
                 to_free.push(right)
             }
-            self.free.push(idx);
+            self.free.push(idx.get());
             self.count -= dec;
         }
     }
@@ -1053,7 +1055,7 @@ where
     /// insert a new node into the table and return its index. This function also increments the
     /// count by 1, but only if `value` is `Some`.
     #[inline(always)]
-    fn new_node(&mut self, prefix: P, value: Option<T>) -> usize {
+    fn new_node(&mut self, prefix: P, value: Option<T>) -> NonZeroUsize {
         if value.is_some() {
             self.count += 1;
         }
@@ -1063,7 +1065,8 @@ where
             node.value = value;
             node.left = None;
             node.right = None;
-            idx
+            // Safety: freed indices are always non-zero (index 0 is the root sentinel)
+            unsafe { NonZeroUsize::new_unchecked(idx) }
         } else {
             let table = self.table.as_mut();
             let idx = table.len();
@@ -1073,7 +1076,8 @@ where
                 left: None,
                 right: None,
             });
-            idx
+            // Safety: table always has at least the root at index 0, so len() >= 1
+            unsafe { NonZeroUsize::new_unchecked(idx) }
         }
     }
 

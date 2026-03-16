@@ -361,13 +361,13 @@ where
             DirectionForInsert::NewLeaf { right } => {
                 let new = self.map.new_node(self.prefix, Some(v));
                 self.map.table.set_child(self.idx, new, right);
-                &mut self.map.table[new]
+                &mut self.map.table[new.get()]
             }
             DirectionForInsert::NewChild { right, child_right } => {
                 let new = self.map.new_node(self.prefix, Some(v));
                 let child = self.map.table.set_child(self.idx, new, right).unwrap();
-                self.map.table.set_child(new, child, child_right);
-                &mut self.map.table[new]
+                self.map.table.set_child(new.get(), child, child_right);
+                &mut self.map.table[new.get()]
             }
             DirectionForInsert::NewBranch {
                 branch_prefix,
@@ -377,9 +377,9 @@ where
                 let branch = self.map.new_node(branch_prefix, None);
                 let new = self.map.new_node(self.prefix, Some(v));
                 let child = self.map.table.set_child(self.idx, branch, right).unwrap();
-                self.map.table.set_child(branch, new, prefix_right);
-                self.map.table.set_child(branch, child, !prefix_right);
-                &mut self.map.table[new]
+                self.map.table.set_child(branch.get(), new, prefix_right);
+                self.map.table.set_child(branch.get(), child, !prefix_right);
+                &mut self.map.table[new.get()]
             }
             DirectionForInsert::Enter { .. } => unreachable!(),
         }
