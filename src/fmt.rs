@@ -21,20 +21,20 @@ impl<P: Debug, T: Debug> Debug for DebugPrefixMap<'_, P, T> {
             (None, None, None) => node.prefix.fmt(f),
             (None, None, Some(child)) | (None, Some(child), None) => f
                 .debug_map()
-                .entry(&node.prefix, &Self(map, child))
+                .entry(&node.prefix, &Self(map, child.get()))
                 .finish(),
             (None, Some(left), Some(right)) => f
                 .debug_map()
-                .entry(&node.prefix, &(Self(map, left), Self(map, right)))
+                .entry(&node.prefix, &(Self(map, left.get()), Self(map, right.get())))
                 .finish(),
             (Some(v), None, None) => f.debug_map().entry(&node.prefix, v).finish(),
             (Some(v), None, Some(child)) | (Some(v), Some(child), None) => f
                 .debug_map()
-                .entry(&node.prefix, &(v, Self(map, child)))
+                .entry(&node.prefix, &(v, Self(map, child.get())))
                 .finish(),
             (Some(v), Some(left), Some(right)) => f
                 .debug_map()
-                .entry(&node.prefix, &(v, Self(map, left), Self(map, right)))
+                .entry(&node.prefix, &(v, Self(map, left.get()), Self(map, right.get())))
                 .finish(),
         }
     }

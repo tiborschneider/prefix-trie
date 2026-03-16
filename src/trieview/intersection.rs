@@ -179,14 +179,14 @@ impl<'a, P: Prefix, L, R> Iterator for Intersection<'a, P, L, R> {
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
-                        node_l.right(),
-                        node_r.right(),
+                        node_l.right().map(|x| x.get()),
+                        node_r.right().map(|x| x.get()),
                     ));
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
-                        node_l.left(),
-                        node_r.left(),
+                        node_l.left().map(|x| x.get()),
+                        node_r.left().map(|x| x.get()),
                     ));
                     if let (Some(left), Some(right)) =
                         (node_l.value.as_ref(), node_r.value.as_ref())
@@ -200,8 +200,8 @@ impl<'a, P: Prefix, L, R> Iterator for Intersection<'a, P, L, R> {
                         self.table_l,
                         self.table_r,
                         l,
-                        node_l.left(),
-                        node_l.right(),
+                        node_l.left().map(|x| x.get()),
+                        node_l.right().map(|x| x.get()),
                         r,
                     ));
                 }
@@ -212,8 +212,8 @@ impl<'a, P: Prefix, L, R> Iterator for Intersection<'a, P, L, R> {
                         self.table_r,
                         l,
                         r,
-                        node_r.left(),
-                        node_r.right(),
+                        node_r.left().map(|x| x.get()),
+                        node_r.right().map(|x| x.get()),
                     ));
                 }
             }
@@ -239,14 +239,14 @@ impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
-                        node_l.right(),
-                        node_r.right(),
+                        node_l.right().map(|x| x.get()),
+                        node_r.right().map(|x| x.get()),
                     ));
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
-                        node_l.left(),
-                        node_r.left(),
+                        node_l.left().map(|x| x.get()),
+                        node_r.left().map(|x| x.get()),
                     ));
                     let node_l = unsafe { self.table_l.get_mut(l) };
                     let node_r = unsafe { self.table_r.get_mut(r) };
@@ -262,8 +262,8 @@ impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
                         self.table_l,
                         self.table_r,
                         l,
-                        node_l.left(),
-                        node_l.right(),
+                        node_l.left().map(|x| x.get()),
+                        node_l.right().map(|x| x.get()),
                         r,
                     ));
                 }
@@ -274,8 +274,8 @@ impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
                         self.table_r,
                         l,
                         r,
-                        node_r.left(),
-                        node_r.right(),
+                        node_r.left().map(|x| x.get()),
+                        node_r.right().map(|x| x.get()),
                     ));
                 }
             }

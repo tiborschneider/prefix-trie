@@ -333,11 +333,11 @@ impl<'a, P: Prefix, L, R> Iterator for Difference<'a, P, L, R> {
                     let node_l = &self.table_l[l];
                     let node_r = &self.table_r[r];
                     self.extend(
-                        next_indices(self.table_l, self.table_r, node_l.right(), node_r.right()),
+                        next_indices(self.table_l, self.table_r, node_l.right().map(|x| x.get()), node_r.right().map(|x| x.get())),
                         lpm_r,
                     );
                     self.extend(
-                        next_indices(self.table_l, self.table_r, node_l.left(), node_r.left()),
+                        next_indices(self.table_l, self.table_r, node_l.left().map(|x| x.get()), node_r.left().map(|x| x.get())),
                         lpm_r,
                     );
                     if let Some(value) = node_l.value.as_ref() {
@@ -357,8 +357,8 @@ impl<'a, P: Prefix, L, R> Iterator for Difference<'a, P, L, R> {
                             self.table_l,
                             self.table_r,
                             l,
-                            node_l.left(),
-                            node_l.right(),
+                            node_l.left().map(|x| x.get()),
+                            node_l.right().map(|x| x.get()),
                             r,
                         ),
                         lpm_r,
@@ -379,8 +379,8 @@ impl<'a, P: Prefix, L, R> Iterator for Difference<'a, P, L, R> {
                             self.table_r,
                             l,
                             r,
-                            node_r.left(),
-                            node_r.right(),
+                            node_r.left().map(|x| x.get()),
+                            node_r.right().map(|x| x.get()),
                         ),
                         lpm_r,
                     );
@@ -388,10 +388,10 @@ impl<'a, P: Prefix, L, R> Iterator for Difference<'a, P, L, R> {
                 DifferenceIndex::OnlyL(l) => {
                     let node_l = &self.table_l[l];
                     if let Some(right) = node_l.right() {
-                        self.extend([DifferenceIndex::OnlyL(right)], lpm_r);
+                        self.extend([DifferenceIndex::OnlyL(right.get())], lpm_r);
                     }
                     if let Some(left) = node_l.left() {
-                        self.extend([DifferenceIndex::OnlyL(left)], lpm_r);
+                        self.extend([DifferenceIndex::OnlyL(left.get())], lpm_r);
                     }
                     if let Some(value) = node_l.value.as_ref() {
                         return Some(DifferenceItem {
@@ -423,14 +423,14 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifference<'a, P, L, R> {
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
-                        node_l.right(),
-                        node_r.right(),
+                        node_l.right().map(|x| x.get()),
+                        node_r.right().map(|x| x.get()),
                     ));
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
-                        node_l.left(),
-                        node_r.left(),
+                        node_l.left().map(|x| x.get()),
+                        node_r.left().map(|x| x.get()),
                     ));
                     if let Some(value) = node_l.value.as_ref() {
                         return Some((&node_l.prefix, value));
@@ -442,8 +442,8 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifference<'a, P, L, R> {
                         self.table_l,
                         self.table_r,
                         l,
-                        node_l.left(),
-                        node_l.right(),
+                        node_l.left().map(|x| x.get()),
+                        node_l.right().map(|x| x.get()),
                         r,
                     ));
                     if let Some(value) = node_l.value.as_ref() {
@@ -461,17 +461,17 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifference<'a, P, L, R> {
                         self.table_r,
                         l,
                         r,
-                        node_r.left(),
-                        node_r.right(),
+                        node_r.left().map(|x| x.get()),
+                        node_r.right().map(|x| x.get()),
                     ));
                 }
                 DifferenceIndex::OnlyL(l) => {
                     let node_l = &self.table_l[l];
                     if let Some(right) = node_l.right() {
-                        self.nodes.extend([DifferenceIndex::OnlyL(right)]);
+                        self.nodes.extend([DifferenceIndex::OnlyL(right.get())]);
                     }
                     if let Some(left) = node_l.left() {
-                        self.nodes.extend([DifferenceIndex::OnlyL(left)]);
+                        self.nodes.extend([DifferenceIndex::OnlyL(left.get())]);
                     }
                     if let Some(value) = node_l.value.as_ref() {
                         return Some((&node_l.prefix, value));
@@ -498,11 +498,11 @@ impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
                     let node_l = &self.table_l[l];
                     let node_r = &self.table_r[r];
                     self.extend(
-                        next_indices(self.table_l, self.table_r, node_l.right(), node_r.right()),
+                        next_indices(self.table_l, self.table_r, node_l.right().map(|x| x.get()), node_r.right().map(|x| x.get())),
                         lpm_r,
                     );
                     self.extend(
-                        next_indices(self.table_l, self.table_r, node_l.left(), node_r.left()),
+                        next_indices(self.table_l, self.table_r, node_l.left().map(|x| x.get()), node_r.left().map(|x| x.get())),
                         lpm_r,
                     );
                     let node_l = unsafe { self.table_l.get_mut(l) };
@@ -523,8 +523,8 @@ impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
                             self.table_l,
                             self.table_r,
                             l,
-                            node_l.left(),
-                            node_l.right(),
+                            node_l.left().map(|x| x.get()),
+                            node_l.right().map(|x| x.get()),
                             r,
                         ),
                         lpm_r,
@@ -546,8 +546,8 @@ impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
                             self.table_r,
                             l,
                             r,
-                            node_r.left(),
-                            node_r.right(),
+                            node_r.left().map(|x| x.get()),
+                            node_r.right().map(|x| x.get()),
                         ),
                         lpm_r,
                     );
@@ -555,10 +555,10 @@ impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
                 DifferenceIndex::OnlyL(l) => {
                     let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(right) = node_l.right() {
-                        self.extend([DifferenceIndex::OnlyL(right)], lpm_r);
+                        self.extend([DifferenceIndex::OnlyL(right.get())], lpm_r);
                     }
                     if let Some(left) = node_l.left() {
-                        self.extend([DifferenceIndex::OnlyL(left)], lpm_r);
+                        self.extend([DifferenceIndex::OnlyL(left.get())], lpm_r);
                     }
                     if let Some(value) = node_l.value.as_mut() {
                         return Some(DifferenceMutItem {
@@ -595,14 +595,14 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifferenceMut<'a, P, L, R> {
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
-                        node_l.right(),
-                        node_r.right(),
+                        node_l.right().map(|x| x.get()),
+                        node_r.right().map(|x| x.get()),
                     ));
                     self.nodes.extend(next_indices(
                         self.table_l,
                         self.table_r,
-                        node_l.left(),
-                        node_r.left(),
+                        node_l.left().map(|x| x.get()),
+                        node_r.left().map(|x| x.get()),
                     ));
                     let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(value) = node_l.value.as_mut() {
@@ -615,8 +615,8 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifferenceMut<'a, P, L, R> {
                         self.table_l,
                         self.table_r,
                         l,
-                        node_l.left(),
-                        node_l.right(),
+                        node_l.left().map(|x| x.get()),
+                        node_l.right().map(|x| x.get()),
                         r,
                     ));
                     let node_l = unsafe { self.table_l.get_mut(l) };
@@ -635,17 +635,17 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifferenceMut<'a, P, L, R> {
                         self.table_r,
                         l,
                         r,
-                        node_r.left(),
-                        node_r.right(),
+                        node_r.left().map(|x| x.get()),
+                        node_r.right().map(|x| x.get()),
                     ));
                 }
                 DifferenceIndex::OnlyL(l) => {
                     let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(right) = node_l.right() {
-                        self.nodes.extend([DifferenceIndex::OnlyL(right)]);
+                        self.nodes.extend([DifferenceIndex::OnlyL(right.get())]);
                     }
                     if let Some(left) = node_l.left() {
-                        self.nodes.extend([DifferenceIndex::OnlyL(left)]);
+                        self.nodes.extend([DifferenceIndex::OnlyL(left.get())]);
                     }
                     if let Some(value) = node_l.value.as_mut() {
                         return Some((&node_l.prefix, value));

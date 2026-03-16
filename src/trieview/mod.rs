@@ -373,7 +373,7 @@ where
         match &self.loc {
             ViewLoc::Node(idx) => Some(Self {
                 table: self.table,
-                loc: ViewLoc::Node(self.table[*idx].left()?),
+                loc: ViewLoc::Node(self.table[*idx].left()?.get()),
             }),
             ViewLoc::Virtual(p, idx) => {
                 // first, check if the node is on the left of the virtual one.
@@ -423,7 +423,7 @@ where
         match &self.loc {
             ViewLoc::Node(idx) => Some(Self {
                 table: self.table,
-                loc: ViewLoc::Node(self.table[*idx].right()?),
+                loc: ViewLoc::Node(self.table[*idx].right()?.get()),
             }),
             ViewLoc::Virtual(p, idx) => {
                 // first, check if the node is on the right of the virtual one.
@@ -976,7 +976,7 @@ where
         // the safety conditions remain satisfied.
 
         let left_idx = match &self.loc {
-            ViewLoc::Node(idx) => self.table[*idx].left(),
+            ViewLoc::Node(idx) => self.table[*idx].left().map(|x| x.get()),
             ViewLoc::Virtual(p, idx) => {
                 // first, check if the node is on the left of the virtual one.
                 if !to_right(p, &self.table[*idx].prefix) {
@@ -1034,7 +1034,7 @@ where
         // the safety conditions remain satisfied.
 
         let right_idx = match &self.loc {
-            ViewLoc::Node(idx) => self.table[*idx].right(),
+            ViewLoc::Node(idx) => self.table[*idx].right().map(|x| x.get()),
             ViewLoc::Virtual(p, idx) => {
                 // first, check if the node is on the right of the virtual one.
                 if to_right(p, &self.table[*idx].prefix) {
@@ -1137,7 +1137,7 @@ where
     /// ```
     pub fn split(self) -> (Option<Self>, Option<Self>) {
         let (left, right) = match &self.loc {
-            ViewLoc::Node(idx) => (self.table[*idx].left(), self.table[*idx].right()),
+            ViewLoc::Node(idx) => (self.table[*idx].left().map(|x| x.get()), self.table[*idx].right().map(|x| x.get())),
             ViewLoc::Virtual(p, idx) => {
                 // check if the node is on the right or the left of the virtual one.
                 if to_right(p, &self.table[*idx].prefix) {

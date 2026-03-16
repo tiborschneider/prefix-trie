@@ -1151,13 +1151,13 @@ where
         let mut idx_removed = false;
         let mut par_removed = false;
         if let Some(left) = self.table[idx].left() {
-            (f, idx_removed) = self._retain(left, Some(idx), false, par, par_right, f);
+            (f, idx_removed) = self._retain(left.get(), Some(idx), false, par, par_right, f);
         }
         if let Some(right) = self.table[idx].right() {
             if idx_removed {
-                (f, par_removed) = self._retain(right, par, par_right, grp, grp_right, f);
+                (f, par_removed) = self._retain(right.get(), par, par_right, grp, grp_right, f);
             } else {
-                (f, _) = self._retain(right, Some(idx), true, par, par_right, f);
+                (f, _) = self._retain(right.get(), Some(idx), true, par, par_right, f);
             }
         }
         // then, check if we need to delete the node
