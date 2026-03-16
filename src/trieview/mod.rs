@@ -360,13 +360,13 @@ where
     /// let view = map.view_at(net!("1.0.0.0/8")).unwrap();
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
     ///
-    /// let view = view.left.unwrap();
+    /// let view = view.left().unwrap();
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
     ///
-    /// let view = view.left.unwrap();
+    /// let view = view.left().unwrap();
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/16"));
     ///
-    /// assert!(view.left.is_none());
+    /// assert!(view.left().is_none());
     /// # }
     /// ```
     pub fn left(&self) -> Option<Self> {
@@ -409,14 +409,14 @@ where
     /// let view = map.view_at(net!("1.0.0.0/8")).unwrap();
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
     ///
-    /// assert!(view.right.is_none());
-    /// let view = view.left.unwrap();
+    /// assert!(view.right().is_none());
+    /// let view = view.left().unwrap();
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
     ///
-    /// let view = view.right.unwrap();
+    /// let view = view.right().unwrap();
     /// assert_eq!(view.prefix(), &net!("1.1.0.0/16"));
     ///
-    /// assert!(view.right.is_none());
+    /// assert!(view.right().is_none());
     /// # }
     /// ```
     pub fn right(&self) -> Option<Self> {
@@ -960,13 +960,13 @@ where
     /// let view = map.view_mut_at(net!("1.0.0.0/8")).unwrap();
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
     ///
-    /// let view = view.left.unwrap();
+    /// let view = view.left().unwrap();
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
     ///
-    /// let view = view.left.unwrap();
+    /// let view = view.left().unwrap();
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/16"));
     ///
-    /// assert!(view.left.is_err());
+    /// assert!(view.left().is_err());
     /// # }
     /// ```
     pub fn left(self) -> Result<Self, Self> {
@@ -1015,16 +1015,16 @@ where
     /// let view = map.view_mut_at(net!("1.0.0.0/8")).unwrap();
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
     ///
-    /// let view = view.right.unwrap_err(); // there is no view on the right.
+    /// let view = view.right().unwrap_err(); // there is no view on the right.
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
     ///
-    /// let view = view.left.unwrap();
+    /// let view = view.left().unwrap();
     /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
     ///
-    /// let view = view.right.unwrap();
+    /// let view = view.right().unwrap();
     /// assert_eq!(view.prefix(), &net!("1.1.0.0/16"));
     ///
-    /// assert!(view.right.is_err());
+    /// assert!(view.right().is_err());
     /// # }
     /// ```
     pub fn right(self) -> Result<Self, Self> {
@@ -1066,8 +1066,8 @@ where
     ///     net!("1.0.0.0/9"),
     /// ]);
     ///
-    /// assert!(map.view_mut_at(net!("1.0.0.0/8")).unwrap().has_left);
-    /// assert!(!map.view_mut_at(net!("1.0.0.0/9")).unwrap().has_left);
+    /// assert!(map.view_mut_at(net!("1.0.0.0/8")).unwrap().has_left());
+    /// assert!(!map.view_mut_at(net!("1.0.0.0/9")).unwrap().has_left());
     /// # }
     /// ```
     pub fn has_left(&self) -> bool {
@@ -1094,8 +1094,8 @@ where
     ///     net!("1.128.0.0/9"),
     /// ]);
     ///
-    /// assert!(map.view_mut_at(net!("1.0.0.0/8")).unwrap().has_right);
-    /// assert!(!map.view_mut_at(net!("1.128.0.0/9")).unwrap().has_right);
+    /// assert!(map.view_mut_at(net!("1.0.0.0/8")).unwrap().has_right());
+    /// assert!(!map.view_mut_at(net!("1.128.0.0/9")).unwrap().has_right());
     /// # }
     /// ```
     pub fn has_right(&self) -> bool {
