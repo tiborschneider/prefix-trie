@@ -25,18 +25,40 @@ jobs:
       with:
         toolchain: ${{ matrix.toolchain }}
         override: true
-        components: rustfmt, clippy
     - name: Install cargo-hack
       run: cargo install cargo-hack
-
-    - name: Run clippy
-      run: cargo hack --feature-powerset clippy --verbose
-    - name: Run rustfmt
-      run: cargo fmt --check
     - name: Run tests
       run: cargo hack --feature-powerset test --verbose --lib --release
     - name: Run doctests
       run: cargo hack --feature-powerset test --verbose --doc
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install rustup
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt
+    - name: Run rustfmt
+      run: cargo fmt --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install rustup
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: clippy
+    - name: Install cargo-hack
+      run: cargo install cargo-hack
+    - name: Run clippy
+      run: cargo hack --feature-powerset clippy --verbose
 
   msrv:
     runs-on: ubuntu-latest
