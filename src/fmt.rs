@@ -1,60 +1,58 @@
-//! Formatting implementation for the PrefixMap
+//! Debug formatting for PrefixMap.
+//!
+//! The output hides the internal TreeBitMap structure and shows the logical prefix trie,
+//! matching the style of PrefixMap's debug output.
 
 use std::fmt::{Debug, Formatter, Result};
 
-use super::*;
+use crate::{Prefix, PrefixMap};
 
-impl<P: Debug, T: Debug> Debug for PrefixMap<P, T> {
+impl<P: Prefix + Debug, T: Debug> Debug for PrefixMap<P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        DebugPrefixMap(self, 0).fmt(f)
+        let entries: Vec<(P, &T)> = self.iter().collect();
+        DebugSubtree { entries: &entries }.fmt(f)
     }
 }
 
-struct DebugPrefixMap<'a, P, T>(&'a PrefixMap<P, T>, usize);
+struct DebugSubtree<'a, P, T> {
+    entries: &'a [(P, &'a T)],
+}
 
-impl<P: Debug, T: Debug> Debug for DebugPrefixMap<'_, P, T> {
+struct DebugExtendedNode<'a, P, T> {
+    value: &'a T,
+    children: DebugSubtree<'a, P, T>,
+}
+
+impl<P: Prefix + Debug, T: Debug> Debug for DebugExtendedNode<'_, P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        let map = self.0;
-        let idx = self.1;
-        let node = &map.table[idx];
-        match (node.value.as_ref(), node.left, node.right) {
-            (None, None, None) => node.prefix.fmt(f),
-            (None, None, Some(child)) | (None, Some(child), None) => f
-                .debug_map()
-                .entry(&node.prefix, &DebugPrefixMap(map, child.get()))
-                .finish(),
-            (None, Some(left), Some(right)) => f
-                .debug_map()
-                .entry(
-                    &node.prefix,
-                    &(
-                        DebugPrefixMap(map, left.get()),
-                        DebugPrefixMap(map, right.get()),
-                    ),
-                )
-                .finish(),
-            (Some(v), None, None) => f.debug_map().entry(&node.prefix, v).finish(),
-            (Some(v), None, Some(child)) | (Some(v), Some(child), None) => f
-                .debug_map()
-                .entry(&node.prefix, &(v, DebugPrefixMap(map, child.get())))
-                .finish(),
-            (Some(v), Some(left), Some(right)) => f
-                .debug_map()
-                .entry(
-                    &node.prefix,
-                    &(
-                        v,
-                        DebugPrefixMap(map, left.get()),
-                        DebugPrefixMap(map, right.get()),
-                    ),
-                )
-                .finish(),
+        let mut d = f.debug_struct("");
+        d.field("value", self.value);
+        if !self.children.entries.is_empty() {
+            d.field("children", &self.children);
         }
+        d.finish()
     }
 }
 
-impl<P: Debug> Debug for PrefixSet<P> {
+impl<P: Prefix + Debug, T: Debug> Debug for DebugSubtree<'_, P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        DebugPrefixMap(&self.0, 0).fmt(f)
+        let mut dm = f.debug_map();
+        let mut entries = self.entries;
+
+        while let Some(((prefix, value), rest)) = entries.split_first() {
+            let child_count = rest.iter().take_while(|(p, _)| prefix.contains(p)).count();
+            let (children, remaining) = rest.split_at(child_count);
+            entries = remaining;
+
+            dm.entry(
+                prefix,
+                &DebugExtendedNode {
+                    value: *value,
+                    children: DebugSubtree { entries: children },
+                },
+            );
+        }
+
+        dm.finish()
     }
 }

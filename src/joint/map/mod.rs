@@ -1,7 +1,7 @@
 //! Module that defines the JointPrefixMap
 
 use super::JointPrefix;
-use crate::{AsView, PrefixMap};
+use crate::{AsView, PrefixMap, TrieView};
 #[cfg(test)]
 #[cfg(feature = "ipnet")]
 mod test;
@@ -136,8 +136,10 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork_ref!(self, prefix, get_mut)
     }
 
-    /// Get the value of an element by matching exactly on the prefix. Notice, that the returned
-    /// prefix may differ from the one provided in the host-part of the address.
+    /// Get the value of an element by matching exactly on the prefix.
+    ///
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits masked out by the prefix length are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -259,6 +261,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
+    /// ```
     pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T)> {
         fork_ref!(self, prefix as (P, T), get_spm)
     }
@@ -280,6 +283,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
+    /// ```
     pub fn get_spm_prefix(&self, prefix: &P) -> Option<P> {
         fork_ref!(self, prefix as P, get_spm_prefix)
     }
@@ -287,8 +291,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// Insert a new item into the prefix-map. This function may return any value that existed
     /// before.
     ///
-    /// In case the node already exists in the tree, its prefix will be replaced by the provided
-    /// argument. This allows you to store additional information in the host part of the prefix.
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits masked out by the prefix length are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -310,10 +314,10 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork!(self, prefix, insert, value)
     }
 
-    /// Gets the given key’s corresponding entry in the map for in-place manipulation. In case you
-    /// eventually insert an element into the map, this operation will also replace the prefix in
-    /// the node with the existing one. That is if you store additional information in the host part
-    /// of the address (the one that is masked out).
+    /// Gets the given key’s corresponding entry in the map for in-place manipulation.
+    ///
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits masked out by the prefix length are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -346,10 +350,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// Removes a key from the map, returning the value at the key if the key was previously in the
-    /// map. In contrast to [`Self::remove_keep_tree`], this operation will modify the tree
-    /// structure. As a result, this operation takes longer than `remove_keep_tree`, as does
-    /// inserting the same element again. However, future reads may be faster as less nodes need to
-    /// be traversed. Further, it reduces the memory footprint to its minimum.
+    /// map. In contrast to [`Self::remove_keep_tree`], this operation may prune empty trie nodes,
+    /// reducing the memory footprint.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -371,10 +373,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// Removes a key from the map, returning the value at the key if the key was previously in the
-    /// map. In contrast to [`Self::remove`], his operation will keep the tree structure as is, but
-    /// only remove the element from it. This allows any future `insert` on the same prefix to be
-    /// faster. However future reads from the tree might be a bit slower because they need to
-    /// traverse more nodes.
+    /// map. In contrast to [`Self::remove`], this operation only removes the stored value and may
+    /// leave empty trie nodes in place.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -386,9 +386,6 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// assert_eq!(pm.get(&prefix), Some(&1));
     /// assert_eq!(pm.remove_keep_tree(&prefix), Some(1));
     /// assert_eq!(pm.get(&prefix), None);
-    ///
-    /// // future inserts of the same key are now faster!
-    /// pm.insert(prefix, 1);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -483,7 +480,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// Iterate over all entries in the map that covers the given `prefix` (including `prefix`
-    /// itself if that is present in the map). The returned iterator yields `(&'a P, &'a T)`.
+    /// itself if that is present in the map). The returned iterator yields `(P, &'a T)`, with
+    /// reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -512,7 +510,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # fn main() {}
     /// ```
     ///
-    /// This function also yields the root note *if* it is part of the map:
+    /// This function also yields the root node *if* it is part of the map:
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -527,7 +525,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover<'a, 'p>(&'a self, prefix: &'p P) -> Cover<'a, 'p, P, T> {
+    pub fn cover<'a>(&'a self, prefix: &P) -> Cover<'a, P, T> {
         match prefix.p1_or_p2_ref() {
             Left(p1) => Cover::P1(self.t1.cover(p1)),
             Right(p2) => Cover::P2(self.t2.cover(p2)),
@@ -535,7 +533,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// Iterate over all keys (prefixes) in the map that covers the given `prefix` (including
-    /// `prefix` itself if that is present in the map). The returned iterator yields `&'a P`.
+    /// `prefix` itself if that is present in the map). The returned iterator yields reconstructed
+    /// prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -560,7 +559,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover_keys<'a, 'p>(&'a self, prefix: &'p P) -> CoverKeys<'a, 'p, P, T> {
+    pub fn cover_keys<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, T> {
         CoverKeys(self.cover(prefix))
     }
 
@@ -590,14 +589,15 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover_values<'a, 'p>(&'a self, prefix: &'p P) -> CoverValues<'a, 'p, P, T> {
+    pub fn cover_values<'a>(&'a self, prefix: &P) -> CoverValues<'a, P, T> {
         CoverValues(self.cover(prefix))
     }
 }
 
 impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// An iterator visiting all key-value pairs in lexicographic order. The iterator element type
-    /// is `(&P, &T)`. Elements of the first prefix are yielded before those of the second prefix.
+    /// is `(P, &T)`, with reconstructed prefixes `P`. Elements of the first prefix are yielded
+    /// before those of the second prefix.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -672,7 +672,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// An iterator visiting all keys in lexicographic order. The iterator element type is
-    /// `&P`. Elements of the first prefix are yielded before those of the second one.
+    /// reconstructed prefixes `P`. Elements of the first prefix are yielded before those of the
+    /// second one.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -748,7 +749,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// An iterator visiting all values in lexicographic order. The iterator element type is
-    /// `&P`. Elements of the first prefix are yielded before those of the second one.
+    /// `&T`. Elements of the first prefix are yielded before those of the second one.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -774,7 +775,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// Creates a consuming iterator visiting all values in lexicographic order. The iterator
-    /// element type is `P`.
+    /// element type is `T`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -829,8 +830,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     }
 
     /// Get an iterator over the node itself and all children. All elements returned have a prefix
-    /// that is contained within `prefix` itself (or are the same). The iterator yields references
-    /// to both keys and values, i.e., type `(&'a P, &'a T)`. The iterator yields elements in
+    /// that is contained within `prefix` itself (or are the same). The iterator yields
+    /// `(P, &'a T)`, with reconstructed prefixes `P`. The iterator yields elements in
     /// lexicographic order.
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
@@ -897,10 +898,11 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
 
     /// Get an iterator of mutable references of the node itself and all its children. All elements
     /// returned have a prefix that is contained within `prefix` itself (or are the same). The
-    /// iterator yields references to the keys, and mutable references to the values, i.e., type
-    /// `(&'a P, &'a mut T)`. The iterator yields elements in lexicographic order.
+    /// iterator yields `(P, &'a mut T)`, with reconstructed prefixes `P`. The iterator yields
+    /// elements in lexicographic order.
     ///
-    /// **Note**: Consider using [`crate::AsViewMut::view_mut_at`] as an alternative.
+    /// **Note**: Consider using [`crate::AsView::view_at`] on a mutable map reference as an
+    /// alternative.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -1027,8 +1029,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// `self.t1.view().union(&other.t1).chain(self.t2.view().union(&other.t2))`.
     ///
     /// If a prefix is present in both trees, the iterator will yield both elements. Otherwise, the
-    /// iterator will yield the element of one map together with the longest prefix match in
-    /// the other map. Elements are of type [`UnionItem`].
+    /// iterator will yield the element from the side where it is present. Elements are of type
+    /// [`UnionItem`].
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -1057,13 +1059,13 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     ///         },
     ///         UnionItem::Right{
     ///             prefix: net!("192.168.0.0/23"),
-    ///             left: Some((net!("192.168.0.0/22"), &2)),
+    ///             left: None,
     ///             right: &"b",
     ///         },
     ///         UnionItem::Left{
     ///             prefix: net!("192.168.0.0/24"),
     ///             left: &3,
-    ///             right: Some((net!("192.168.0.0/23"), &"b")),
+    ///             right: None,
     ///         },
     ///         UnionItem::Left{
     ///             prefix: net!("2001::1:0:0/96"),
@@ -1076,8 +1078,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// ```
     pub fn union<'a, R>(&'a self, other: &'a JointPrefixMap<P, R>) -> Union<'a, P, T, R> {
         Union {
-            i1: Some(self.t1.view().union(&other.t1)),
-            i2: Some(self.t2.view().union(&other.t2)),
+            i1: Some(self.t1.view().union(&other.t1).into_iter()),
+            i2: Some(self.t2.view().union(&other.t2).into_iter()),
         }
     }
 
@@ -1124,14 +1126,20 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         other: &'a JointPrefixMap<P, R>,
     ) -> Intersection<'a, P, T, R> {
         Intersection {
-            i1: Some(self.t1.view().intersection(&other.t1)),
-            i2: Some(self.t2.view().intersection(&other.t2)),
+            i1: self
+                .t1
+                .view()
+                .intersection(&other.t1)
+                .map(IntoIterator::into_iter),
+            i2: self
+                .t2
+                .view()
+                .intersection(&other.t2)
+                .map(IntoIterator::into_iter),
         }
     }
 
-    /// Iterate over the all elements in `self` that are not present in `other`. Each item will
-    /// return a reference to the prefix and value in `self`, as well as the longest prefix match of
-    /// `other`.
+    /// Iterate over the all elements in `self` that are not present in `other`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -1159,17 +1167,17 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// assert_eq!(
     ///     map_a.difference(&map_b).collect::<Vec<_>>(),
     ///     vec![
-    ///         DifferenceItem { prefix: net!("192.168.0.0/24"), value: &3, right: Some((net!("192.168.0.0/23"), &"c"))},
-    ///         DifferenceItem { prefix: net!("192.168.2.0/23"), value: &4, right: Some((net!("192.168.0.0/22"), &"b"))},
-    ///         DifferenceItem { prefix: net!("2001::1:0:0/97"), value: &6, right: Some((net!("2001::1:0:0/96"), &"e"))},
+    ///         DifferenceItem { prefix: net!("192.168.0.0/24"), value: &3, right: None },
+    ///         DifferenceItem { prefix: net!("192.168.2.0/23"), value: &4, right: None },
+    ///         DifferenceItem { prefix: net!("2001::1:0:0/97"), value: &6, right: None },
     ///     ]
     /// );
     /// # }
     /// ```
     pub fn difference<'a, R>(&'a self, other: &'a JointPrefixMap<P, R>) -> Difference<'a, P, T, R> {
         Difference {
-            i1: Some(self.t1.view().difference(&other.t1)),
-            i2: Some(self.t2.view().difference(&other.t2)),
+            i1: Some(self.t1.view().difference(&other.t1).into_iter()),
+            i2: Some(self.t2.view().difference(&other.t2).into_iter()),
         }
     }
 
@@ -1210,8 +1218,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         other: &'a JointPrefixMap<P, R>,
     ) -> CoveringDifference<'a, P, T, R> {
         CoveringDifference {
-            i1: Some(self.t1.view().covering_difference(&other.t1)),
-            i2: Some(self.t2.view().covering_difference(&other.t2)),
+            i1: Some(self.t1.view().covering_difference(&other.t1).into_iter()),
+            i2: Some(self.t2.view().covering_difference(&other.t2).into_iter()),
         }
     }
 }

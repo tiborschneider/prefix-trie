@@ -1,37 +1,109 @@
-//! PrefixSet, that is implemened as a simple binary tree, based on the [`PrefixMap`].
+//! Prefix set implemented on top of [`PrefixMap`].
 
-use crate::{map::CoverKeys, Prefix, PrefixMap};
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 
-/// Set of prefixes, organized in a tree. This strucutre gives efficient access to the longest
-/// prefix in the set that contains another prefix.
+use crate::Prefix;
+
+use super::{
+    map::{CoverKeys, PrefixMap},
+    trieview::{AsView, TrieRef, TrieRefMut},
+};
+
+/// Set of prefixes, organized in a dense prefix trie.
 ///
-/// You can perform union, intersection, and (covering) difference operations by first creating a
-/// view over the map using [`crate::AsView`] or [`crate::AsViewMut`].
+/// This structure gives efficient access to the longest prefix in the set that contains another
+/// prefix. Prefixes returned from this set are reconstructed from the trie and are therefore
+/// returned by value. Host bits outside the prefix length are not preserved.
+///
+/// You can perform union, intersection, and difference operations by creating a view with
+/// [`AsView`].
 #[derive(Clone)]
 pub struct PrefixSet<P>(pub(crate) PrefixMap<P, ()>);
 
 impl<P: Prefix> PrefixSet<P> {
-    /// Create a new, empty prefixset.
+    /// Create a new, empty prefix set.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// assert!(set.is_empty());
+    /// # }
+    /// ```
     pub fn new() -> Self {
         Self(Default::default())
     }
 
-    /// Returns the number of elements stored in `self`.
+    /// Returns the number of prefixes stored in `self`.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// assert_eq!(set.len(), 0);
+    /// set.insert("192.168.0.0/24".parse()?);
+    /// set.insert("192.168.1.0/24".parse()?);
+    /// assert_eq!(set.len(), 2);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
-    /// Returns `true` if the set contains no elements.
+    /// Returns `true` if the set contains no prefixes.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// assert!(set.is_empty());
+    /// set.insert("192.168.0.0/24".parse()?);
+    /// assert!(!set.is_empty());
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    /// Check wether some prefix is present in the set, without using longest prefix match.
+    /// Returns the amount of memory used by this data structure in bytes.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// let before = set.mem_size();
+    /// set.insert("192.168.0.0/24".parse()?);
+    /// assert!(set.mem_size() >= before);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn mem_size(&self) -> usize {
+        self.0.mem_size()
+    }
+
+    /// Check whether `prefix` is present in the set using exact prefix matching.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
@@ -49,80 +121,67 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.contains_key(prefix)
     }
 
-    /// Get a reference to the stored prefix. This function allows you to retrieve the host part of
-    /// the prefix. The returned prefix will always have the same network address and prefix length.
+    /// Get the canonical reconstructed prefix by exact prefix matching.
     ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
-    /// set.insert("192.168.0.254/24".parse()?);
-    /// assert_eq!(set.get(&"192.168.0.0/24".parse()?), Some(&"192.168.0.254/24".parse()?));
-    /// # Ok(())
-    /// # }
-    /// # #[cfg(not(feature = "ipnet"))]
-    /// # fn main() {}
-    /// ```
-    pub fn get<'a>(&'a self, prefix: &P) -> Option<&'a P> {
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits masked out by the prefix length are not preserved.
+    pub fn get(&self, prefix: &P) -> Option<P> {
         self.0.get_key_value(prefix).map(|(p, _)| p)
     }
 
-    /// Get the longest prefix in the set that contains the given preifx.
+    /// Get the longest prefix in the set that contains `prefix`.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::PrefixSet;
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// set.insert("192.168.1.0/24".parse()?);
     /// set.insert("192.168.0.0/23".parse()?);
-    /// assert_eq!(set.get_lpm(&"192.168.1.1/32".parse()?), Some(&"192.168.1.0/24".parse()?));
-    /// assert_eq!(set.get_lpm(&"192.168.1.0/24".parse()?), Some(&"192.168.1.0/24".parse()?));
-    /// assert_eq!(set.get_lpm(&"192.168.0.0/24".parse()?), Some(&"192.168.0.0/23".parse()?));
+    /// assert_eq!(set.get_lpm(&"192.168.1.1/32".parse()?), Some("192.168.1.0/24".parse()?));
+    /// assert_eq!(set.get_lpm(&"192.168.1.0/24".parse()?), Some("192.168.1.0/24".parse()?));
+    /// assert_eq!(set.get_lpm(&"192.168.0.0/24".parse()?), Some("192.168.0.0/23".parse()?));
     /// assert_eq!(set.get_lpm(&"192.168.2.0/24".parse()?), None);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<&'a P> {
-        self.0.get_lpm(prefix).map(|(p, _)| p)
+    pub fn get_lpm(&self, prefix: &P) -> Option<P> {
+        self.0.get_lpm_prefix(prefix)
     }
 
-    /// Get the shortest prefix in the set that contains the given preifx.
+    /// Get the shortest prefix in the set that contains `prefix`.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::PrefixSet;
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// set.insert("192.168.1.0/24".parse()?);
     /// set.insert("192.168.0.0/23".parse()?);
-    /// assert_eq!(set.get_spm(&"192.168.1.1/32".parse()?), Some(&"192.168.0.0/23".parse()?));
-    /// assert_eq!(set.get_spm(&"192.168.1.0/24".parse()?), Some(&"192.168.0.0/23".parse()?));
-    /// assert_eq!(set.get_spm(&"192.168.0.0/23".parse()?), Some(&"192.168.0.0/23".parse()?));
+    /// assert_eq!(set.get_spm(&"192.168.1.1/32".parse()?), Some("192.168.0.0/23".parse()?));
+    /// assert_eq!(set.get_spm(&"192.168.1.0/24".parse()?), Some("192.168.0.0/23".parse()?));
+    /// assert_eq!(set.get_spm(&"192.168.0.0/23".parse()?), Some("192.168.0.0/23".parse()?));
     /// assert_eq!(set.get_spm(&"192.168.2.0/24".parse()?), None);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<&'a P> {
+    pub fn get_spm(&self, prefix: &P) -> Option<P> {
         self.0.get_spm_prefix(prefix)
     }
 
-    /// Adds a value to the set.
+    /// Adds a prefix to the set.
     ///
-    /// Returns whether the value was newly inserted. That is:
-    /// - If the set did not previously contain this value, `true` is returned.
-    /// - If the set already contained this value, `false` is returned.
-    ///
-    /// This operation will always replace the currently stored prefix. This allows you to store
-    /// additional information in the host aprt of the prefix.
+    /// Returns whether the prefix was newly inserted.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::PrefixSet;
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
@@ -138,10 +197,11 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.insert(prefix, ()).is_none()
     }
 
-    /// Removes a value from the set. Returns whether the value was present in the set.
+    /// Removes `prefix` from the set and returns whether it was present.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::PrefixSet;
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
@@ -159,13 +219,11 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.remove(prefix).is_some()
     }
 
-    /// Removes a prefix from the set, returning wether the prefix was present or not. In contrast
-    /// to [`Self::remove`], his operation will keep the tree structure as is, but only remove the
-    /// element from it. This allows any future `insert` on the same prefix to be faster. However
-    /// future reads from the tree might be a bit slower because they need to traverse more nodes.
+    /// Removes `prefix` from the set and may leave empty trie nodes in place.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::PrefixSet;
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
@@ -174,9 +232,6 @@ impl<P: Prefix> PrefixSet<P> {
     /// assert!(set.contains(&prefix));
     /// assert!(set.remove_keep_tree(&prefix));
     /// assert!(!set.contains(&prefix));
-    ///
-    /// // future inserts of the same key are now faster!
-    /// set.insert(prefix);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -186,11 +241,11 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.remove_keep_tree(prefix).is_some()
     }
 
-    /// Remove all elements that are contained within `prefix`. This will change the tree
-    /// structure. This operation is `O(n)`, as the entries must be freed up one-by-one.
+    /// Remove all prefixes that are contained within `prefix`.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::PrefixSet;
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
@@ -213,18 +268,19 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.remove_children(prefix)
     }
 
-    /// Clear the set but keep the allocated memory.
+    /// Clear the set while keeping allocated memory for reuse.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::PrefixSet;
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// set.insert("192.168.0.0/24".parse()?);
     /// set.insert("192.168.1.0/24".parse()?);
     /// set.clear();
+    /// assert!(set.is_empty());
     /// assert!(!set.contains(&"192.168.0.0/24".parse()?));
-    /// assert!(!set.contains(&"192.168.1.0/24".parse()?));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -234,15 +290,41 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.clear()
     }
 
-    /// Iterate over all prefixes in the set
+    /// Iterate over all prefixes in lexicographic order.
+    ///
+    /// The iterator yields canonical owned prefixes.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// set.insert("192.168.0.0/23".parse()?);
+    /// set.insert("192.168.0.0/24".parse()?);
+    /// set.insert("192.168.2.0/23".parse()?);
+    /// assert_eq!(
+    ///     set.iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         "192.168.0.0/23".parse()?,
+    ///         "192.168.0.0/24".parse()?,
+    ///         "192.168.2.0/23".parse()?,
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
     pub fn iter(&self) -> Iter<'_, P> {
         self.into_iter()
     }
 
-    /// Keep only the elements in the map that satisfy the given condition `f`.
+    /// Keep only prefixes that satisfy the predicate `f`.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::{Prefix, PrefixSet};
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
@@ -264,17 +346,16 @@ impl<P: Prefix> PrefixSet<P> {
     where
         F: FnMut(&P) -> bool,
     {
-        let _ = self.0._retain(0, None, false, None, false, |p, _| f(p));
+        self.0.retain(|p, _| f(p));
     }
 
-    /// Get an iterator over the node itself and all children. All elements returned have a prefix
-    /// that is contained within `prefix` itself (or are the same). The iterator yields elements in
-    /// lexicographic order.
+    /// Get an iterator over `prefix` and all more-specific prefixes contained within it.
     ///
-    /// **Info**: Use the [`crate::trieview::TrieView`] abstraction that provides more flexibility.
+    /// The iterator yields canonical owned prefixes in lexicographic order.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::PrefixSet;
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
@@ -286,8 +367,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// assert_eq!(
     ///     set.children(&"192.168.0.0/23".parse()?).collect::<Vec<_>>(),
     ///     vec![
-    ///         &"192.168.0.0/23".parse()?,
-    ///         &"192.168.0.0/24".parse()?,
+    ///         "192.168.0.0/23".parse()?,
+    ///         "192.168.0.0/24".parse()?,
     ///     ]
     /// );
     /// # Ok(())
@@ -299,14 +380,14 @@ impl<P: Prefix> PrefixSet<P> {
         Iter(self.0.children(prefix))
     }
 
-    /// Iterate over all prefixes in the set that covers the given `prefix` (including `prefix`
-    /// itself if that is present in the set). The returned iterator yields `&'a P`.
+    /// Iterate over all prefixes in the set that cover `prefix`.
     ///
-    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
-    /// the tree.
+    /// This includes `prefix` itself if it is present in the set. The iterator yields canonical
+    /// owned prefixes ordered by prefix length.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// use prefix_trie::PrefixSet;
+    ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
@@ -316,16 +397,16 @@ impl<P: Prefix> PrefixSet<P> {
     /// set.insert(p0);
     /// set.insert(p1);
     /// set.insert(p2);
-    /// set.insert("10.1.2.0/24".parse()?); // disjoint prefixes are not covered
-    /// set.insert("10.1.1.0/25".parse()?); // more specific prefixes are not covered
-    /// set.insert("11.0.0.0/8".parse()?);  // Branch points that don't contain values are skipped
-    /// assert_eq!(set.cover(&p2).collect::<Vec<_>>(), vec![&p0, &p1, &p2]);
+    /// set.insert("10.1.2.0/24".parse()?);
+    /// set.insert("10.1.1.0/25".parse()?);
+    /// set.insert("11.0.0.0/8".parse()?);
+    /// assert_eq!(set.cover(&p2).collect::<Vec<_>>(), vec![p0, p1, p2]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover<'a, 'p>(&'a self, prefix: &'p P) -> CoverKeys<'a, 'p, P, ()> {
+    pub fn cover<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, ()> {
         self.0.cover_keys(prefix)
     }
 }
@@ -341,27 +422,38 @@ where
     P: Prefix + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.iter().zip(other.iter()).all(|(a, b)| a == b)
+        self.0 == other.0
     }
 }
 
 impl<P> Eq for PrefixSet<P> where P: Prefix + Eq {}
 
-#[derive(Clone, Default)]
-/// An iterator over all entries of a [`PrefixSet`] in lexicographic order.
-pub struct Iter<'a, P>(crate::map::Iter<'a, P, ()>);
+impl<P> Debug for PrefixSet<P>
+where
+    P: Prefix + Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.debug_set().entries(self.iter()).finish()
+    }
+}
 
-impl<'a, P: Prefix> Iterator for Iter<'a, P> {
-    type Item = &'a P;
+/// An iterator over all prefixes of a [`PrefixSet`] in lexicographic order.
+///
+/// This iterator yields canonical owned prefixes.
+#[derive(Clone, Default)]
+pub struct Iter<'a, P: Prefix>(crate::map::Iter<'a, P, ()>);
+
+impl<P: Prefix> Iterator for Iter<'_, P> {
+    type Item = P;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next().map(|(p, _)| p)
     }
 }
 
+/// A consuming iterator over all prefixes of a [`PrefixSet`] in lexicographic order.
 #[derive(Clone)]
-/// A consuming iterator over all entries of a [`PrefixSet`] in lexicographic order.
-pub struct IntoIter<P>(crate::map::IntoIter<P, ()>);
+pub struct IntoIter<P: Prefix>(crate::map::IntoIter<P, ()>);
 
 impl<P: Prefix> Iterator for IntoIter<P> {
     type Item = P;
@@ -382,7 +474,7 @@ impl<P: Prefix> IntoIterator for PrefixSet<P> {
 }
 
 impl<'a, P: Prefix> IntoIterator for &'a PrefixSet<P> {
-    type Item = &'a P;
+    type Item = P;
 
     type IntoIter = Iter<'a, P>;
 
@@ -398,5 +490,24 @@ impl<P: Prefix> FromIterator<P> for PrefixSet<P> {
             set.insert(p);
         }
         set
+    }
+}
+
+impl<'a, P: Prefix> AsView<'a> for &'a PrefixSet<P> {
+    type P = P;
+    type View = TrieRef<'a, P, ()>;
+
+    fn view(self) -> Self::View {
+        TrieRef::new_root(self.0.table())
+    }
+}
+
+impl<'a, P: Prefix> AsView<'a> for &'a mut PrefixSet<P> {
+    type P = P;
+    type View = TrieRefMut<'a, P, ()>;
+
+    fn view(self) -> Self::View {
+        let raw = self.0.table_mut().raw_cells();
+        TrieRefMut::new_root(self.0.table(), raw)
     }
 }

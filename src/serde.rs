@@ -1,15 +1,17 @@
-//! Serialization and Deserialization implementation
+//! Serialization and deserialization for dense prefix collections.
 
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::*;
+use crate::Prefix;
+
+use super::{map::PrefixMap, set::PrefixSet};
 
 impl<P: Prefix + Serialize, T: Serialize> Serialize for PrefixMap<P, T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let map: Vec<(&P, &T)> = Vec::from_iter(self);
+        let map: Vec<(P, &T)> = Vec::from_iter(self);
         map.serialize(serializer)
     }
 }
@@ -19,7 +21,7 @@ impl<P: Prefix + Serialize> Serialize for PrefixSet<P> {
     where
         S: Serializer,
     {
-        let set: Vec<&P> = Vec::from_iter(self);
+        let set: Vec<P> = Vec::from_iter(self);
         set.serialize(serializer)
     }
 }
@@ -48,14 +50,14 @@ impl<'de, P: Prefix + Deserialize<'de>> Deserialize<'de> for PrefixSet<P> {
 #[cfg(feature = "ipnet")]
 mod test {
     use super::*;
-    use num_traits::{NumCast, PrimInt};
+    use num_traits::NumCast;
 
     fn ip<P: Prefix>(s: &str) -> P {
         let ip: ipnet::Ipv4Net = s.parse().unwrap();
         let r = ip.addr().to_bits();
         let len = ip.prefix_len();
 
-        let type_len = P::zero().repr().count_zeros() as usize;
+        let type_len = P::num_bits() as usize;
         assert!(type_len >= 32);
 
         let r: <P as Prefix>::R =

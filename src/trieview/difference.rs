@@ -1,773 +1,575 @@
-use std::num::NonZeroUsize;
+//! Difference set-operation view: L minus R.
+//!
+//! [`DifferenceView`] yields every prefix present in the left view but **not** in the right.
+//!
+//! `right` is `Option<R>` internally:
+//! - `None`: no right-side filter; all of left's entries are in the difference.
+//! - `Some`: right is at the same depth as left (maintained by `get_child`).
+//!
+//! At the same depth:
+//! - `data_bitmap  = left & !right`: entries in left but not right
+//! - `child_bitmap = left`: must visit all left children; some subtrees may be fully absent from
+//!   right
+//! - `get_data     = left.get_data(bit)`: `T = L::T`, same type as left
+//! - `get_child`   = descend both; if right lacks the child, pass None for right
+//!
+//! If right starts deeper than left (e.g. user-supplied view_at), it is carried
+//! along until left's traversal descends to right's depth, at which point they align.
 
-use crate::to_right;
+use std::marker::PhantomData;
 
-use super::*;
+use crate::AsView;
+use crate::{node::child_bit as node_child_bit, prefix::mask_from_prefix_len, Prefix};
 
-/// An iterator over the difference of two [`TrieView`]s. See [`TrieView::difference`] for more
-/// information and an example.
-pub struct Difference<'a, P, L, R> {
-    table_l: &'a Table<P, L>,
-    table_r: &'a Table<P, R>,
-    nodes: Vec<(DifferenceIndex, Option<(&'a P, &'a R)>)>,
+use super::iter::ViewIter;
+use super::TrieView;
+
+/// An immutable view over the difference of two [`TrieView`]s.
+///
+/// Returned by [`TrieView::difference`]. Iterates over every prefix present
+/// in the left view but **not** in the right view, yielding values from the left side.
+///
+/// The right side is `Option<R>` internally: once the traversal enters a subtree
+/// that the right view does not cover, the right side becomes `None` and all
+/// remaining left entries in that subtree are yielded unconditionally.
+#[derive(Clone)]
+pub struct DifferenceView<'a, L, R> {
+    left: L,
+    right: Option<R>,
+    _phantom: PhantomData<&'a ()>,
 }
 
-/// An iterator over the difference of two [`TrieView`]s. See [`TrieViewMut::difference_mut`] for
-/// more information and an example.
-pub struct DifferenceMut<'a, P, L, R> {
-    table_l: &'a Table<P, L>,
-    table_r: &'a Table<P, R>,
-    nodes: Vec<(DifferenceIndex, Option<(&'a P, &'a R)>)>,
-}
-
-impl<'a, P, L, R> DifferenceMut<'a, P, L, R> {
-    /// Safety:
-    /// 1. Table_l must come from a `TrieViewMut` and satisfy the conditions in `TrieViewMut::new`.
-    /// 2. Table_l and table_r must be distinct. This is implicitly given by the rule above.
-    unsafe fn new(
-        table_l: &'a Table<P, L>,
-        table_r: &'a Table<P, R>,
-        nodes: Vec<(DifferenceIndex, Option<(&'a P, &'a R)>)>,
-    ) -> Self {
-        Self {
-            table_l,
-            table_r,
-            nodes,
-        }
-    }
-}
-
-/// An iterator over the covering difference of two [`TrieView`]s. See
-/// [`TrieView::covering_difference`] for more information and an example.
-pub struct CoveringDifference<'a, P, L, R> {
-    table_l: &'a Table<P, L>,
-    table_r: &'a Table<P, R>,
-    nodes: Vec<DifferenceIndex>,
-}
-
-/// An iterator over the covering difference of two [`TrieView`]s. See
-/// [`TrieViewMut::covering_difference_mut`] for more information and an example.
-pub struct CoveringDifferenceMut<'a, P, L, R> {
-    table_l: &'a Table<P, L>,
-    table_r: &'a Table<P, R>,
-    nodes: Vec<DifferenceIndex>,
-}
-
-impl<'a, P, L, R> CoveringDifferenceMut<'a, P, L, R> {
-    /// Safety:
-    /// 1. Table_l must come from a `TrieViewMut` and satisfy the conditions in `TrieViewMut::new`.
-    /// 2. Table_l and table_r must be distinct. This is implicitly given by the rule above.
-    unsafe fn new(
-        table_l: &'a Table<P, L>,
-        table_r: &'a Table<P, R>,
-        nodes: Vec<DifferenceIndex>,
-    ) -> Self {
-        Self {
-            table_l,
-            table_r,
-            nodes,
-        }
-    }
-}
-
-pub(super) enum DifferenceIndex {
-    Both(usize, usize),
-    FirstL(usize, usize),
-    FirstR(usize, usize),
-    OnlyL(usize),
-}
-
-/// An item of the [`Difference`] iterator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DifferenceItem<'a, P, L, R> {
-    /// The prefix that is present in `self` but not in `other`.
-    pub prefix: &'a P,
-    /// The value that is stored in `self`.
-    pub value: &'a L,
-    /// The longest-prefix-match that is present in `other`.
-    pub right: Option<(&'a P, &'a R)>,
-}
-
-/// An item of the [`DifferenceMut`] iterator.
-#[derive(Debug)]
-pub struct DifferenceMutItem<'a, P, L, R> {
-    /// The prefix that is present in `self` but not in `other`.
-    pub prefix: &'a P,
-    /// The value that is stored in `self`.
-    pub value: &'a mut L,
-    /// The longest-prefix-match that is present in `other`.
-    pub right: Option<(&'a P, &'a R)>,
-}
-
-impl<'a, P, L> TrieView<'a, P, L>
+impl<'a, L, R> DifferenceView<'a, L, R>
 where
-    P: Prefix,
+    L: TrieView<'a>,
+    R: TrieView<'a, P = L::P>,
 {
-    /// Iterate over the all elements in `self` that are not present in `other`. Each item will
-    /// return a reference to the prefix and value in `self`, as well as the longest prefix match of
-    /// `other`.
+    /// Construct a `DifferenceView`, aligning the right side to the left's position.
     ///
-    /// **Warning**: The iterator will only yield elements of the given views. If `other` points to
-    /// a branching or a virtual node, then the longest prefix match returned may be `None`, even
-    /// though it exists in the original map referenced by `other`.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::DifferenceItem;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    /// ]);
-    /// let mut map_b: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), "a"),
-    ///     (net!("192.168.0.0/22"), "b"),
-    ///     (net!("192.168.0.0/23"), "c"),
-    ///     (net!("192.168.2.0/24"), "d"),
-    /// ]);
-    /// let sub_a = map_a.view_at(net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.view_at(net!("192.168.0.0/22")).unwrap();
-    /// assert_eq!(
-    ///     sub_a.difference(&sub_b).collect::<Vec<_>>(),
-    ///     vec![
-    ///         DifferenceItem { prefix: &net!("192.168.0.0/24"), value: &3, right: Some((&net!("192.168.0.0/23"), &"c"))},
-    ///         DifferenceItem { prefix: &net!("192.168.2.0/23"), value: &4, right: Some((&net!("192.168.0.0/22"), &"b"))},
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    pub fn difference<R>(&self, other: &'a impl AsView<P = P, T = R>) -> Difference<'a, P, L, R> {
-        let other = other.view();
-        Difference {
-            table_l: self.table,
-            table_r: other.table,
-            nodes: extend_lpm(
-                other.table,
-                other.table[other.loc.idx()].prefix_value(),
-                next_indices(
-                    self.table,
-                    other.table,
-                    Some(self.loc.idx()),
-                    Some(other.loc.idx()),
-                ),
-            )
-            .collect(),
-        }
-    }
-
-    /// Iterate over all elements in `self` that are not not covered in `other`. In other words,
-    /// only items of `self` are yielded for which there does not exist a prefix in `other` that
-    /// covers it.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/22"), 1),
-    ///     (net!("192.168.0.0/24"), 2),
-    ///     (net!("192.168.2.0/23"), 3),
-    /// ]);
-    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     net!("192.168.0.0/23"),
-    /// ]);
-    /// assert_eq!(
-    ///     map_a.view().covering_difference(&set_b).collect::<Vec<_>>(),
-    ///     vec![(&net!("192.168.0.0/22"), &1), (&net!("192.168.2.0/23"), &3)],
-    /// );
-    /// # }
-    /// ```
-    pub fn covering_difference<R>(
-        &self,
-        other: &'a impl AsView<P = P, T = R>,
-    ) -> CoveringDifference<'a, P, L, R> {
-        let other = other.view();
-        CoveringDifference {
-            table_l: self.table,
-            table_r: other.table,
-            nodes: next_indices(
-                self.table,
-                other.table,
-                Some(self.loc.idx()),
-                Some(other.loc.idx()),
-            ),
+    /// - If right is shallower, it is navigated toward left's position.  If the path
+    ///   diverges or a required child is absent, `right` becomes `None` (all left
+    ///   entries are kept for that subtree).
+    /// - If right is deeper, it is stored as-is and will be aligned during traversal
+    ///   as `get_child` descends toward right's depth.
+    pub(crate) fn new(left: L, right: R) -> Self {
+        let right = align_right(&left, right);
+        Self {
+            left,
+            right,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl<P, L> TrieViewMut<'_, P, L>
+/// Navigate `right` to match `left`'s position as closely as possible.
+///
+/// Returns `None` if keys diverge (the right subtrie has no overlap with left).
+fn align_right<'a, L, R>(left: &L, right: R) -> Option<R>
 where
-    P: Prefix,
+    L: TrieView<'a>,
+    R: TrieView<'a, P = L::P>,
 {
-    /// Iterate over the all elements in `self` that are not present in `other`. Each item will
-    /// return a reference to the prefix and a mutable reference to the value in `self`, as well as
-    /// the longest prefix match of `other` (with an immutable reference).
-    ///
-    /// **Warning**: The iterator will only yield elements of the given views. If `other` points to
-    /// a branching node, then the longest prefix match returned may be `None`, even though it
-    /// exists in the original map referenced by `other`.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # use prefix_trie::trieview::DifferenceItem;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    /// ]);
-    /// let mut map_b: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), "a"),
-    ///     (net!("192.168.0.0/22"), "b"),
-    ///     (net!("192.168.0.0/23"), "c"),
-    ///     (net!("192.168.2.0/24"), "d"),
-    /// ]);
-    ///
-    /// let mut sub_a = map_a.view_mut_at(net!("192.168.0.0/22")).unwrap();
-    /// let sub_b = map_b.view_at(net!("192.168.0.0/22")).unwrap();
-    /// sub_a.difference_mut(&sub_b).for_each(|x| *x.value += 10);
-    ///
-    /// assert_eq!(
-    ///     map_a.into_iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (net!("192.168.0.0/20"), 1),
-    ///         (net!("192.168.0.0/22"), 2),
-    ///         (net!("192.168.0.0/24"), 13),
-    ///         (net!("192.168.2.0/23"), 14),
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    pub fn difference_mut<'a, R>(
-        &'a mut self,
-        other: &'a impl AsView<P = P, T = R>,
-    ) -> DifferenceMut<'a, P, L, R> {
-        let other = other.view();
-        let nodes = extend_lpm(
-            other.table,
-            other.table[other.loc.idx()].prefix_value(),
-            next_indices(
-                self.table,
-                other.table,
-                Some(self.loc.idx()),
-                Some(other.loc.idx()),
-            ),
-        )
-        .collect();
-        // Safety: `self` comes from a TrieViewMut. Assuming it satisfies all conditions from
-        // `TrieViewMut::new`, then `self.table` is the the only thing possibly referencing
-        // its nodes.
-        unsafe { DifferenceMut::new(self.table, other.table, nodes) }
+    // Check key agreement at the shallower prefix_len.
+    let min_prefix_len = left.prefix_len().min(right.prefix_len());
+    let mask = mask_from_prefix_len(min_prefix_len as u8);
+    if left.key() & mask != right.key() & mask {
+        return None; // diverging keys -> R has no overlap with L's subtrie
     }
 
-    /// Iterate over all elements in `self` that are not not covered in `other`. In other words,
-    /// only items of `self` are yielded for which there does not exist a prefix in `other` that
-    /// covers it. The iterator yields mutable references to the values.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map_a: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/22"), 1),
-    ///     (net!("192.168.0.0/24"), 2),
-    ///     (net!("192.168.2.0/23"), 3),
-    /// ]);
-    /// let mut set_b: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     net!("192.168.0.0/23"),
-    /// ]);
-    ///
-    /// map_a.view_mut().covering_difference_mut(&set_b).for_each(|(_, v)| *v += 10);
-    ///
-    /// assert_eq!(
-    ///     map_a.into_iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (net!("192.168.0.0/22"), 11),
-    ///         (net!("192.168.0.0/24"), 2),
-    ///         (net!("192.168.2.0/23"), 13),
-    ///     ],
-    /// );
-    /// # }
-    /// ```
-    pub fn covering_difference_mut<'a, R>(
-        &'a mut self,
-        other: &'a impl AsView<P = P, T = R>,
-    ) -> CoveringDifferenceMut<'a, P, L, R> {
-        let other = other.view();
-        let nodes = next_indices(
-            self.table,
-            other.table,
-            Some(self.loc.idx()),
-            Some(other.loc.idx()),
+    match right.depth().cmp(&left.depth()) {
+        std::cmp::Ordering::Less => {
+            // R is shallower: navigate toward L's depth/key.
+            right.navigate_to(left.key(), left.prefix_len())
+        }
+        std::cmp::Ordering::Equal => {
+            // Same depth
+            Some(right)
+        }
+        std::cmp::Ordering::Greater => {
+            // R is deeper: keep as-is; handled during traversal via get_child.
+            Some(right)
+        }
+    }
+}
+
+impl<'a, L, R> TrieView<'a> for DifferenceView<'a, L, R>
+where
+    L: TrieView<'a>,
+    R: TrieView<'a, P = L::P>,
+{
+    type P = L::P;
+    type T = L::T;
+
+    #[inline]
+    fn depth(&self) -> u32 {
+        self.left.depth()
+    }
+
+    #[inline]
+    fn key(&self) -> <L::P as Prefix>::R {
+        self.left.key()
+    }
+
+    #[inline]
+    fn prefix_len(&self) -> u32 {
+        self.left.prefix_len()
+    }
+
+    #[inline]
+    fn data_bitmap(&self) -> u32 {
+        match &self.right {
+            None => self.left.data_bitmap(),
+            Some(r) => {
+                if r.depth() == self.left.depth() {
+                    // Right is at the same level -> mask out entries present in right.
+                    self.left.data_bitmap() & !r.data_bitmap()
+                } else {
+                    // Right is deeper -> it doesn't have data at left's current depth.
+                    self.left.data_bitmap()
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn child_bitmap(&self) -> u32 {
+        // Always use left's child bitmap: we must visit every left child because
+        // some subtrees may be absent from right, making all their entries eligible.
+        self.left.child_bitmap()
+    }
+
+    #[inline]
+    unsafe fn get_data(&mut self, data_bit: u32) -> L::T {
+        self.left.get_data(data_bit)
+    }
+
+    unsafe fn get_child(&mut self, child_bit: u32) -> Self {
+        let l_child = self.left.get_child(child_bit);
+        let r_child = match &mut self.right {
+            None => None,
+            Some(r) => {
+                if r.depth() == self.left.depth() {
+                    // Both at the same depth; descend both together.
+                    if (r.child_bitmap() >> child_bit) & 1 == 1 {
+                        Some(r.get_child(child_bit))
+                    } else {
+                        None // right has no child here -> all left entries kept
+                    }
+                } else {
+                    // Right is deeper (right.depth > left.depth).
+                    // Only carry right along if this child leads toward right's subtrie.
+                    let toward_r = node_child_bit(self.left.depth(), r.key());
+                    if child_bit == toward_r {
+                        Some(self.right.take().unwrap())
+                    } else {
+                        None
+                    }
+                }
+            }
+        };
+        DifferenceView {
+            left: l_child,
+            right: r_child,
+            _phantom: PhantomData,
+        }
+    }
+
+    unsafe fn reposition(&mut self, key: <L::P as Prefix>::R, prefix_len: u32) {
+        self.left.reposition(key, prefix_len);
+        // right does not need repositioning. It is anyways just used as a filter.
+    }
+}
+
+impl<'a, L, R> IntoIterator for DifferenceView<'a, L, R>
+where
+    L: TrieView<'a>,
+    R: TrieView<'a, P = L::P>,
+{
+    type Item = (L::P, L::T);
+    type IntoIter = ViewIter<'a, DifferenceView<'a, L, R>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, L, R> AsView<'a> for DifferenceView<'a, L, R>
+where
+    L: TrieView<'a>,
+    R: TrieView<'a, P = L::P>,
+{
+    type P = L::P;
+    type View = Self;
+
+    fn view(self) -> Self {
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        Prefix,
+        {
+            trieview::{AsView, TrieView},
+            PrefixMap,
+        },
+    };
+
+    type P = (u32, u8);
+
+    fn p(repr: u32, len: u8) -> P {
+        P::from_repr_len(repr, len)
+    }
+
+    fn map_from(entries: &[(u32, u8, i32)]) -> PrefixMap<P, i32> {
+        let mut m = PrefixMap::new();
+        for &(repr, len, val) in entries {
+            m.insert(p(repr, len), val);
+        }
+        m
+    }
+
+    fn collect_diff<'a>(iter: impl Iterator<Item = (P, &'a i32)>) -> Vec<(P, i32)> {
+        iter.map(|(p, v)| (p, *v)).collect()
+    }
+
+    // -- Same-depth cases ------------------------------------------------------
+
+    #[test]
+    fn diff_basic() {
+        // a \ b removes only shared prefixes; unshared left entries are kept.
+        let a = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a010000, 16, 2),
+            (0x0a020000, 16, 3),
+            (0x0b000000, 8, 4),
+        ]);
+        let b = map_from(&[
+            (0x0a000000, 8, 10),  // shared with a -> removed from result
+            (0x0a020000, 16, 30), // shared with a -> removed from result
+            (0x0c000000, 8, 99),  // not in a -> irrelevant
+        ]);
+        let got = collect_diff(a.view().difference(b.view()).into_iter());
+        assert_eq!(
+            got,
+            vec![
+                (p(0x0a010000, 16), 2), // kept: not in b
+                (p(0x0b000000, 8), 4),  // kept: not in b
+            ]
         );
-
-        // Safety: `self` comes from a TrieViewMut. Assuming it satisfies all conditions from
-        // `TrieViewMut::new`, then `self.table` is the the only thing possibly referencing
-        // its nodes.
-        unsafe { CoveringDifferenceMut::new(self.table, other.table, nodes) }
     }
-}
 
-impl<'a, P: Prefix, L, R> Iterator for Difference<'a, P, L, R> {
-    type Item = DifferenceItem<'a, P, L, R>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some((cur, lpm_r)) = self.nodes.pop() {
-            match cur {
-                DifferenceIndex::Both(l, r) => {
-                    let node_l = &self.table_l[l];
-                    let node_r = &self.table_r[r];
-                    self.extend(
-                        next_indices(self.table_l, self.table_r, node_l.right, node_r.right),
-                        lpm_r,
-                    );
-                    self.extend(
-                        next_indices(self.table_l, self.table_r, node_l.left, node_r.left),
-                        lpm_r,
-                    );
-                    if let Some(value) = node_l.value.as_ref() {
-                        if node_r.value.is_none() {
-                            return Some(DifferenceItem {
-                                prefix: &node_l.prefix,
-                                value,
-                                right: lpm_r,
-                            });
-                        }
-                    }
-                }
-                DifferenceIndex::FirstL(l, r) => {
-                    let node_l = &self.table_l[l];
-                    self.extend(
-                        next_indices_first_a(
-                            self.table_l,
-                            self.table_r,
-                            l,
-                            node_l.left,
-                            node_l.right,
-                            r,
-                        ),
-                        lpm_r,
-                    );
-                    if let Some(value) = node_l.value.as_ref() {
-                        return Some(DifferenceItem {
-                            prefix: &node_l.prefix,
-                            value,
-                            right: lpm_r,
-                        });
-                    }
-                }
-                DifferenceIndex::FirstR(l, r) => {
-                    let node_r = &self.table_r[r];
-                    self.extend(
-                        next_indices_first_b(
-                            self.table_l,
-                            self.table_r,
-                            l,
-                            r,
-                            node_r.left,
-                            node_r.right,
-                        ),
-                        lpm_r,
-                    );
-                }
-                DifferenceIndex::OnlyL(l) => {
-                    let node_l = &self.table_l[l];
-                    if let Some(right) = node_l.right {
-                        self.extend([DifferenceIndex::OnlyL(right.get())], lpm_r);
-                    }
-                    if let Some(left) = node_l.left {
-                        self.extend([DifferenceIndex::OnlyL(left.get())], lpm_r);
-                    }
-                    if let Some(value) = node_l.value.as_ref() {
-                        return Some(DifferenceItem {
-                            prefix: &node_l.prefix,
-                            value,
-                            right: lpm_r,
-                        });
-                    }
-                }
-            }
-        }
-        None
+    #[test]
+    fn diff_no_overlap() {
+        // b has completely different prefixes -> all of a is kept.
+        let a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2)]);
+        let b = map_from(&[(0x0b000000, 8, 10), (0x0c000000, 8, 20)]);
+        let got = collect_diff(a.view().difference(b.view()).into_iter());
+        assert_eq!(got, vec![(p(0x0a000000, 8), 1), (p(0x0a010000, 16), 2),]);
     }
-}
 
-impl<'a, P: Prefix, L, R> Iterator for CoveringDifference<'a, P, L, R> {
-    type Item = (&'a P, &'a L);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(cur) = self.nodes.pop() {
-            match cur {
-                DifferenceIndex::Both(l, r) => {
-                    let node_l = &self.table_l[l];
-                    let node_r = &self.table_r[r];
-                    // skip if r has a value (this all children must be ignored)
-                    if node_r.value.is_some() {
-                        continue;
-                    }
-                    self.nodes.extend(next_indices(
-                        self.table_l,
-                        self.table_r,
-                        node_l.right,
-                        node_r.right,
-                    ));
-                    self.nodes.extend(next_indices(
-                        self.table_l,
-                        self.table_r,
-                        node_l.left,
-                        node_r.left,
-                    ));
-                    if let Some(value) = node_l.value.as_ref() {
-                        return Some((&node_l.prefix, value));
-                    }
-                }
-                DifferenceIndex::FirstL(l, r) => {
-                    let node_l = &self.table_l[l];
-                    self.nodes.extend(next_indices_first_a(
-                        self.table_l,
-                        self.table_r,
-                        l,
-                        node_l.left,
-                        node_l.right,
-                        r,
-                    ));
-                    if let Some(value) = node_l.value.as_ref() {
-                        return Some((&node_l.prefix, value));
-                    }
-                }
-                DifferenceIndex::FirstR(l, r) => {
-                    let node_r = &self.table_r[r];
-                    // skip if r has a value (this all children must be ignored)
-                    if node_r.value.is_some() {
-                        continue;
-                    }
-                    self.nodes.extend(next_indices_first_b(
-                        self.table_l,
-                        self.table_r,
-                        l,
-                        r,
-                        node_r.left,
-                        node_r.right,
-                    ));
-                }
-                DifferenceIndex::OnlyL(l) => {
-                    let node_l = &self.table_l[l];
-                    if let Some(right) = node_l.right {
-                        self.nodes.extend([DifferenceIndex::OnlyL(right.get())]);
-                    }
-                    if let Some(left) = node_l.left {
-                        self.nodes.extend([DifferenceIndex::OnlyL(left.get())]);
-                    }
-                    if let Some(value) = node_l.value.as_ref() {
-                        return Some((&node_l.prefix, value));
-                    }
-                }
-            }
-        }
-        None
+    #[test]
+    fn diff_b_superset() {
+        // b contains every prefix in a -> result is empty.
+        let a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2)]);
+        let b = map_from(&[
+            (0x0a000000, 8, 10),
+            (0x0a010000, 16, 20),
+            (0x0b000000, 8, 99),
+        ]);
+        let got = collect_diff(a.view().difference(b.view()).into_iter());
+        assert!(got.is_empty());
     }
-}
 
-impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
-    type Item = DifferenceMutItem<'a, P, L, R>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some((cur, lpm_r)) = self.nodes.pop() {
-            // safety: map is a tree. Every node is visited exactly once during the iteration
-            // (self.nodes is not public). Therefore, each in each iteration of this loop (also
-            // between multiple calls to `next`), the index `cur` is different to any of the earlier
-            // iterations. It is therefore safe to extend the lifetime of the elements to 'a (which
-            // is the lifetime for which `self` has an exclusive reference over the map).
-            match cur {
-                DifferenceIndex::Both(l, r) => {
-                    let node_l = &self.table_l[l];
-                    let node_r = &self.table_r[r];
-                    self.extend(
-                        next_indices(self.table_l, self.table_r, node_l.right, node_r.right),
-                        lpm_r,
-                    );
-                    self.extend(
-                        next_indices(self.table_l, self.table_r, node_l.left, node_r.left),
-                        lpm_r,
-                    );
-                    let node_l = unsafe { self.table_l.get_mut(l) };
-                    if let Some(value) = node_l.value.as_mut() {
-                        if node_r.value.is_none() {
-                            return Some(DifferenceMutItem {
-                                prefix: &node_l.prefix,
-                                value,
-                                right: lpm_r,
-                            });
-                        }
-                    }
-                }
-                DifferenceIndex::FirstL(l, r) => {
-                    let node_l = &self.table_l[l];
-                    self.extend(
-                        next_indices_first_a(
-                            self.table_l,
-                            self.table_r,
-                            l,
-                            node_l.left,
-                            node_l.right,
-                            r,
-                        ),
-                        lpm_r,
-                    );
-                    let node_l = unsafe { self.table_l.get_mut(l) };
-                    if let Some(value) = node_l.value.as_mut() {
-                        return Some(DifferenceMutItem {
-                            prefix: &node_l.prefix,
-                            value,
-                            right: lpm_r,
-                        });
-                    }
-                }
-                DifferenceIndex::FirstR(l, r) => {
-                    let node_r = &self.table_r[r];
-                    self.extend(
-                        next_indices_first_b(
-                            self.table_l,
-                            self.table_r,
-                            l,
-                            r,
-                            node_r.left,
-                            node_r.right,
-                        ),
-                        lpm_r,
-                    );
-                }
-                DifferenceIndex::OnlyL(l) => {
-                    let node_l = unsafe { self.table_l.get_mut(l) };
-                    if let Some(right) = node_l.right {
-                        self.extend([DifferenceIndex::OnlyL(right.get())], lpm_r);
-                    }
-                    if let Some(left) = node_l.left {
-                        self.extend([DifferenceIndex::OnlyL(left.get())], lpm_r);
-                    }
-                    if let Some(value) = node_l.value.as_mut() {
-                        return Some(DifferenceMutItem {
-                            prefix: &node_l.prefix,
-                            value,
-                            right: lpm_r,
-                        });
-                    }
-                }
-            }
-        }
-        None
+    #[test]
+    fn diff_b_empty() {
+        // Empty b -> all of a is returned.
+        let a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2)]);
+        let b: PrefixMap<P, i32> = PrefixMap::new();
+        let got = collect_diff(a.view().difference(b.view()).into_iter());
+        assert_eq!(got, vec![(p(0x0a000000, 8), 1), (p(0x0a010000, 16), 2),]);
     }
-}
 
-impl<'a, P: Prefix, L, R> Iterator for CoveringDifferenceMut<'a, P, L, R> {
-    type Item = (&'a P, &'a mut L);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(cur) = self.nodes.pop() {
-            // safety: map is a tree. Every node is visited exactly once during the iteration
-            // (self.nodes is not public). Therefore, each in each iteration of this loop (also
-            // between multiple calls to `next`), the index `cur` is different to any of the earlier
-            // iterations. It is therefore safe to extend the lifetime of the elements to 'a (which
-            // is the lifetime for which `self` has an exclusive reference over the map).
-            match cur {
-                DifferenceIndex::Both(l, r) => {
-                    let node_l = &self.table_l[l];
-                    let node_r = &self.table_r[r];
-                    // skip if r has a value (this all children must be ignored)
-                    if node_r.value.is_some() {
-                        continue;
-                    }
-                    self.nodes.extend(next_indices(
-                        self.table_l,
-                        self.table_r,
-                        node_l.right,
-                        node_r.right,
-                    ));
-                    self.nodes.extend(next_indices(
-                        self.table_l,
-                        self.table_r,
-                        node_l.left,
-                        node_r.left,
-                    ));
-                    let node_l = unsafe { self.table_l.get_mut(l) };
-                    if let Some(value) = node_l.value.as_mut() {
-                        return Some((&node_l.prefix, value));
-                    }
-                }
-                DifferenceIndex::FirstL(l, r) => {
-                    let node_l = &self.table_l[l];
-                    self.nodes.extend(next_indices_first_a(
-                        self.table_l,
-                        self.table_r,
-                        l,
-                        node_l.left,
-                        node_l.right,
-                        r,
-                    ));
-                    let node_l = unsafe { self.table_l.get_mut(l) };
-                    if let Some(value) = node_l.value.as_mut() {
-                        return Some((&node_l.prefix, value));
-                    }
-                }
-                DifferenceIndex::FirstR(l, r) => {
-                    let node_r = &self.table_r[r];
-                    // skip if r has a value (this all children must be ignored)
-                    if node_r.value.is_some() {
-                        continue;
-                    }
-                    self.nodes.extend(next_indices_first_b(
-                        self.table_l,
-                        self.table_r,
-                        l,
-                        r,
-                        node_r.left,
-                        node_r.right,
-                    ));
-                }
-                DifferenceIndex::OnlyL(l) => {
-                    let node_l = unsafe { self.table_l.get_mut(l) };
-                    if let Some(right) = node_l.right {
-                        self.nodes.extend([DifferenceIndex::OnlyL(right.get())]);
-                    }
-                    if let Some(left) = node_l.left {
-                        self.nodes.extend([DifferenceIndex::OnlyL(left.get())]);
-                    }
-                    if let Some(value) = node_l.value.as_mut() {
-                        return Some((&node_l.prefix, value));
-                    }
-                }
-            }
-        }
-        None
+    #[test]
+    fn diff_a_empty() {
+        let a: PrefixMap<P, i32> = PrefixMap::new();
+        let b = map_from(&[(0x0a000000, 8, 10)]);
+        assert!(a.view().difference(b.view()).into_iter().next().is_none());
     }
-}
 
-impl<'a, P: Prefix, L, R> Difference<'a, P, L, R> {
-    fn extend(
-        &mut self,
-        indices: impl IntoIterator<Item = DifferenceIndex> + 'static,
-        lpm_r: Option<(&'a P, &'a R)>,
-    ) {
-        self.nodes.extend(extend_lpm(self.table_r, lpm_r, indices));
+    /// Large same-depth test covering multiple subtries and levels.
+    #[test]
+    fn diff_large_same_depth() {
+        let a = map_from(&[
+            (0x01000000, 8, 1),
+            (0x0a000000, 8, 10),
+            (0x0a010000, 16, 11),
+            (0x0a010100, 24, 12),
+            (0x0a020000, 16, 13),
+            (0x0b000000, 8, 20),
+            (0x0b010000, 16, 21),
+            (0x64000000, 8, 100),
+            (0xc0a80000, 16, 200),
+        ]);
+        let b = map_from(&[
+            (0x0a000000, 8, 99),  // removes 10/8
+            (0x0a010100, 24, 99), // removes 10.1.1/24
+            (0x0b000000, 8, 99),  // removes 11/8
+            (0x64000000, 8, 99),  // removes 100/8
+            (0xc0a80100, 24, 99), // not in a -> no effect
+        ]);
+        let got = collect_diff(a.view().difference(b.view()).into_iter());
+        assert_eq!(
+            got,
+            vec![
+                (p(0x01000000, 8), 1),    // kept: not in b
+                (p(0x0a010000, 16), 11),  // kept: 10.1/16 is not in b (only /24 is)
+                (p(0x0a020000, 16), 13),  // kept: not in b
+                (p(0x0b010000, 16), 21),  // kept: 11.1/16 not in b (only /8 is)
+                (p(0xc0a80000, 16), 200), // kept: 192.168/16 not in b
+            ]
+        );
     }
-}
 
-impl<'a, P: Prefix, L, R> DifferenceMut<'a, P, L, R> {
-    fn extend(
-        &mut self,
-        indices: impl IntoIterator<Item = DifferenceIndex> + 'static,
-        lpm_r: Option<(&'a P, &'a R)>,
-    ) {
-        self.nodes.extend(extend_lpm(self.table_r, lpm_r, indices));
+    // -- find / find_lpm --------------------------------------------------------
+
+    #[test]
+    fn diff_find_then_iter() {
+        let a = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a010000, 16, 2),
+            (0x0a010100, 24, 3),
+            (0x0b000000, 8, 4),
+        ]);
+        let b = map_from(&[
+            (0x0a000000, 8, 10),
+            (0x0a010000, 16, 20), // removes 10.1/16 from difference
+        ]);
+        // diff: {10.1.1/24, 11/8}; find 10.1/16 subtrie in diff -> only 10.1.1/24
+        let got = collect_diff(
+            a.view()
+                .difference(b.view())
+                .find(&p(0x0a010000, 16))
+                .unwrap()
+                .into_iter(),
+        );
+        assert_eq!(got, vec![(p(0x0a010100, 24), 3)]);
     }
-}
 
-fn next_indices<'a, P: Prefix, L, R>(
-    table_l: &'a Table<P, L>,
-    table_r: &'a Table<P, R>,
-    l: Option<impl Into<usize>>,
-    r: Option<impl Into<usize>>,
-) -> Vec<DifferenceIndex> {
-    match (l.map(|x| x.into()), r.map(|x| x.into())) {
-        (None, Some(_)) => vec![],
-        (Some(l), None) => vec![DifferenceIndex::OnlyL(l)],
-        (Some(l), Some(r)) => {
-            let p_l = &table_l[l].prefix;
-            let p_r = &table_r[r].prefix;
-            if p_l.prefix_len() == p_r.prefix_len() {
-                match p_l.mask().cmp(&p_r.mask()) {
-                    std::cmp::Ordering::Equal => {
-                        vec![DifferenceIndex::Both(l, r)]
-                    }
-                    _ => {
-                        vec![DifferenceIndex::OnlyL(l)]
-                    }
-                }
-            } else if p_l.contains(p_r) {
-                vec![DifferenceIndex::FirstL(l, r)]
-            } else if p_r.contains(p_l) {
-                vec![DifferenceIndex::FirstR(l, r)]
-            } else {
-                vec![DifferenceIndex::OnlyL(l)]
-            }
-        }
-        _ => vec![],
+    #[test]
+    fn diff_mut_find_lpm_value_does_not_require_clone() {
+        let mut a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2), (0x0a010100, 24, 3)]);
+        let b = map_from(&[(0x0a010100, 24, 30)]);
+
+        let got = (&mut a)
+            .view()
+            .difference(b.view())
+            .find_lpm_value(&p(0x0a010180, 25))
+            .map(|(prefix, value)| {
+                *value += 10;
+                (prefix, *value)
+            });
+
+        assert_eq!(got, Some((p(0x0a010000, 16), 12)));
+        assert_eq!(a.get(&p(0x0a010000, 16)), Some(&12));
     }
-}
 
-fn next_indices_first_a<'a, P: Prefix, L, R>(
-    table_l: &'a Table<P, L>,
-    table_r: &'a Table<P, R>,
-    l: usize,
-    ll: Option<NonZeroUsize>,
-    lr: Option<NonZeroUsize>,
-    r: usize,
-) -> Vec<DifferenceIndex> {
-    match (ll, lr) {
-        (None, None) => vec![],
-        (None, Some(lr)) => next_indices(table_l, table_r, Some(lr), Some(r)),
-        (Some(ll), None) => next_indices(table_l, table_r, Some(ll), Some(r)),
-        (Some(ll), Some(lr)) => {
-            if to_right(&table_l[l].prefix, &table_r[r].prefix) {
-                let mut idxes = next_indices(table_l, table_r, Some(lr), Some(r));
-                idxes.push(DifferenceIndex::OnlyL(ll.get()));
-                idxes
-            } else {
-                let mut idxes = next_indices(table_l, table_r, Some(ll), Some(r));
-                idxes.insert(0, DifferenceIndex::OnlyL(lr.get()));
-                idxes
-            }
-        }
+    // -- Depth-difference cases ------------------------------------------------
+    //
+    // With K=5, `view_at(&p(addr, len))` lands at depth = floor(len/K)*K.
+    //   len=8  -> depth 5    len=16 -> depth 15
+
+    /// Right is shallower: right is navigated to left's depth at construction.
+    /// Entries in left's subtrie that are also in right's navigated position are removed.
+    #[test]
+    fn diff_right_shallower_navigated_to_left() {
+        // a_sub = 10.x subtrie (depth 5); b_root = root (depth 0).
+        // align_right navigates b_root to depth 5 via the 10.x child.
+        // At depth 5, b has {10/8, 10.1/16}; a has {10/8, 10.1/16, 10.2/16}.
+        // Difference: {10.2/16}.
+        let a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2), (0x0a020000, 16, 3)]);
+        let b = map_from(&[
+            (0x0a000000, 8, 10),
+            (0x0a010000, 16, 20),
+            (0x0b000000, 8, 30), // irrelevant -> outside a_sub
+        ]);
+        let a_sub = a.view_at(&p(0x0a000000, 8)).unwrap(); // depth 5
+        let b_root = b.view(); // depth 0
+
+        let got = collect_diff(a_sub.difference(b_root).into_iter());
+        assert_eq!(got, vec![(p(0x0a020000, 16), 3)]);
     }
-}
 
-fn next_indices_first_b<'a, P: Prefix, L, R>(
-    table_l: &'a Table<P, L>,
-    table_r: &'a Table<P, R>,
-    l: usize,
-    r: usize,
-    rl: Option<NonZeroUsize>,
-    rr: Option<NonZeroUsize>,
-) -> Vec<DifferenceIndex> {
-    match (rl, rr) {
-        (None, None) => vec![DifferenceIndex::OnlyL(l)],
-        (None, Some(rr)) => next_indices(table_l, table_r, Some(l), Some(rr)),
-        (Some(rl), None) => next_indices(table_l, table_r, Some(l), Some(rl)),
-        (Some(rl), Some(rr)) => {
-            if to_right(&table_r[r].prefix, &table_l[l].prefix) {
-                next_indices(table_l, table_r, Some(l), Some(rr))
-            } else {
-                next_indices(table_l, table_r, Some(l), Some(rl))
-            }
-        }
+    /// Right navigated to left, but right diverges (no path to left's key).
+    /// align_right returns None -> all left entries are kept.
+    #[test]
+    fn diff_right_shallower_diverges() {
+        // a_sub = 10.x subtrie (depth 5); b has no entries in 10.x at all.
+        // Right navigates toward 10.x but finds no child -> right = None -> all kept.
+        let a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2)]);
+        let b = map_from(&[
+            (0x0b000000, 8, 10), // 11.x -> completely different subtrie
+            (0x0c000000, 8, 20),
+        ]);
+        let a_sub = a.view_at(&p(0x0a000000, 8)).unwrap(); // depth 5
+        let b_root = b.view(); // depth 0
+
+        let got = collect_diff(a_sub.difference(b_root).into_iter());
+        // No path from b_root to 10.x -> right = None -> all of a_sub kept
+        assert_eq!(got, vec![(p(0x0a000000, 8), 1), (p(0x0a010000, 16), 2),]);
     }
-}
 
-fn extend_lpm<'a, P: Prefix, R>(
-    table_r: &'a Table<P, R>,
-    lpm_r: Option<(&'a P, &'a R)>,
-    indices: impl IntoIterator<Item = DifferenceIndex> + 'static,
-) -> impl Iterator<Item = (DifferenceIndex, Option<(&'a P, &'a R)>)> + 'a {
-    let get_lpm_r = move |r: usize| table_r[r].prefix_value().or(lpm_r);
-    indices.into_iter().map(move |x| match x {
-        DifferenceIndex::Both(_, r) | DifferenceIndex::FirstR(_, r) => (x, get_lpm_r(r)),
-        DifferenceIndex::FirstL(_, _) | DifferenceIndex::OnlyL(_) => (x, lpm_r),
-    })
+    /// Left is shallower than right (right is positioned deeper in the trie).
+    /// Left leads; right is carried toward its depth via get_child.
+    /// Left's entries in subtries NOT leading toward right are kept unconditionally.
+    #[test]
+    fn diff_left_shallower_right_deeper() {
+        // a_root (depth 0) minus b_sub at 10.x (depth 5).
+        // a has: 9/8, 10/8, 10.1/16, 11/8.
+        // b_sub covers: 10/8, 10.1/16, 10.2/16 (within 10.x).
+        //
+        // Expected difference:
+        //   9/8  -> kept (not in b_sub's subtrie)
+        //   10/8 -> removed (b_sub has it)
+        //   10.1/16 -> removed
+        //   11/8 -> kept (not in b_sub's subtrie)
+        let a = map_from(&[
+            (0x09000000, 8, 1),
+            (0x0a000000, 8, 2),
+            (0x0a010000, 16, 3),
+            (0x0b000000, 8, 4),
+        ]);
+        let b = map_from(&[
+            (0x0a000000, 8, 10),
+            (0x0a010000, 16, 20),
+            (0x0a020000, 16, 30),
+        ]);
+        let a_root = a.view();
+        let b_sub = b.view_at(&p(0x0a000000, 8)).unwrap(); // depth 5
+
+        let got = collect_diff(a_root.difference(b_sub).into_iter());
+        assert_eq!(
+            got,
+            vec![
+                (p(0x09000000, 8), 1), // kept: 9/8 not toward b_sub
+                (p(0x0b000000, 8), 4), // kept: 11/8 not toward b_sub
+            ]
+        );
+    }
+
+    /// Left has entries in many subtries; right (deeper) only covers one of them.
+    /// Entries in subtries NOT leading toward right are kept entirely.
+    #[test]
+    fn diff_left_multiple_subtries_right_covers_one() {
+        let a = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a010000, 16, 2),
+            (0x0b000000, 8, 3),
+            (0x0b010000, 16, 4),
+            (0x0c000000, 8, 5),
+        ]);
+        let b = map_from(&[
+            (0x0a000000, 8, 10),  // covers 10/8
+            (0x0a010000, 16, 20), // covers 10.1/16
+        ]);
+        let a_root = a.view();
+        let b_sub = b.view_at(&p(0x0a000000, 8)).unwrap(); // depth 5
+
+        let got = collect_diff(a_root.difference(b_sub).into_iter());
+        assert_eq!(
+            got,
+            vec![
+                // 10.x entries: 10/8 and 10.1/16 both in b_sub -> removed
+                (p(0x0b000000, 8), 3), // not toward b_sub -> kept entirely
+                (p(0x0b010000, 16), 4),
+                (p(0x0c000000, 8), 5),
+            ]
+        );
+    }
+
+    // -- Composition -----------------------------------------------------------
+
+    #[test]
+    fn diff_composed_with_intersection() {
+        // (a \ b) ∩ c -> DifferenceView implements TrieView so it composes.
+        let a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2), (0x0b000000, 8, 3)]);
+        let b = map_from(&[(0x0a000000, 8, 99)]); // removes 10/8 from a
+        let c = map_from(&[(0x0a010000, 16, 100), (0x0b000000, 8, 200)]);
+        // a \ b = {10.1/16, 11/8}; ∩ c = {10.1/16, 11/8} (both in c)
+        let got: Vec<_> = a
+            .view()
+            .difference(b.view())
+            .intersection(c.view())
+            .unwrap()
+            .into_iter()
+            .map(|(p, (l, r))| (p, *l, *r))
+            .collect();
+        assert_eq!(
+            got,
+            vec![(p(0x0a010000, 16), 2, 100), (p(0x0b000000, 8), 3, 200),]
+        );
+    }
+
+    #[test]
+    fn diff_composed_difference_of_differences() {
+        // (a \ b) \ c
+        let a = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a010000, 16, 2),
+            (0x0b000000, 8, 3),
+            (0x0c000000, 8, 4),
+        ]);
+        let b = map_from(&[(0x0a000000, 8, 99)]); // removes 10/8
+        let c = map_from(&[(0x0b000000, 8, 99)]); // removes 11/8
+
+        // a \ b = {10.1/16, 11/8, 12/8}; \ c = {10.1/16, 12/8}
+        let got = collect_diff(
+            a.view()
+                .difference(b.view())
+                .difference(c.view())
+                .into_iter(),
+        );
+        assert_eq!(got, vec![(p(0x0a010000, 16), 2), (p(0x0c000000, 8), 4),]);
+    }
+
+    #[test]
+    fn view_into_right_child() {
+        let a = map_from(&[(0x00000000, 0, 0), (0x00000000, 1, 1), (0x00000000, 2, 2)]);
+        let b = map_from(&[(0x00000000, 0, 0), (0x00000000, 2, 2)]);
+        let b_view = b.view_at(&p(0x00000000, 1)).unwrap();
+        let got = a.view().difference(b_view).iter().collect::<Vec<_>>();
+        let want = vec![(p(0x00000000, 0), &0), (p(0x00000000, 1), &1)];
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn view_into_left_child() {
+        let a = map_from(&[(0x00000000, 0, 0), (0x00000000, 1, 1), (0x00000000, 2, 2)]);
+        let b = map_from(&[(0x00000000, 0, 0), (0x00000000, 2, 2)]);
+        let a_view = a.view_at(&p(0x00000000, 1)).unwrap();
+        let got = a_view.difference(b.view()).iter().collect::<Vec<_>>();
+        let want = vec![(p(0x00000000, 1), &1)];
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn view_into_right_child_deep() {
+        let a = map_from(&[(0x00000000, 0, 0), (0x00000000, 5, 5), (0x00000000, 6, 6)]);
+        let b = map_from(&[(0x00000000, 0, 0), (0x00000000, 6, 6)]);
+        let b_view = b.view_at(&p(0x00000000, 5)).unwrap();
+        let got = a.view().difference(b_view).iter().collect::<Vec<_>>();
+        let want = vec![(p(0x00000000, 0), &0), (p(0x00000000, 5), &5)];
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn view_into_left_child_deep() {
+        let a = map_from(&[(0x00000000, 0, 0), (0x00000000, 5, 5), (0x00000000, 6, 6)]);
+        let b = map_from(&[(0x00000000, 0, 0), (0x00000000, 6, 6)]);
+        let a_view = a.view_at(&p(0x00000000, 5)).unwrap();
+        let got = a_view.difference(b.view()).iter().collect::<Vec<_>>();
+        let want = vec![(p(0x00000000, 5), &5)];
+        assert_eq!(got, want);
+    }
 }

@@ -1,5 +1,10 @@
 //! Code for inserting elements and the entry pattern.
 
+use crate::{
+    table::{Empty, NoNode, Present},
+    Prefix,
+};
+
 use super::*;
 
 /// A mutable view into a single entry in a map, which may either be vacant or occupied.
@@ -13,20 +18,47 @@ pub enum Entry<'a, P, T> {
 /// A mutable view into a missing entry. The information within this structure describes a path
 /// towards that missing node, and how to insert it.
 pub struct VacantEntry<'a, P, T> {
-    pub(super) map: &'a mut PrefixMap<P, T>,
-    pub(super) prefix: P,
-    pub(super) idx: usize,
-    pub(super) direction: DirectionForInsert<P>,
+    map: &'a mut PrefixMap<P, T>,
+    loc: Result<Empty, NoNode>,
+    prefix: P,
+}
+
+impl<'a, P, T> VacantEntry<'a, P, T> {
+    pub(super) fn empty(map: &'a mut PrefixMap<P, T>, loc: Empty, prefix: P) -> Self {
+        Self {
+            map,
+            loc: Ok(loc),
+            prefix,
+        }
+    }
+    pub(super) fn no_node(map: &'a mut PrefixMap<P, T>, loc: NoNode, prefix: P) -> Self {
+        Self {
+            map,
+            loc: Err(loc),
+            prefix,
+        }
+    }
 }
 
 /// A mutable view into an occupied entry. An occupied entry represents a node that is already
 /// present on the tree.
 pub struct OccupiedEntry<'a, P, T> {
-    pub(crate) node: &'a mut Node<P, T>,
-    pub(super) prefix: P, // needed to replace the prefix on the thing if we perform insert.
+    map: &'a mut PrefixMap<P, T>,
+    loc: Present,
+    prefix: P,
 }
 
-impl<P, T> Entry<'_, P, T> {
+impl<'a, P, T> OccupiedEntry<'a, P, T>
+where
+    P: Prefix,
+{
+    pub(super) fn new(map: &'a mut PrefixMap<P, T>, loc: Present, prefix: P) -> Self {
+        let prefix = P::from_repr_len(prefix.mask(), prefix.prefix_len());
+        Self { map, loc, prefix }
+    }
+}
+
+impl<P: Prefix, T> Entry<'_, P, T> {
     /// Get the value if it exists
     ///
     /// ```
@@ -45,7 +77,7 @@ impl<P, T> Entry<'_, P, T> {
     pub fn get(&self) -> Option<&T> {
         match self {
             Entry::Vacant(_) => None,
-            Entry::Occupied(e) => e.node.value.as_ref(),
+            Entry::Occupied(e) => Some(e.get()),
         }
     }
 
@@ -69,7 +101,10 @@ impl<P, T> Entry<'_, P, T> {
     pub fn get_mut(&mut self) -> Option<&mut T> {
         match self {
             Entry::Vacant(_) => None,
-            Entry::Occupied(e) => e.node.value.as_mut(),
+            Entry::Occupied(e) => {
+                // Safety: internal_idx points to an initialized cell (see OccupiedEntry::new)
+                Some(e.get_mut())
+            }
         }
     }
 
@@ -91,7 +126,7 @@ impl<P, T> Entry<'_, P, T> {
     pub fn key(&self) -> &P {
         match self {
             Entry::Vacant(e) => &e.prefix,
-            Entry::Occupied(e) => &e.node.prefix,
+            Entry::Occupied(e) => e.key(),
         }
     }
 }
@@ -100,8 +135,10 @@ impl<'a, P, T> Entry<'a, P, T>
 where
     P: Prefix,
 {
-    /// Replace the current entry, and return the entry that was stored before. This will also
-    /// replace the key with the one provided to the `entry` function.
+    /// Replace the current entry, and return the entry that was stored before.
+    ///
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits masked out by the prefix length are not preserved.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -121,7 +158,7 @@ where
     /// # fn main() {}
     /// ```
     ///
-    /// This function *will replace* the prefix in the map with the one provided to the `entry` call:
+    /// Host bits from the `entry` argument are not preserved:
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -132,7 +169,7 @@ where
     /// pm.entry("192.168.1.2/24".parse()?).insert(2);
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some((&"192.168.1.2/24".parse()?, &2)) // prefix is overwritten
+    ///     Some(("192.168.1.0/24".parse()?, &2))
     /// );
     /// # Ok(())
     /// # }
@@ -171,7 +208,7 @@ where
     /// # fn main() {}
     /// ```
     ///
-    /// This function will *not* replace the prefix in the map if it already exists.
+    /// Host bits from an existing matching prefix are not preserved.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -182,7 +219,7 @@ where
     /// pm.entry("192.168.1.2/24".parse()?).or_insert(2);
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some((&"192.168.1.1/24".parse()?, &1)) // prefix is not overwritten.
+    ///     Some(("192.168.1.0/24".parse()?, &1))
     /// );
     /// # Ok(())
     /// # }
@@ -192,8 +229,8 @@ where
     #[inline(always)]
     pub fn or_insert(self, default: T) -> &'a mut T {
         match self {
-            Entry::Vacant(e) => e._insert(default).value.as_mut().unwrap(),
-            Entry::Occupied(e) => e.node.value.get_or_insert(default),
+            Entry::Vacant(e) => e._insert(default).1,
+            Entry::Occupied(e) => e.into_mut(),
         }
     }
 
@@ -218,7 +255,7 @@ where
     /// # fn main() {}
     /// ```
     ///
-    /// This function will *not* replace the prefix in the map if it already exists.
+    /// Host bits from an existing matching prefix are not preserved.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -229,7 +266,7 @@ where
     /// pm.entry("192.168.1.2/24".parse()?).or_insert_with(|| 2);
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some((&"192.168.1.1/24".parse()?, &1)) // prefix is not overwritten.
+    ///     Some(("192.168.1.0/24".parse()?, &1))
     /// );
     /// # Ok(())
     /// # }
@@ -239,8 +276,8 @@ where
     #[inline(always)]
     pub fn or_insert_with<F: FnOnce() -> T>(self, default: F) -> &'a mut T {
         match self {
-            Entry::Vacant(e) => e._insert(default()).value.as_mut().unwrap(),
-            Entry::Occupied(e) => e.node.value.get_or_insert_with(default),
+            Entry::Vacant(e) => e._insert(default()).1,
+            Entry::Occupied(e) => e.into_mut(),
         }
     }
 
@@ -261,7 +298,7 @@ where
     /// # fn main() {}
     /// ```
     ///
-    /// This function will *not* replace the prefix in the map if it already exists.
+    /// Host bits from an existing matching prefix are not preserved.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -272,7 +309,7 @@ where
     /// pm.entry("192.168.1.2/24".parse()?).and_modify(|x| *x += 1);
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some((&"192.168.1.1/24".parse()?, &2)) // prefix is not overwritten.
+    ///     Some(("192.168.1.0/24".parse()?, &2))
     /// );
     /// # Ok(())
     /// # }
@@ -283,8 +320,8 @@ where
     pub fn and_modify<F: FnOnce(&mut T)>(self, f: F) -> Self {
         match self {
             Entry::Vacant(e) => Entry::Vacant(e),
-            Entry::Occupied(e) => {
-                e.node.value.as_mut().map(f);
+            Entry::Occupied(mut e) => {
+                f(e.get_mut());
                 Entry::Occupied(e)
             }
         }
@@ -317,7 +354,7 @@ where
     /// # fn main() {}
     /// ```
     ///
-    /// This function will *not* replace the prefix in the map if it already exists.
+    /// Host bits from an existing matching prefix are not preserved.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -328,7 +365,7 @@ where
     /// pm.entry("192.168.1.2/24".parse()?).or_default();
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some((&"192.168.1.1/24".parse()?, &1)) // prefix is not overwritten.
+    ///     Some(("192.168.1.0/24".parse()?, &1))
     /// );
     /// # Ok(())
     /// # }
@@ -346,47 +383,36 @@ impl<'a, P, T> VacantEntry<'a, P, T>
 where
     P: Prefix,
 {
-    fn _insert(self, v: T) -> &'a mut Node<P, T> {
-        match self.direction {
-            DirectionForInsert::Reached => {
-                // increment the count, as node.value will be `None`. We do it here as we borrow
-                // `map` mutably in the next line.
-                self.map.count += 1;
-                let node = &mut self.map.table[self.idx];
-                node.prefix = self.prefix;
-                debug_assert!(node.value.is_none());
-                node.value = Some(v);
-                node
+    fn _insert(self, v: T) -> (P, &'a mut T) {
+        let Self { map, loc, prefix } = self;
+
+        map.count += 1;
+
+        let empty = match loc {
+            Ok(empty) => empty,
+            Err(no_node) => {
+                // first, we must insert up to that node.
+                let Err(loc) = map.table.find_node_or_insert_from(
+                    no_node.node(),
+                    no_node.depth(),
+                    prefix.repr(),
+                    prefix.prefix_len() as u32,
+                ) else {
+                    unreachable!("node was missing")
+                };
+                loc
             }
-            DirectionForInsert::NewLeaf { right } => {
-                let new = self.map.new_node(self.prefix, Some(v));
-                self.map.table.set_child(self.idx, new, right);
-                &mut self.map.table[new.get()]
-            }
-            DirectionForInsert::NewChild { right, child_right } => {
-                let new = self.map.new_node(self.prefix, Some(v));
-                let child = self.map.table.set_child(self.idx, new, right).unwrap();
-                self.map.table.set_child(new, child, child_right);
-                &mut self.map.table[new.get()]
-            }
-            DirectionForInsert::NewBranch {
-                branch_prefix,
-                right,
-                prefix_right,
-            } => {
-                let branch = self.map.new_node(branch_prefix, None);
-                let new = self.map.new_node(self.prefix, Some(v));
-                let child = self.map.table.set_child(self.idx, branch, right).unwrap();
-                self.map.table.set_child(branch, new, prefix_right);
-                self.map.table.set_child(branch, child, !prefix_right);
-                &mut self.map.table[new.get()]
-            }
-            DirectionForInsert::Enter { .. } => unreachable!(),
-        }
+        };
+
+        let present = map.table.set_data(empty, v);
+        (
+            present.prefix(prefix.repr()),
+            map.table.get_data_mut(present),
+        )
     }
 }
 
-impl<P, T> OccupiedEntry<'_, P, T> {
+impl<P: Prefix, T> OccupiedEntry<'_, P, T> {
     /// Gets a reference to the key in the entry. This is the key that is currently stored, and not
     /// the key that was used in the insert.
     ///
@@ -407,7 +433,7 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn key(&self) -> &P {
-        &self.node.prefix
+        &self.prefix
     }
 
     /// Gets a reference to the value in the entry.
@@ -430,14 +456,13 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn get(&self) -> &T {
-        self.node.value.as_ref().unwrap()
+        self.map.table.get_data(self.loc)
     }
 
     /// Gets a mutable reference to the value in the entry.
     ///
-    /// This call will not modify the prefix stored in the tree. In case the prefix used to create
-    /// the entry is different from the stored one (has additional information in the host part),
-    /// and you wish that prefix to be overwritten, use `insert`.
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits masked out by the prefix length are not preserved.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -458,11 +483,10 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn get_mut(&mut self) -> &mut T {
-        self.node.value.as_mut().unwrap()
+        self.map.table.get_data_mut(self.loc)
     }
 
-    /// Insert a new value into the entry, returning the old value. This operation will also replace
-    /// the prefix with the provided one.
+    /// Insert a new value into the entry, returning the old value.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -482,13 +506,12 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn insert(self, value: T) -> T {
-        self.node.prefix = self.prefix;
-        self.node.value.replace(value).unwrap()
+    pub fn insert(self, v: T) -> T {
+        self.map.table.replace_data(self.loc, v)
     }
 
-    /// Remove the current value and return it. The tree will not be modified (the same effect as
-    /// `PrefixMap::remove_keep_tree`).
+    /// Remove the current value and return it. Empty trie nodes may be left in place (the same
+    /// effect as `PrefixMap::remove_keep_tree`).
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -508,8 +531,16 @@ impl<P, T> OccupiedEntry<'_, P, T> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn remove(&mut self) -> T {
-        self.node.value.take().unwrap()
+    pub fn remove(self) -> T {
+        self.map.count -= 1;
+        self.map.table.take_data(self.loc)
+    }
+}
+
+impl<'a, P, T> OccupiedEntry<'a, P, T> {
+    /// Converts this occupied entry into a mutable reference to the stored value.
+    pub fn into_mut(self) -> &'a mut T {
+        self.map.table.get_data_mut(self.loc)
     }
 }
 
@@ -560,8 +591,7 @@ where
     /// # fn main() {}
     /// ```
     pub fn insert(self, default: T) -> &'a mut T {
-        let node = self._insert(default);
-        node.value.as_mut().unwrap()
+        self._insert(default).1
     }
 
     /// Get a mutable reference to the value. If the value is yet empty, set it to the return value
@@ -584,8 +614,7 @@ where
     /// # fn main() {}
     /// ```
     pub fn insert_with<F: FnOnce() -> T>(self, default: F) -> &'a mut T {
-        let node = self._insert(default());
-        node.value.as_mut().unwrap()
+        self._insert(default()).1
     }
 }
 
@@ -614,7 +643,6 @@ where
     /// # fn main() {}
     /// ```
     pub fn default(self) -> &'a mut T {
-        let node = self._insert(Default::default());
-        node.value.as_mut().unwrap()
+        self._insert(Default::default()).1
     }
 }

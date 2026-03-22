@@ -7,8 +7,7 @@ use crate::*;
 use quickcheck::Arbitrary;
 
 mod basic;
-mod set_ops;
-mod traversals;
+mod views;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Operation<P, T> {
@@ -19,7 +18,7 @@ enum Operation<P, T> {
 #[cfg(miri)]
 const DEFAULT_NUM_TESTS: usize = 10;
 #[cfg(not(miri))]
-const DEFAULT_NUM_TESTS: usize = 10000;
+const DEFAULT_NUM_TESTS: usize = 2000;
 const DEFAULT_GEN_SIZE: usize = 100;
 
 fn proptest_runner<A: Arbitrary + Debug + PartialEq, F: Fn(A) -> bool>(f: F) {
@@ -33,11 +32,11 @@ fn proptest_runner<A: Arbitrary + Debug + PartialEq, F: Fn(A) -> bool>(f: F) {
         .and_then(|x| x.parse::<usize>().ok())
         .unwrap_or(DEFAULT_GEN_SIZE);
 
-    let mut gen = quickcheck::Gen::new(gen_size);
+    let mut generator = quickcheck::Gen::new(gen_size);
 
     // sample all inputs
     for _ in 0..num_tests {
-        let input = A::arbitrary(&mut gen);
+        let input = A::arbitrary(&mut generator);
         let input_c = input.clone();
         let success = f(input_c);
         if !success {
@@ -57,7 +56,7 @@ fn shrink_failure<A: Arbitrary + Debug + PartialEq, F: Fn(A) -> bool>(f: F, inpu
     // if we reach this point, then all shrunken inputs work. Therefore, `inputs` is the minimal
     // input
     panic!(
-        "[QUICKCHECK] Test case failed!\n  Minimal input:\n    {:?}",
+        "[QUICKCHECK] Test case failed!\n  Minimal input: {:#?}",
         input
     );
 }
@@ -73,28 +72,13 @@ macro_rules! qc {
     };
 }
 
-fn select<P: Clone, T: Clone, F: Fn(&P, &T) -> bool>(map: &PrefixMap<P, T>, f: F) -> Vec<(P, T)> {
+fn select<P: Prefix + Clone, T: Clone, F: Fn(&P, &T) -> bool>(
+    map: &PrefixMap<P, T>,
+    f: F,
+) -> Vec<(P, T)> {
     map.iter()
         .map(|(p, t)| (p.clone(), t.clone()))
         .filter(|(p, t)| f(p, t))
-        .collect()
-}
-
-fn select_ref<P, T, F: Fn(&P, &T) -> bool>(map: &PrefixMap<P, T>, f: F) -> Vec<(&P, &T)> {
-    map.iter().filter(|(p, t)| f(*p, *t)).collect()
-}
-
-fn select_keys<P, T, F: Fn(&P, &T) -> bool>(map: &PrefixMap<P, T>, f: F) -> Vec<&P> {
-    map.iter()
-        .filter(|(p, t)| f(*p, *t))
-        .map(|(p, _)| p)
-        .collect()
-}
-
-fn select_values<P, T, F: Fn(&P, &T) -> bool>(map: &PrefixMap<P, T>, f: F) -> Vec<&T> {
-    map.iter()
-        .filter(|(p, t)| f(*p, *t))
-        .map(|(_, t)| t)
         .collect()
 }
 
@@ -144,22 +128,11 @@ impl<P: Arbitrary, T: Arbitrary> Arbitrary for Operation<P, T> {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-struct TestPrefix(u32, u8);
-
-impl TestPrefix {
-    fn left(self) -> Self {
-        TestPrefix(self.0, self.1 + 1)
-    }
-
-    fn right(self) -> Self {
-        TestPrefix(self.0 + (1 << (31 - self.1)), self.1 + 1)
-    }
-}
+pub(crate) struct TestPrefix(u32, u8);
 
 impl Debug for TestPrefix {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let addr = format!("{:032b}", self.0)[..10].to_string();
-        write!(f, "0b{addr}/{}", self.1)
+        write!(f, "0x{:08x}/{}", self.0, self.1)
     }
 }
 

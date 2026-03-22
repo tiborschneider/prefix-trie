@@ -19,14 +19,14 @@ macro_rules! fork {
     };
     ($self:ident, $prefix:ident as ($P:ty,T), $func:ident $(, $args:expr),*) => {
         match $prefix.p1_or_p2() {
-            ::either::Either::Left(p) => $self.t1.$func(p$(, $args),*).map(|(p, t)| ($P::from_p1(p), t)),
-            ::either::Either::Right(p) => $self.t2.$func(p$(, $args),*).map(|(p, t)| ($P::from_p2(p), t)),
+            ::either::Either::Left(p) => $self.t1.$func(p$(, $args),*).map(|(p, t)| ($P::from_p1(&p), t)),
+            ::either::Either::Right(p) => $self.t2.$func(p$(, $args),*).map(|(p, t)| ($P::from_p2(&p), t)),
         }
     };
     ($self:ident, $prefix:ident as $P:ty, $func:ident $(, $args:expr),*) => {
         match $prefix.p1_or_p2() {
-            ::either::Either::Left(p) => $self.t1.$func(p$(, $args),*).map(|p| $P::from_p1(p)),
-            ::either::Either::Right(p) => $self.t2.$func(p$(, $args),*).map(|p| $P::from_p2(p)),
+            ::either::Either::Left(p) => $self.t1.$func(p$(, $args),*).map(|p| $P::from_p1(&p)),
+            ::either::Either::Right(p) => $self.t2.$func(p$(, $args),*).map(|p| $P::from_p2(&p)),
         }
     };
 }
@@ -40,14 +40,14 @@ macro_rules! fork_ref {
     };
     ($self:ident, $prefix:ident as ($P:ty,T), $func:ident $(, $args:expr),*) => {
         match $prefix.p1_or_p2_ref() {
-            ::either::Either::Left(p) => $self.t1.$func(p$(, $args),*).map(|(p, t)| (<$P>::from_p1(p), t)),
-            ::either::Either::Right(p) => $self.t2.$func(p$(, $args),*).map(|(p, t)| (<$P>::from_p2(p), t)),
+            ::either::Either::Left(p) => $self.t1.$func(p$(, $args),*).map(|(p, t)| (<$P>::from_p1(&p), t)),
+            ::either::Either::Right(p) => $self.t2.$func(p$(, $args),*).map(|(p, t)| (<$P>::from_p2(&p), t)),
         }
     };
     ($self:ident, $prefix:ident as $P:ty, $func:ident $(, $args:expr),*) => {
         match $prefix.p1_or_p2_ref() {
-            ::either::Either::Left(p) => $self.t1.$func(p$(, $args),*).map(|p| <$P>::from_p1(p)),
-            ::either::Either::Right(p) => $self.t2.$func(p$(, $args),*).map(|p| <$P>::from_p2(p)),
+            ::either::Either::Left(p) => $self.t1.$func(p$(, $args),*).map(|p| <$P>::from_p1(&p)),
+            ::either::Either::Right(p) => $self.t2.$func(p$(, $args),*).map(|p| <$P>::from_p2(&p)),
         }
     };
 }

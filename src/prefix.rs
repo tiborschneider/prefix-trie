@@ -1,4 +1,4 @@
-//! Description of the generic type `Prefix`.
+//! Prefix trait and implementations.
 
 #[cfg(feature = "cidr")]
 use cidr::{Ipv4Cidr, Ipv4Inet, Ipv6Cidr, Ipv6Inet};
@@ -6,69 +6,61 @@ use cidr::{Ipv4Cidr, Ipv4Inet, Ipv6Cidr, Ipv6Inet};
 use ipnet::{Ipv4Net, Ipv6Net};
 #[cfg(feature = "ipnetwork")]
 use ipnetwork::{Ipv4Network, Ipv6Network};
-use num_traits::{CheckedShr, PrimInt, Unsigned, Zero};
+use num_traits::{CheckedShr, One, PrimInt, Unsigned, Zero};
 
-/// Trait for defining prefixes.
+/// A fixed-width prefix key.
+///
+/// `PrefixMap` and `PrefixSet` store trie positions, not prefix values. They derive those
+/// positions from [`Prefix::repr`] and [`Prefix::prefix_len`], and reconstruct returned prefixes
+/// with [`Prefix::from_repr_len`]. Host bits outside the prefix length may be present in `repr()`,
+/// but they are ignored for matching and are not preserved when prefixes are reconstructed.
 pub trait Prefix: Sized + std::fmt::Debug {
-    /// How can the prefix be represented. This must be one of `u8`, `u16`, `u32`, `u64`, or `u128`.
-    type R: Unsigned + PrimInt + Zero + CheckedShr;
+    /// Unsigned integer representation used as the trie key.
+    ///
+    /// The most significant bit is the first prefix bit. This is normally one of the unsigned
+    /// primitive integers (`u8`, `u16`, `u32`, `u64`, `u128`, or `usize`) and should have the same
+    /// width as the address family being represented.
+    type R: Unsigned + PrimInt + Zero + One + CheckedShr;
 
-    /// Get raw representation of the address, ignoring the prefix length. This function must return
-    /// the representation with the mask already applied.
+    /// Returns the number of bits used to represent addresses and prefixes.
+    fn num_bits() -> u32 {
+        Self::R::zero().count_zeros()
+    }
+
+    /// Returns the raw address bits.
+    ///
+    /// This value does not have to be masked to [`Prefix::prefix_len`]. For example, an IPv4
+    /// `192.0.2.1/24` value may return the raw bits for `192.0.2.1`, not `192.0.2.0`. Implementors
+    /// must ensure that the prefix bits occupy the most significant bits of the returned integer.
     fn repr(&self) -> Self::R;
 
-    /// Prefix length
+    /// Returns the prefix length in bits.
+    ///
+    /// The returned value must be in the range `0..=Self::num_bits()`.
     fn prefix_len(&self) -> u8;
 
-    /// Create a new prefix from the representation and the prefix pength.
+    /// Creates a prefix from raw address bits and a prefix length.
+    ///
+    /// The map and set call this with host bits already masked out when reconstructing stored
+    /// prefixes. Implementations may also canonicalize `repr` themselves if the underlying prefix
+    /// type cannot represent host bits.
     fn from_repr_len(repr: Self::R, len: u8) -> Self;
 
-    /// mask `self.repr()` using `self.len()`. If you can guarantee that `repr` is already masked,
-    /// them simply re-implement this function for your type.
+    /// Returns the canonical network bits for this prefix.
+    ///
+    /// The default implementation masks [`Prefix::repr`] using [`Prefix::prefix_len`]. Override
+    /// this when the underlying type can return the masked network address directly.
     fn mask(&self) -> Self::R {
         self.repr() & mask_from_prefix_len(self.prefix_len())
     }
 
-    /// Create a prefix that matches everything
-    fn zero() -> Self {
-        Self::from_repr_len(Self::R::zero(), 0)
-    }
-
-    /// longest common prefix
-    fn longest_common_prefix(&self, other: &Self) -> Self {
-        let a = self.mask();
-        let b = other.mask();
-        let len = ((a ^ b).leading_zeros() as u8)
-            .min(self.prefix_len())
-            .min(other.prefix_len());
-        let repr = a & mask_from_prefix_len(len);
-        Self::from_repr_len(repr, len)
-    }
-
-    /// Check if `self` contains `other` in its prefix range. This function also returns `True` if
+    /// Checks if `self` contains `other` in its prefix range. This function also returns `true` if
     /// `self` is identical to `other`.
     fn contains(&self, other: &Self) -> bool {
         if self.prefix_len() > other.prefix_len() {
             return false;
         }
         other.repr() & mask_from_prefix_len(self.prefix_len()) == self.mask()
-    }
-
-    /// Check if a specific bit is set (counted from the left, where 0 is the first bit from the
-    /// left).
-    fn is_bit_set(&self, bit: u8) -> bool {
-        let mask = (!Self::R::zero())
-            .checked_shr(bit as u32)
-            .unwrap_or_else(Self::R::zero)
-            ^ (!Self::R::zero())
-                .checked_shr(1u32 + bit as u32)
-                .unwrap_or_else(Self::R::zero);
-        mask & self.mask() != Self::R::zero()
-    }
-
-    /// Compare two prefixes together
-    fn eq(&self, other: &Self) -> bool {
-        self.mask() == other.mask() && self.prefix_len() == other.prefix_len()
     }
 }
 
@@ -105,20 +97,6 @@ impl Prefix for Ipv4Net {
         self.network().into()
     }
 
-    fn zero() -> Self {
-        Default::default()
-    }
-
-    fn longest_common_prefix(&self, other: &Self) -> Self {
-        let a = self.repr();
-        let b = other.repr();
-        let len = ((a ^ b).leading_zeros() as u8)
-            .min(self.prefix_len())
-            .min(other.prefix_len());
-        let repr = a & mask_from_prefix_len::<u32>(len);
-        Ipv4Net::new(repr.into(), len).unwrap()
-    }
-
     fn contains(&self, other: &Self) -> bool {
         self.contains(other)
     }
@@ -142,20 +120,6 @@ impl Prefix for Ipv6Net {
 
     fn mask(&self) -> u128 {
         self.network().into()
-    }
-
-    fn zero() -> Self {
-        Default::default()
-    }
-
-    fn longest_common_prefix(&self, other: &Self) -> Self {
-        let a = self.repr();
-        let b = other.repr();
-        let len = ((a ^ b).leading_zeros() as u8)
-            .min(self.prefix_len())
-            .min(other.prefix_len());
-        let repr = a & mask_from_prefix_len::<u128>(len);
-        Ipv6Net::new(repr.into(), len).unwrap()
     }
 
     fn contains(&self, other: &Self) -> bool {
@@ -363,27 +327,6 @@ mod test {
         assert!(smaller_c.contains(&smaller_c));
     }
 
-    #[test]
-    fn longest_common_prefix() {
-        macro_rules! assert_lcp {
-            ($a:literal, $b:literal, $c:literal) => {
-                assert_eq!(pfx!($a).longest_common_prefix(&pfx!($b)), pfx!($c));
-                assert_eq!(pfx!($b).longest_common_prefix(&pfx!($a)), pfx!($c));
-            };
-        }
-        assert_lcp!("1.2.3.4/24", "1.3.3.4/24", "1.2.0.0/15");
-        assert_lcp!("1.2.3.4/24", "1.1.3.4/24", "1.0.0.0/14");
-        assert_lcp!("1.2.3.4/24", "1.2.3.4/30", "1.2.3.0/24");
-    }
-
-    #[test]
-    fn is_bit_set() {
-        assert!(pfx!("255.0.0.0/8").is_bit_set(0));
-        assert!(pfx!("255.0.0.0/8").is_bit_set(7));
-        assert!(!pfx!("255.0.0.0/8").is_bit_set(8));
-        assert!(!pfx!("255.255.0.0/8").is_bit_set(8));
-    }
-
     #[generic_tests::define]
     mod t {
         use num_traits::NumCast;
@@ -441,49 +384,11 @@ mod test {
         }
 
         #[test]
-        fn zero<P: Prefix>() {
-            let prefix = P::from_repr_len(P::R::zero(), 0);
-            assert!(P::zero().eq(&prefix));
-        }
-
-        #[test]
-        fn longest_common_prefix<P: Prefix>() {
-            for ((a, al), (b, bl), (c, cl)) in [
-                ((0x01020304, 24), (0x01030304, 24), (0x01020000, 15)),
-                ((0x12345678, 24), (0x12345678, 16), (0x12340000, 16)),
-            ] {
-                let a: P = new(a, al);
-                let b: P = new(b, bl);
-                let c: P = new(c, cl);
-                let lcp = a.longest_common_prefix(&b);
-                assert!(lcp.repr() == c.repr());
-                assert!(lcp.prefix_len() == c.prefix_len());
-            }
-        }
-
-        #[test]
         fn contains<P: Prefix>() {
             assert!(new::<P>(0x01020000, 16).contains(&new(0x0102ffff, 24)));
             assert!(new::<P>(0x01020304, 16).contains(&new(0x0102ffff, 24)));
             assert!(new::<P>(0x01020304, 16).contains(&new(0x0102ffff, 16)));
             assert!(!new::<P>(0x01020304, 24).contains(&new(0x0102ffff, 16)));
-        }
-
-        #[test]
-        fn is_bit_set<P: Prefix>() {
-            let x = 0x12345678u32;
-            let num_zeros = <<P as Prefix>::R as Zero>::zero().count_zeros() as u8;
-            let offset = num_zeros - 32;
-            let p: P = new(x, 16);
-            for i in 0..64 {
-                let j = i + offset;
-                if i >= 16 {
-                    assert!(!p.is_bit_set(j))
-                } else {
-                    let mask = 0x80000000u32 >> i;
-                    assert_eq!(p.is_bit_set(j), x & mask != 0)
-                }
-            }
         }
 
         #[instantiate_tests(<Ipv4Net>)]

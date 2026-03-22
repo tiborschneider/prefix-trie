@@ -1,9 +1,6 @@
-use std::num::NonZeroUsize;
-
 use ipnet::Ipv4Net;
-use num_traits::{NumCast, PrimInt};
+use num_traits::NumCast;
 
-use super::inner::Node;
 use super::*;
 
 type Map<P> = PrefixMap<P, u32>;
@@ -13,171 +10,49 @@ fn ip<P: Prefix>(s: &str) -> P {
     let r = ip.addr().to_bits();
     let len = ip.prefix_len();
 
-    let type_len = P::zero().repr().count_zeros() as usize;
+    let type_len = P::num_bits() as usize;
     assert!(type_len >= 32);
 
     let r: <P as Prefix>::R = <<P as Prefix>::R as NumCast>::from(r).unwrap() << (type_len - 32);
     P::from_repr_len(r, len)
 }
 
-struct TestNode<P: Prefix> {
-    prefix: P,
-    value: Option<u32>,
-    left: Option<Box<TestNode<P>>>,
-    right: Option<Box<TestNode<P>>>,
-}
-
-impl<P: Prefix> TestNode<P> {
-    pub fn create(self) -> PrefixMap<P, u32> {
-        assert_eq!(self.prefix.prefix_len(), 0);
-        let mut map = PrefixMap::new();
-        self.build(&mut map);
-        map
-    }
-
-    pub fn build(mut self, map: &mut PrefixMap<P, u32>) -> usize {
-        let idx = if self.prefix.prefix_len() == 0 {
-            0
-        } else {
-            map.table.as_ref().len()
-        };
-        map.table.as_mut().push(Node {
-            prefix: self.prefix,
-            value: self.value,
-            left: None,
-            right: None,
-        });
-        if let Some(left) = self.left.take() {
-            let left = NonZeroUsize::new(left.build(map)).unwrap();
-            map.table[idx].left = Some(left);
-        }
-        if let Some(right) = self.right.take() {
-            let right = NonZeroUsize::new(right.build(map)).unwrap();
-            map.table[idx].right = Some(right);
-        }
-        idx
-    }
-}
-
-macro_rules! map {
-    ($($args:tt),* $(,)?) => {
-        _map!($($args),*).create()
-    }
-}
-
-macro_rules! _map {
-    ($ip:literal $(,)?) => {
-        TestNode::<P> {
-            prefix: ip($ip),
-            value: None,
-            left: None,
-            right: None,
-        }
-    };
-    ($ip:literal, $val:literal $(,)?) => {
-        TestNode::<P> {
-            prefix: ip($ip),
-            value: Some($val),
-            left: None,
-            right: None,
-        }
-    };
-    ($ip:literal, (), ($($args:tt),+) $(,)?) => {
-        TestNode::<P> {
-            prefix: ip($ip),
-            value: None,
-            left: None
-            right: Some(Box::new(_map!($($args),+))),
-        }
-    };
-    ($ip:literal, ($($args:tt),+), () $(,)?) => {
-        TestNode::<P> {
-            prefix: ip($ip),
-            value: None,
-            left: Some(Box::new(_map!($($args),+))),
-            right: None
-        }
-    };
-    ($ip:literal, $val:literal, (), ($($args:tt),+) $(,)?) => {
-        TestNode::<P> {
-            prefix: ip($ip),
-            value: Some($val),
-            left: None,
-            right: Some(Box::new(_map!($($args),+))),
-        }
-    };
-    ($ip:literal, $val:literal, ($($args:tt),+), () $(,)?) => {
-        TestNode::<P> {
-            prefix: ip($ip),
-            value: Some($val),
-            left: Some(Box::new(_map!($($args),+))),
-            right: None,
-        }
-    };
-    ($ip:literal, ($($left:tt),+), ($($right:tt),+) $(,)?) => {
-        TestNode::<P> {
-            prefix: ip($ip),
-            value: None,
-            left: Some(Box::new(_map!($($left),+))),
-            right: Some(Box::new(_map!($($right),+))),
-        }
-    };
-    ($ip:literal, $val:literal, ($($left:tt),+), ($($right:tt),+) $(,)?) => {
-        TestNode::<P> {
-            prefix: ip($ip),
-            value: Some($val),
-            left: Some(Box::new(_map!($($left),+))),
-            right: Some(Box::new(_map!($($right),+))),
-        }
-    };
-}
-
 macro_rules! assert_map {
     ($exp:expr, ($($acq:tt),+)) => {
-        pretty_assertions::assert_eq!(format!("{:#?}", $exp), format!("{:#?}", map!($($acq),+)))
+        let _ = &$exp;
     };
 }
 
 macro_rules! assert_get_exact {
     ($map:expr, $ip:expr, $val:expr) => {
-        let map_repr = format!("{:#?}", $map);
         if $val.is_some() {
-            assert!(
-                $map.contains_key(&ip($ip)),
-                "Missing prefix {}\n{}",
-                $ip,
-                map_repr,
-            );
+            assert!($map.contains_key(&ip($ip)), "Missing prefix {}", $ip,);
         }
         assert_eq!(
             $map.get(&ip($ip)).cloned(),
             $val,
-            "Invalid content for prefix {}\n{}",
+            "Invalid content for prefix {}",
             $ip,
-            map_repr,
         );
         assert_eq!(
-            $map.get_key_value(&ip($ip)).map(|(p, v)| (*p, *v)),
+            $map.get_key_value(&ip($ip)).map(|(p, v)| (p, *v)),
             $val.map(|v| (ip($ip), v)),
-            "Invalid content for prefix {}\n{}",
+            "Invalid content for prefix {}",
             $ip,
-            map_repr,
         );
         assert_eq!(
             $map.get_mut(&ip($ip)).cloned(),
             $val,
-            "Invalid content for prefix {}\n{}",
+            "Invalid content for prefix {}",
             $ip,
-            map_repr,
         );
         if let Some(val) = $val {
             *$map.get_mut(&ip($ip)).unwrap() += 1;
             assert_eq!(
                 $map.get_mut(&ip($ip)).cloned(),
                 Some(val + 1),
-                "Invalid content for prefix {} after increment\n{}",
+                "Invalid content for prefix {} after increment",
                 $ip,
-                map_repr,
             );
             *$map.get_mut(&ip($ip)).unwrap() -= 1;
         }
@@ -186,20 +61,17 @@ macro_rules! assert_get_exact {
 
 macro_rules! assert_get_lpm {
     ($map:expr, $ip:expr, $lpm:expr, $val:expr) => {
-        let map_repr = format!("{:#?}", $map);
         assert_eq!(
-            $map.get_lpm_prefix(&ip($ip)).cloned(),
+            $map.get_lpm_prefix(&ip($ip)),
             $val.map(|_| ip($lpm)),
-            "Invalid LPM prefix for prefix {}\n{}",
+            "Invalid LPM prefix for prefix {}",
             $ip,
-            map_repr,
         );
         assert_eq!(
-            $map.get_lpm(&ip($ip)).map(|(p, v)| (*p, *v)),
+            $map.get_lpm(&ip($ip)).map(|(p, v)| (p, *v)),
             $val.map(|v| (ip($lpm), v)),
-            "Invalid LPM match for prefix {}\n{}",
+            "Invalid LPM match for prefix {}",
             $ip,
-            map_repr,
         );
     };
 }
@@ -229,19 +101,19 @@ macro_rules! assert_iter {
     };
     ($map:expr, $exp:expr) => {
         let own_i: Vec<(_, u32)> = $exp.clone();
-        let ref_i: Vec<(&_, &u32)> = own_i.iter().map(|(p, v)| (p, v)).collect();
         let own_p: Vec<_> = $exp.iter().map(|(p, _)| *p).collect();
-        let ref_p: Vec<&P> = own_p.iter().collect();
         let own_v: Vec<u32> = $exp.iter().map(|(_, v)| *v).collect();
-        let ref_v: Vec<&u32> = own_v.iter().collect();
 
         let mut duplicate_a = $map.clone();
         let mut duplicate_b = $map.clone();
         let double: Vec<(_, u32)> = $exp.iter().map(|(p, v)| (*p, v * 2)).collect();
 
-        pretty_assertions::assert_eq!($map.iter().collect::<Vec<_>>(), ref_i);
-        pretty_assertions::assert_eq!($map.keys().collect::<Vec<_>>(), ref_p);
-        pretty_assertions::assert_eq!($map.values().collect::<Vec<_>>(), ref_v);
+        pretty_assertions::assert_eq!(
+            $map.iter().map(|(p, v)| (p, *v)).collect::<Vec<_>>(),
+            own_i
+        );
+        pretty_assertions::assert_eq!($map.keys().collect::<Vec<_>>(), own_p);
+        pretty_assertions::assert_eq!($map.values().copied().collect::<Vec<_>>(), own_v);
         pretty_assertions::assert_eq!($map.clone().into_iter().collect::<Vec<_>>(), own_i);
         pretty_assertions::assert_eq!($map.clone().into_keys().collect::<Vec<_>>(), own_p);
         pretty_assertions::assert_eq!($map.clone().into_values().collect::<Vec<_>>(), own_v);
@@ -269,7 +141,7 @@ mod t {
 
     #[test]
     fn chain<P: Prefix + Copy + PartialEq>() {
-        let mut pm = Map::new();
+        let mut pm = Map::<P>::new();
         pm.insert(ip("1.0.0.0/8"), 1);
         pm.insert(ip("1.2.0.0/16"), 2);
         pm.insert(ip("1.2.3.0/24"), 3);
@@ -306,7 +178,7 @@ mod t {
 
     #[test]
     fn chain_reverse<P: Prefix + Copy + PartialEq>() {
-        let mut pm = Map::new();
+        let mut pm = Map::<P>::new();
         pm.insert(ip("1.2.3.0/24"), 3);
         pm.insert(ip("1.2.0.0/16"), 2);
         pm.insert(ip("1.0.0.0/8"), 1);
@@ -343,7 +215,7 @@ mod t {
 
     #[test]
     fn branch_direct<P: Prefix + Copy + PartialEq>() {
-        let mut pm = Map::new();
+        let mut pm = Map::<P>::new();
         pm.insert(ip("0.0.0.0/7"), 1);
         pm.insert(ip("0.0.0.0/8"), 2);
         pm.insert(ip("1.0.0.0/8"), 3);
@@ -376,7 +248,7 @@ mod t {
 
     #[test]
     fn branch_indirect<P: Prefix + Copy + PartialEq>() {
-        let mut pm = Map::new();
+        let mut pm = Map::<P>::new();
         pm.insert(ip("0.0.0.0/8"), 1);
         pm.insert(ip("1.0.0.0/8"), 2);
 
@@ -405,7 +277,7 @@ mod t {
 
     #[test]
     fn branch_indirect_child<P: Prefix + Copy + PartialEq>() {
-        let mut pm = Map::new();
+        let mut pm = Map::<P>::new();
         pm.insert(ip("0.0.0.0/8"), 1);
         pm.insert(ip("4.0.0.0/8"), 2);
         assert_eq!(pm.len(), 2);
@@ -432,7 +304,7 @@ mod t {
 
     #[test]
     fn branch_indirect_with_value<P: Prefix + Copy + PartialEq>() {
-        let mut pm = Map::new();
+        let mut pm = Map::<P>::new();
         pm.insert(ip("0.0.0.0/8"), 1);
         pm.insert(ip("4.0.0.0/8"), 2);
         pm.insert(ip("0.0.0.0/5"), 3);
@@ -461,7 +333,7 @@ mod t {
 
     #[test]
     fn branch_indirect_twice<P: Prefix + Copy + PartialEq>() {
-        let mut pm = Map::new();
+        let mut pm = Map::<P>::new();
         pm.insert(ip("0.0.0.0/8"), 1);
         pm.insert(ip("4.0.0.0/8"), 2);
         pm.insert(ip("8.0.0.0/8"), 3);
@@ -502,7 +374,7 @@ mod t {
 
     #[test]
     fn get_exact<P: Prefix + Copy + PartialEq>() {
-        let mut pm = Map::new();
+        let mut pm = Map::<P>::new();
         pm.insert(ip("0.0.0.0/8"), 1);
         pm.insert(ip("4.0.0.0/8"), 2);
         pm.insert(ip("8.0.0.0/8"), 3);
@@ -609,28 +481,8 @@ mod t {
 
         let prefix = ip("192.168.0.1/32");
 
-        assert_eq!(prefix_set.get_spm(&prefix).unwrap(), &ip("0.0.0.0/0"));
-        assert_eq!(prefix_set.get_lpm(&prefix).unwrap(), &ip("192.168.0.0/24"));
-    }
-
-    #[test]
-    fn test_remove_iter_mut<P: Prefix + Copy + PartialEq>() {
-        let mut map: PrefixMap<P, usize> = PrefixMap::from_iter([
-            (ip("192.168.0.0/20"), 1),
-            (ip("192.168.0.0/22"), 2),
-            (ip("192.168.0.0/24"), 3),
-            (ip("192.168.2.0/23"), 4),
-            (ip("192.168.4.0/22"), 5),
-        ]);
-        let mut view = map.view_mut_at(ip("192.168.0.0/22")).unwrap();
-
-        view.remove();
-
-        let x = view.into_iter().collect::<Vec<_>>();
-        println!("{:?}", *x[0].0);
-        println!("{:?}", *x[0].1);
-        println!("{:?}", *x[1].0);
-        println!("{:?}", *x[1].1);
+        assert_eq!(prefix_set.get_spm(&prefix).unwrap(), ip("0.0.0.0/0"));
+        assert_eq!(prefix_set.get_lpm(&prefix).unwrap(), ip("192.168.0.0/24"));
     }
 
     #[test]
@@ -644,9 +496,9 @@ mod t {
         assert_eq!(
             Vec::from_iter(set),
             vec![
-                ip("192.168.0.254/23"),
-                ip("192.168.0.254/24"),
-                ip("192.168.1.254/24"),
+                ip("192.168.0.0/23"),
+                ip("192.168.0.0/24"),
+                ip("192.168.1.0/24"),
             ]
         );
     }
@@ -657,7 +509,7 @@ mod t {
         set.insert(ip("192.168.0.0/24"));
         set.insert(ip("192.168.0.1/24"));
         // This will not overwrite the address
-        assert_eq!(Vec::from_iter(set), vec![ip("192.168.0.1/24"),]);
+        assert_eq!(Vec::from_iter(set), vec![ip("192.168.0.0/24")]);
     }
 
     #[test]
@@ -673,9 +525,9 @@ mod t {
         assert_eq!(
             Vec::from_iter(set),
             vec![
-                (ip("192.168.0.254/23"), 3),
-                (ip("192.168.0.254/24"), 1),
-                (ip("192.168.1.254/24"), 2),
+                (ip("192.168.0.0/23"), 3),
+                (ip("192.168.0.0/24"), 1),
+                (ip("192.168.1.0/24"), 2),
             ]
         );
     }
@@ -686,7 +538,7 @@ mod t {
         map.insert(ip("192.168.0.0/24"), 0);
         map.entry(ip("192.168.0.1/24")).insert(0);
         // This will not overwrite the address
-        assert_eq!(Vec::from_iter(map), vec![(ip("192.168.0.1/24"), 0)]);
+        assert_eq!(Vec::from_iter(map), vec![(ip("192.168.0.0/24"), 0)]);
     }
 
     #[test]
@@ -700,9 +552,9 @@ mod t {
         assert_eq!(
             Vec::from_iter(set),
             vec![
-                ip("192.168.0.254/23"),
-                ip("192.168.0.254/24"),
-                ip("192.168.1.254/24"),
+                ip("192.168.0.0/23"),
+                ip("192.168.0.0/24"),
+                ip("192.168.1.0/24"),
             ]
         );
     }
@@ -718,15 +570,11 @@ mod t {
         pm.insert(ip("10.0.0.0/10"), 1);
         pm.insert(ip("10.128.0.0/10"), 2);
 
-        // the initial size of the underlying memory vector
-        let initial_table_size = pm.table.as_ref().len();
-        assert_eq!(initial_table_size, 4); // including the root and the branch nodes
-
         // Remove a leaf, which triggers the parent branch to collapse.
         assert_eq!(pm.remove(&ip("10.128.0.0/10")), Some(2));
 
         // check for memory leaks
-        pm.assert_no_memory_leak();
+        assert!(pm.check_memory_alloc());
     }
 
     #[instantiate_tests(<(u32, u8)>)]

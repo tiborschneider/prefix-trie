@@ -1,8 +1,23 @@
 //! Module that contains the implementation for the iterators
 
-use crate::joint::JointPrefix;
+use crate::{
+    joint::JointPrefix,
+    trieview::{
+        union as trie_union, CoveringDifferenceView, DifferenceView, IntersectionView, TrieRef,
+        UnionView, ViewIter,
+    },
+};
 
 use super::JointPrefixMap;
+
+type MapView<'a, P, T> = TrieRef<'a, P, T>;
+type UnionInner<'a, P, L, R> = ViewIter<'a, UnionView<'a, MapView<'a, P, L>, MapView<'a, P, R>>>;
+type IntersectionInner<'a, P, L, R> =
+    ViewIter<'a, IntersectionView<'a, MapView<'a, P, L>, MapView<'a, P, R>>>;
+type DifferenceInner<'a, P, L, R> =
+    ViewIter<'a, DifferenceView<'a, MapView<'a, P, L>, MapView<'a, P, R>>>;
+type CoveringDifferenceInner<'a, P, L, R> =
+    ViewIter<'a, CoveringDifferenceView<'a, MapView<'a, P, L>, MapView<'a, P, R>>>;
 
 /// An iterator over all entries of a [`JointPrefixMap`] in lexicographic order.
 pub struct Iter<'a, P: JointPrefix, T> {
@@ -77,14 +92,14 @@ impl<'a, P: JointPrefix, T> Iterator for Iter<'a, P, T> {
     fn next(&mut self) -> Option<(P, &'a T)> {
         if let Some(i1) = self.i1.as_mut() {
             if let Some((p, t)) = i1.next() {
-                return Some((P::from_p1(p), t));
+                return Some((P::from_p1(&p), t));
             }
             // iterator 1 is empty
             self.i1 = None;
         }
         if let Some(i2) = self.i2.as_mut() {
             if let Some((p, t)) = i2.next() {
-                return Some((P::from_p2(p), t));
+                return Some((P::from_p2(&p), t));
             }
             // iterator 1 is empty
             self.i2 = None;
@@ -237,14 +252,14 @@ impl<'a, P: JointPrefix, T> Iterator for IterMut<'a, P, T> {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(i1) = self.i1.as_mut() {
             if let Some((p, t)) = i1.next() {
-                return Some((P::from_p1(p), t));
+                return Some((P::from_p1(&p), t));
             }
             // iterator 1 is empty
             self.i1 = None;
         }
         if let Some(i2) = self.i2.as_mut() {
             if let Some((p, t)) = i2.next() {
-                return Some((P::from_p2(p), t));
+                return Some((P::from_p2(&p), t));
             }
             // iterator 1 is empty
             self.i2 = None;
@@ -283,32 +298,32 @@ impl<P: JointPrefix, T> FromIterator<(P, T)> for JointPrefixMap<P, T> {
 }
 
 /// An iterator that yields all items in a `JointPrefixMap` that covers a given prefix (including
-/// the prefix itself if preseint). See [`crate::joint::JointPrefixMap::cover`] for how to create
+/// the prefix itself if present). See [`crate::joint::JointPrefixMap::cover`] for how to create
 /// this iterator.
-pub enum Cover<'a, 'p, P: JointPrefix, T> {
+pub enum Cover<'a, P: JointPrefix, T> {
     /// Cover of the first prefix variant
-    P1(crate::map::Cover<'a, 'p, P::P1, T>),
+    P1(crate::map::Cover<'a, P::P1, T>),
     /// Cover of the second prefix variant
-    P2(crate::map::Cover<'a, 'p, P::P2, T>),
+    P2(crate::map::Cover<'a, P::P2, T>),
 }
 
-impl<'a, P: JointPrefix, T> Iterator for Cover<'a, '_, P, T> {
+impl<'a, P: JointPrefix, T: 'a> Iterator for Cover<'a, P, T> {
     type Item = (P, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Cover::P1(cover) => cover.next().map(|(p, t)| (P::from_p1(p), t)),
-            Cover::P2(cover) => cover.next().map(|(p, t)| (P::from_p2(p), t)),
+            Cover::P1(cover) => cover.next().map(|(p, t)| (P::from_p1(&p), t)),
+            Cover::P2(cover) => cover.next().map(|(p, t)| (P::from_p2(&p), t)),
         }
     }
 }
 
 /// An iterator that yields all keys (prefixes) in a `JointPrefixMap` that covers a given prefix
-/// (including the prefix itself if preseint). See [`crate::joint::JointPrefixMap::cover_keys`] for
+/// (including the prefix itself if present). See [`crate::joint::JointPrefixMap::cover_keys`] for
 /// how to create this iterator.
-pub struct CoverKeys<'a, 'p, P: JointPrefix, T>(pub(crate) Cover<'a, 'p, P, T>);
+pub struct CoverKeys<'a, P: JointPrefix, T>(pub(crate) Cover<'a, P, T>);
 
-impl<P: JointPrefix, T> Iterator for CoverKeys<'_, '_, P, T> {
+impl<'a, P: JointPrefix, T: 'a> Iterator for CoverKeys<'a, P, T> {
     type Item = P;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -317,11 +332,11 @@ impl<P: JointPrefix, T> Iterator for CoverKeys<'_, '_, P, T> {
 }
 
 /// An iterator that yields all values in a `JointPrefixMap` that covers a given prefix (including
-/// the prefix itself if preseint). See [`crate::joint::JointPrefixMap::cover_values`] for how to
+/// the prefix itself if present). See [`crate::joint::JointPrefixMap::cover_values`] for how to
 /// create this iterator.
-pub struct CoverValues<'a, 'p, P: JointPrefix, T>(pub(super) Cover<'a, 'p, P, T>);
+pub struct CoverValues<'a, P: JointPrefix, T>(pub(super) Cover<'a, P, T>);
 
-impl<'a, P: JointPrefix, T> Iterator for CoverValues<'a, '_, P, T> {
+impl<'a, P: JointPrefix, T: 'a> Iterator for CoverValues<'a, P, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -332,11 +347,11 @@ impl<'a, P: JointPrefix, T> Iterator for CoverValues<'a, '_, P, T> {
 /// An iterator over the union of two [`JointPrefixMap`]s. The iterator yields first prefixes of
 /// `P1`, followed by those of `P2`.
 pub struct Union<'a, P: JointPrefix, L, R> {
-    pub(crate) i1: Option<crate::trieview::Union<'a, P::P1, L, R>>,
-    pub(crate) i2: Option<crate::trieview::Union<'a, P::P2, L, R>>,
+    pub(crate) i1: Option<UnionInner<'a, P::P1, L, R>>,
+    pub(crate) i2: Option<UnionInner<'a, P::P2, L, R>>,
 }
 
-impl<'a, P: JointPrefix, L, R> Iterator for Union<'a, P, L, R> {
+impl<'a, P: JointPrefix, L: 'a, R: 'a> Iterator for Union<'a, P, L, R> {
     type Item = UnionItem<'a, P, L, R>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -366,7 +381,8 @@ pub enum UnionItem<'a, P, L, R> {
         prefix: P,
         /// The value of the element in the left TrieView (`self`).
         left: &'a L,
-        /// The longest prefix match in the right TrieView (`other`).
+        /// No exact value from the right TrieView (`other`) for this prefix. This is always
+        /// `None` for the plain union iterator.
         right: Option<(P, &'a R)>,
     },
 
@@ -374,13 +390,14 @@ pub enum UnionItem<'a, P, L, R> {
     Right {
         /// The prefix of the element.
         prefix: P,
-        /// The longest prefix match in the left TrieView (`self`).
+        /// No exact value from the left TrieView (`self`) for this prefix. This is always `None`
+        /// for the plain union iterator.
         left: Option<(P, &'a L)>,
         /// The value of the element in the right TrieView (`other`).
         right: &'a R,
     },
 
-    /// The prefix is only present in the right TrieView (`other`).
+    /// The prefix is present in both TrieViews.
     Both {
         /// The prefix of the element.
         prefix: P,
@@ -547,8 +564,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
         }
     }
 
-    /// Get the value of the left item (`self`). This either returns the exact match or the
-    /// longest-prefix match.
+    /// Get the value of the left item (`self`) when it is present exactly.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -574,7 +590,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     ///         .collect::<Vec<_>>(),
     ///     vec![
     ///         Some((net!("192.168.0.0/22"), &2)),
-    ///         Some((net!("192.168.0.0/22"), &2)),
+    ///         None,
     ///         Some((net!("192.168.0.0/24"), &3)),
     ///         Some((net!("2001::1:0:0/96"), &1)),
     ///     ]
@@ -590,8 +606,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
         }
     }
 
-    /// Get the value of the left item (`self`). This either returns the exact match or the
-    /// longest-prefix match.
+    /// Get the value of the left item (`self`) when it is present exactly.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -615,7 +630,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     ///     vec![
     ///         Some((net!("2001::1:0:0/96"), &1)),
     ///         Some((net!("2001::2:0:0/96"), &2)),
-    ///         Some((net!("2001::2:0:0/96"), &2)),
+    ///         None,
     ///         Some((net!("2001::2:0:0/98"), &3)),
     ///     ]
     /// );
@@ -630,8 +645,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
         }
     }
 
-    /// Get the value of the right item (`other`). This either returns the exact match or the
-    /// longest-prefix match.
+    /// Get the value of the right item (`other`) when it is present exactly.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -658,7 +672,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     ///     vec![
     ///         Some((net!("192.168.0.0/22"), &"a")),
     ///         Some((net!("192.168.0.0/23"), &"b")),
-    ///         Some((net!("192.168.0.0/23"), &"b")),
+    ///         None,
     ///         None,
     ///     ]
     /// );
@@ -673,8 +687,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
         }
     }
 
-    /// Get the value of the right item (`other`). This either returns the exact match or the
-    /// longest-prefix match.
+    /// Get the value of the right item (`other`) when it is present exactly.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -699,7 +712,7 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
     ///         None,
     ///         Some((net!("2001::2:0:0/96"), &"a")),
     ///         Some((net!("2001::2:0:0/97"), &"b")),
-    ///         Some((net!("2001::2:0:0/97"), &"b")),
+    ///         None,
     ///     ]
     /// );
     /// # }
@@ -715,64 +728,42 @@ impl<'a, P, L, R> UnionItem<'a, P, L, R> {
 }
 
 impl<'a, P: JointPrefix, L, R> UnionItem<'a, P, L, R> {
-    fn from_p1(value: crate::trieview::UnionItem<'a, P::P1, L, R>) -> Self {
-        match value {
-            crate::trieview::UnionItem::Left {
-                prefix,
+    fn from_p1(value: (P::P1, trie_union::UnionItem<&'a L, &'a R>)) -> Self {
+        let (prefix, item) = value;
+        match item {
+            trie_union::UnionItem::Left(left) => UnionItem::Left {
+                prefix: P::from_p1(&prefix),
                 left,
-                right,
-            } => UnionItem::Left {
-                prefix: P::from_p1(prefix),
-                left,
-                right: right.map(|(p, r)| (P::from_p1(p), r)),
+                right: None,
             },
-            crate::trieview::UnionItem::Right {
-                prefix,
-                left,
-                right,
-            } => UnionItem::Right {
-                prefix: P::from_p1(prefix),
-                left: left.map(|(p, l)| (P::from_p1(p), l)),
+            trie_union::UnionItem::Right(right) => UnionItem::Right {
+                prefix: P::from_p1(&prefix),
+                left: None,
                 right,
             },
-            crate::trieview::UnionItem::Both {
-                prefix,
-                left,
-                right,
-            } => UnionItem::Both {
-                prefix: P::from_p1(prefix),
+            trie_union::UnionItem::Both(left, right) => UnionItem::Both {
+                prefix: P::from_p1(&prefix),
                 left,
                 right,
             },
         }
     }
 
-    fn from_p2(value: crate::trieview::UnionItem<'a, P::P2, L, R>) -> Self {
-        match value {
-            crate::trieview::UnionItem::Left {
-                prefix,
+    fn from_p2(value: (P::P2, trie_union::UnionItem<&'a L, &'a R>)) -> Self {
+        let (prefix, item) = value;
+        match item {
+            trie_union::UnionItem::Left(left) => UnionItem::Left {
+                prefix: P::from_p2(&prefix),
                 left,
-                right,
-            } => UnionItem::Left {
-                prefix: P::from_p2(prefix),
-                left,
-                right: right.map(|(p, r)| (P::from_p2(p), r)),
+                right: None,
             },
-            crate::trieview::UnionItem::Right {
-                prefix,
-                left,
-                right,
-            } => UnionItem::Right {
-                prefix: P::from_p2(prefix),
-                left: left.map(|(p, l)| (P::from_p2(p), l)),
+            trie_union::UnionItem::Right(right) => UnionItem::Right {
+                prefix: P::from_p2(&prefix),
+                left: None,
                 right,
             },
-            crate::trieview::UnionItem::Both {
-                prefix,
-                left,
-                right,
-            } => UnionItem::Both {
-                prefix: P::from_p2(prefix),
+            trie_union::UnionItem::Both(left, right) => UnionItem::Both {
+                prefix: P::from_p2(&prefix),
                 left,
                 right,
             },
@@ -783,23 +774,23 @@ impl<'a, P: JointPrefix, L, R> UnionItem<'a, P, L, R> {
 /// An iterator over the intersection of two [`JointPrefixMap`]s. The iterator yields first prefixes
 /// of `P1`, followed by those of `P2`.
 pub struct Intersection<'a, P: JointPrefix, L, R> {
-    pub(crate) i1: Option<crate::trieview::Intersection<'a, P::P1, L, R>>,
-    pub(crate) i2: Option<crate::trieview::Intersection<'a, P::P2, L, R>>,
+    pub(crate) i1: Option<IntersectionInner<'a, P::P1, L, R>>,
+    pub(crate) i2: Option<IntersectionInner<'a, P::P2, L, R>>,
 }
 
-impl<'a, P: JointPrefix, L, R> Iterator for Intersection<'a, P, L, R> {
+impl<'a, P: JointPrefix, L: 'a, R: 'a> Iterator for Intersection<'a, P, L, R> {
     type Item = (P, &'a L, &'a R);
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(i1) = self.i1.as_mut() {
-            if let Some((p, l, r)) = i1.next() {
-                return Some((P::from_p1(p), l, r));
+            if let Some((p, (l, r))) = i1.next() {
+                return Some((P::from_p1(&p), l, r));
             }
             self.i1 = None;
         }
         if let Some(i2) = self.i2.as_mut() {
-            if let Some((p, l, r)) = i2.next() {
-                return Some((P::from_p2(p), l, r));
+            if let Some((p, (l, r))) = i2.next() {
+                return Some((P::from_p2(&p), l, r));
             }
             self.i2 = None;
         }
@@ -810,11 +801,11 @@ impl<'a, P: JointPrefix, L, R> Iterator for Intersection<'a, P, L, R> {
 /// An iterator over the difference of two [`JointPrefixMap`]s, i.e., prefixes that are in `self`
 /// but not in `other`. The iterator yields first prefixes of `P1`, followed by those of `P2`.
 pub struct Difference<'a, P: JointPrefix, L, R> {
-    pub(crate) i1: Option<crate::trieview::Difference<'a, P::P1, L, R>>,
-    pub(crate) i2: Option<crate::trieview::Difference<'a, P::P2, L, R>>,
+    pub(crate) i1: Option<DifferenceInner<'a, P::P1, L, R>>,
+    pub(crate) i2: Option<DifferenceInner<'a, P::P2, L, R>>,
 }
 
-impl<'a, P: JointPrefix, L, R> Iterator for Difference<'a, P, L, R> {
+impl<'a, P: JointPrefix, L: 'a, R: 'a> Iterator for Difference<'a, P, L, R> {
     type Item = DifferenceItem<'a, P, L, R>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -838,23 +829,23 @@ impl<'a, P: JointPrefix, L, R> Iterator for Difference<'a, P, L, R> {
 /// are not covered by `other`. The iterator yields first prefixes of `P1`, followed by those of
 /// `P2`.
 pub struct CoveringDifference<'a, P: JointPrefix, L, R> {
-    pub(crate) i1: Option<crate::trieview::CoveringDifference<'a, P::P1, L, R>>,
-    pub(crate) i2: Option<crate::trieview::CoveringDifference<'a, P::P2, L, R>>,
+    pub(crate) i1: Option<CoveringDifferenceInner<'a, P::P1, L, R>>,
+    pub(crate) i2: Option<CoveringDifferenceInner<'a, P::P2, L, R>>,
 }
 
-impl<'a, P: JointPrefix, L, R> Iterator for CoveringDifference<'a, P, L, R> {
+impl<'a, P: JointPrefix, L: 'a, R: 'a> Iterator for CoveringDifference<'a, P, L, R> {
     type Item = (P, &'a L);
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(i1) = self.i1.as_mut() {
             if let Some((p, l)) = i1.next() {
-                return Some((P::from_p1(p), l));
+                return Some((P::from_p1(&p), l));
             }
             self.i1 = None;
         }
         if let Some(i2) = self.i2.as_mut() {
             if let Some((p, l)) = i2.next() {
-                return Some((P::from_p2(p), l));
+                return Some((P::from_p2(&p), l));
             }
             self.i2 = None;
         }
@@ -869,24 +860,26 @@ pub struct DifferenceItem<'a, P, L, R> {
     pub prefix: P,
     /// The value stored in `self`.
     pub value: &'a L,
-    /// The longest-prefix-match that is present in `other`.
+    /// No matching right-side value is yielded by plain difference. This is always `None`.
     pub right: Option<(P, &'a R)>,
 }
 
 impl<'a, P: JointPrefix, L, R> DifferenceItem<'a, P, L, R> {
-    fn from_p1(value: crate::trieview::DifferenceItem<'a, P::P1, L, R>) -> Self {
+    fn from_p1(value: (P::P1, &'a L)) -> Self {
+        let (prefix, value) = value;
         Self {
-            prefix: P::from_p1(value.prefix),
-            value: value.value,
-            right: value.right.map(|(p, r)| (P::from_p1(p), r)),
+            prefix: P::from_p1(&prefix),
+            value,
+            right: None,
         }
     }
 
-    fn from_p2(value: crate::trieview::DifferenceItem<'a, P::P2, L, R>) -> Self {
+    fn from_p2(value: (P::P2, &'a L)) -> Self {
+        let (prefix, value) = value;
         Self {
-            prefix: P::from_p2(value.prefix),
-            value: value.value,
-            right: value.right.map(|(p, r)| (P::from_p2(p), r)),
+            prefix: P::from_p2(&prefix),
+            value,
+            right: None,
         }
     }
 }

@@ -1,0 +1,299 @@
+//! Concrete [`TrieRef`] cursor implementing [`TrieView`].
+//!
+//! [`TrieRef`] is a lightweight, `Copy`able immutable cursor. All set-operation views
+//! ([`IntersectionView`][super::IntersectionView], [`UnionView`][super::union::UnionView],
+//! etc.) can be composed from `TrieRef` leaves.
+
+use std::marker::PhantomData;
+
+use num_traits::Zero;
+
+use crate::{
+    Prefix,
+    {
+        allocator::Loc,
+        map::PrefixMap,
+        node::{child_cover_mask, data_cover_mask, extend_repr},
+        table::{Table, K},
+    },
+};
+
+use super::{AsView, TrieView, ViewIter};
+
+/// An immutable cursor implementing [`TrieView`].
+///
+/// # Invariant
+///
+/// `depth <= prefix_len < depth + K`, where `K` is the stride of a `MultiBitNode`.
+/// `depth` is always a multiple of `K`.
+/// `key` contains the accumulated bits (only the top `prefix_len` bits are significant).
+pub struct TrieRef<'a, P: Prefix, T> {
+    pub(super) table: &'a Table<T>,
+    /// Location of the `MultiBitNode` that contains this view's root position.
+    pub(super) node_loc: Loc,
+    /// Depth of `node_loc`: always a multiple of `K`.
+    pub(super) depth: u32,
+    /// Accumulated key bits (only the top `prefix_len` bits are significant).
+    pub(super) key: P::R,
+    /// Binary-tree depth of this view's root position.
+    pub(super) prefix_len: u32,
+    pub(super) _marker: PhantomData<P>,
+}
+
+// `TrieRef` holds only a shared reference (`&'a Table<T>`) and a `Loc` + key bits,
+// so it is always `Copy`/`Clone` regardless of whether `P` or `T` are.
+impl<'a, P: Prefix, T> Clone for TrieRef<'a, P, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<'a, P: Prefix, T> Copy for TrieRef<'a, P, T> {}
+
+impl<'a, P: Prefix, T> TrieRef<'a, P, T> {
+    /// Create a view at the root of the given table.
+    pub(crate) fn new_root(table: &'a Table<T>) -> Self {
+        Self {
+            table,
+            node_loc: Loc::root(),
+            depth: 0,
+            key: P::R::zero(),
+            prefix_len: 0,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'a, P: Prefix, T> TrieView<'a> for TrieRef<'a, P, T> {
+    type P = P;
+    type T = &'a T;
+
+    #[inline]
+    fn depth(&self) -> u32 {
+        self.depth
+    }
+
+    #[inline]
+    fn key(&self) -> P::R {
+        self.key
+    }
+
+    #[inline]
+    fn prefix_len(&self) -> u32 {
+        self.prefix_len
+    }
+
+    #[inline]
+    fn data_bitmap(&self) -> u32 {
+        self.table.node(self.node_loc).data_bitmap()
+            & data_cover_mask(self.depth, self.key, self.prefix_len)
+    }
+
+    #[inline]
+    fn child_bitmap(&self) -> u32 {
+        self.table.node(self.node_loc).child_bitmap()
+            & child_cover_mask(self.depth, self.key, self.prefix_len)
+    }
+
+    #[inline]
+    unsafe fn get_data(&mut self, data_bit: u32) -> &'a T {
+        let node = self.table.node(self.node_loc);
+        // SAFETY: caller guarantees data_bit is set in data_bitmap().
+        let present = node
+            .data_loc_if_present(self.node_loc, self.depth, data_bit)
+            .expect("get_data: data_bit not set in bitmap");
+        self.table.get_data(present)
+    }
+
+    #[inline]
+    unsafe fn get_child(&mut self, child_bit: u32) -> Self {
+        let child_loc = self
+            .table
+            .child(self.node_loc, child_bit)
+            .expect("get_child: child_bit not set in bitmap");
+        let new_key = extend_repr(self.key, self.depth, child_bit);
+        Self {
+            table: self.table,
+            node_loc: child_loc,
+            depth: self.depth + K,
+            key: new_key,
+            prefix_len: self.depth + K,
+            _marker: PhantomData,
+        }
+    }
+
+    #[inline]
+    unsafe fn reposition(&mut self, key: P::R, prefix_len: u32) {
+        let _old_prefix = self.prefix();
+        self.key = key;
+        self.prefix_len = prefix_len;
+        // ensure that we always go deeper inside.
+        debug_assert!(_old_prefix.contains(&self.prefix()));
+    }
+}
+
+impl<'a, P: Prefix, T> IntoIterator for TrieRef<'a, P, T> {
+    type Item = (P, &'a T);
+    type IntoIter = ViewIter<'a, TrieRef<'a, P, T>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, P: Prefix, T> AsView<'a> for &'a PrefixMap<P, T> {
+    type P = P;
+    type View = TrieRef<'a, P, T>;
+
+    fn view(self) -> TrieRef<'a, P, T> {
+        TrieRef::new_root(self.table())
+    }
+}
+
+impl<'a, P: Prefix, T> AsView<'a> for TrieRef<'a, P, T> {
+    type P = P;
+    type View = TrieRef<'a, P, T>;
+
+    fn view(self) -> TrieRef<'a, P, T> {
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        Prefix,
+        {
+            trieview::{AsView, TrieView},
+            PrefixMap,
+        },
+    };
+
+    type P = (u32, u8);
+
+    fn p(repr: u32, len: u8) -> P {
+        P::from_repr_len(repr, len)
+    }
+
+    fn map_from(entries: &[(u32, u8, i32)]) -> PrefixMap<P, i32> {
+        let mut m = PrefixMap::new();
+        for &(repr, len, val) in entries {
+            m.insert(p(repr, len), val);
+        }
+        m
+    }
+
+    #[test]
+    fn view_iter_all() {
+        let m = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a010000, 16, 2),
+            (0x0a020000, 16, 3),
+            (0x0a010000, 24, 4),
+        ]);
+        let expected: Vec<(P, i32)> = m.iter().map(|(p, v)| (p, *v)).collect();
+        let from_view: Vec<(P, i32)> = m.view().iter().map(|(p, v)| (p, *v)).collect();
+        assert_eq!(from_view, expected);
+    }
+
+    #[test]
+    fn view_at_subtrie() {
+        let m = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a010000, 16, 2),
+            (0x0a020000, 16, 3),
+            (0x0a010000, 24, 4),
+        ]);
+        let got: Vec<_> = m
+            .view_at(&p(0x0a010000, 16))
+            .map(|v| v.iter().map(|(p, x)| (p, *x)).collect::<Vec<_>>())
+            .unwrap_or_default();
+        assert_eq!(got, vec![(p(0x0a010000, 16), 2), (p(0x0a010000, 24), 4)]);
+    }
+
+    #[test]
+    fn view_value() {
+        let m = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2)]);
+        let v = m.view().find(&p(0x0a010000, 16)).unwrap();
+        assert_eq!(v.value(), Some(&2));
+        let v2 = m.view().find(&p(0x0a000000, 8)).unwrap();
+        assert_eq!(v2.value(), Some(&1));
+    }
+
+    #[test]
+    fn view_find_exact() {
+        let m = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 24, 4)]);
+        assert!(m.view().find_exact(&p(0x0a010000, 16)).is_none());
+        assert!(m.view().find_exact(&p(0x0a000000, 8)).is_some());
+    }
+
+    #[test]
+    fn view_find_exact_value() {
+        let m = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 24, 4)]);
+        assert_eq!(m.view().find_exact_value(&p(0x0a010000, 16)), None);
+        assert_eq!(
+            m.view()
+                .find_exact_value(&p(0x0a010000, 24))
+                .map(|(p, v)| (p, *v)),
+            Some((p(0x0a010000, 24), 4))
+        );
+    }
+
+    #[test]
+    fn view_find_lpm() {
+        let m = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2), (0x0a010100, 24, 3)]);
+        let v = m.view().find_lpm(&p(0x0a010180, 25)).unwrap();
+        assert_eq!(v.prefix(), p(0x0a010100, 24));
+        assert_eq!(v.value(), Some(&3));
+
+        let v = m.view().find_lpm(&p(0x0a020000, 16)).unwrap();
+        assert_eq!(v.prefix(), p(0x0a000000, 8));
+        assert_eq!(v.value(), Some(&1));
+        assert!(m.view().find_lpm(&p(0x0b000000, 8)).is_none());
+    }
+
+    #[test]
+    fn view_find_lpm_value() {
+        let m = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2), (0x0a010100, 24, 3)]);
+        assert_eq!(
+            m.view()
+                .find_lpm_value(&p(0x0a010180, 25))
+                .map(|(p, v)| (p, *v)),
+            Some((p(0x0a010100, 24), 3))
+        );
+    }
+
+    #[test]
+    fn view_prefix_value_keys_values() {
+        let m = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2)]);
+        assert_eq!(
+            m.view()
+                .find_exact(&p(0x0a010000, 16))
+                .unwrap()
+                .prefix_value()
+                .map(|(p, v)| (p, *v)),
+            Some((p(0x0a010000, 16), 2))
+        );
+        assert_eq!(
+            m.view().keys().collect::<Vec<_>>(),
+            vec![p(0x0a000000, 8), p(0x0a010000, 16)]
+        );
+        assert_eq!(m.view().values().copied().collect::<Vec<_>>(), vec![1, 2]);
+    }
+
+    #[test]
+    fn view_prefix_reconstruction() {
+        let m = map_from(&[(0x0a010203, 32, 99)]);
+        let v = m.view().find_exact(&p(0x0a010203, 32)).unwrap();
+        assert_eq!(v.prefix(), p(0x0a010203, 32));
+        assert_eq!(v.value(), Some(&99));
+    }
+
+    #[test]
+    fn view_into_iter() {
+        let m = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2)]);
+        // TrieRef: for loop via IntoIterator
+        let from_for: Vec<(P, i32)> = m.view().into_iter().map(|(p, v)| (p, *v)).collect();
+        let expected: Vec<(P, i32)> = m.iter().map(|(p, v)| (p, *v)).collect();
+        assert_eq!(from_for, expected);
+    }
+}

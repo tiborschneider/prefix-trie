@@ -53,8 +53,10 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
         }
     }
 
-    /// Replace the current entry, and return the entry that was stored before. This will also
-    /// replace the key with the one provided to the `entry` function.
+    /// Replace the current entry, and return the entry that was stored before.
+    ///
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits masked out by the prefix length are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -69,7 +71,7 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
     /// # fn main() {}
     /// ```
     ///
-    /// This function *will replace* the prefix in the map with the one provided to the `entry` call:
+    /// Host bits from the `entry` argument are not preserved:
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -80,7 +82,7 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
     /// pm.entry("192.168.1.2/24".parse()?).insert(2);
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some(("192.168.1.2/24".parse()?, &2)) // prefix is overwritten
+    ///     Some(("192.168.1.0/24".parse()?, &2))
     /// );
     /// # Ok(())
     /// # }
@@ -115,7 +117,7 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
     /// # fn main() {}
     /// ```
     ///
-    /// This function will *not* replace the prefix in the map if it already exists.
+    /// Host bits from an existing matching prefix are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -126,7 +128,7 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
     /// pm.entry("192.168.1.2/24".parse()?).or_insert(2);
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some(("192.168.1.1/24".parse()?, &1)) // prefix is not overwritten.
+    ///     Some(("192.168.1.0/24".parse()?, &1))
     /// );
     /// # Ok(())
     /// # }
@@ -138,8 +140,8 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
         match self {
             Entry::Vacant(e) => e.insert(default),
             Entry::Occupied(e) => match e {
-                OccupiedEntry::P1(e) => e.node.value.get_or_insert(default),
-                OccupiedEntry::P2(e) => e.node.value.get_or_insert(default),
+                OccupiedEntry::P1(e) => e.into_mut(),
+                OccupiedEntry::P2(e) => e.into_mut(),
             },
         }
     }
@@ -161,7 +163,7 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
     /// # fn main() {}
     /// ```
     ///
-    /// This function will *not* replace the prefix in the map if it already exists.
+    /// Host bits from an existing matching prefix are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -172,7 +174,7 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
     /// pm.entry("192.168.1.2/24".parse()?).or_insert_with(|| 2);
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some(("192.168.1.1/24".parse()?, &1)) // prefix is not overwritten.
+    ///     Some(("192.168.1.0/24".parse()?, &1))
     /// );
     /// # Ok(())
     /// # }
@@ -184,8 +186,8 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
         match self {
             Entry::Vacant(e) => e.insert(default()),
             Entry::Occupied(e) => match e {
-                OccupiedEntry::P1(e) => e.node.value.get_or_insert_with(default),
-                OccupiedEntry::P2(e) => e.node.value.get_or_insert_with(default),
+                OccupiedEntry::P1(e) => e.into_mut(),
+                OccupiedEntry::P2(e) => e.into_mut(),
             },
         }
     }
@@ -207,7 +209,7 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
     /// # fn main() {}
     /// ```
     ///
-    /// This function will *not* replace the prefix in the map if it already exists.
+    /// Host bits from an existing matching prefix are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -218,7 +220,7 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
     /// pm.entry("192.168.1.2/24".parse()?).and_modify(|x| *x += 1);
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some(("192.168.1.1/24".parse()?, &2)) // prefix is not overwritten.
+    ///     Some(("192.168.1.0/24".parse()?, &2))
     /// );
     /// # Ok(())
     /// # }
@@ -230,12 +232,12 @@ impl<'a, P: JointPrefix, T> Entry<'a, P, T> {
         match self {
             Entry::Vacant(e) => Entry::Vacant(e),
             Entry::Occupied(e) => match e {
-                OccupiedEntry::P1(e) => {
-                    e.node.value.as_mut().map(f);
+                OccupiedEntry::P1(mut e) => {
+                    f(e.get_mut());
                     Entry::Occupied(OccupiedEntry::P1(e))
                 }
-                OccupiedEntry::P2(e) => {
-                    e.node.value.as_mut().map(f);
+                OccupiedEntry::P2(mut e) => {
+                    f(e.get_mut());
                     Entry::Occupied(OccupiedEntry::P2(e))
                 }
             },
@@ -265,7 +267,7 @@ where
     /// # fn main() {}
     /// ```
     ///
-    /// This function will *not* replace the prefix in the map if it already exists.
+    /// Host bits from an existing matching prefix are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -276,7 +278,7 @@ where
     /// pm.entry("192.168.1.2/24".parse()?).or_default();
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some(("192.168.1.1/24".parse()?, &1)) // prefix is not overwritten.
+    ///     Some(("192.168.1.0/24".parse()?, &1))
     /// );
     /// # Ok(())
     /// # }
@@ -310,9 +312,8 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
 
     /// Gets a mutable reference to the value in the entry.
     ///
-    /// This call will not modify the prefix stored in the tree. In case the prefix used to create
-    /// the entry is different from the stored one (has additional information in the host part),
-    /// and you wish that prefix to be overwritten, use `insert`.
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits masked out by the prefix length are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -326,7 +327,7 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
     /// }
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some(("192.168.1.1/24".parse()?, &2)) // prefix is not overwritten
+    ///     Some(("192.168.1.0/24".parse()?, &2))
     /// );
     /// # Ok(())
     /// # }
@@ -340,8 +341,7 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
         }
     }
 
-    /// Insert a new value into the entry, returning the old value. This operation will also replace
-    /// the prefix with the provided one.
+    /// Insert a new value into the entry, returning the old value.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -351,11 +351,11 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
     /// pm.insert("192.168.1.1/24".parse()?, 1);
     /// if let Entry::Occupied(mut e) = pm.entry("192.168.1.0/24".parse()?) {
-    ///     e.insert(2); // doing so will overwrite the prefix.
+    ///     e.insert(2);
     /// }
     /// assert_eq!(
     ///     pm.get_key_value(&"192.168.1.0/24".parse()?),
-    ///     Some(("192.168.1.0/24".parse()?, &2)) // prefix is overwritten
+    ///     Some(("192.168.1.0/24".parse()?, &2))
     /// );
     /// # Ok(())
     /// # }
@@ -369,9 +369,9 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
         }
     }
 
-    /// Remove the current value and return it. The tree will not be modified (the same effect as
-    /// `JointPrefixMap::remove_keep_tree`).
-    pub fn remove(&mut self) -> T {
+    /// Remove the current value and return it. Empty trie nodes may be left in place (the same
+    /// effect as `JointPrefixMap::remove_keep_tree`).
+    pub fn remove(self) -> T {
         match self {
             OccupiedEntry::P1(e) => e.remove(),
             OccupiedEntry::P2(e) => e.remove(),

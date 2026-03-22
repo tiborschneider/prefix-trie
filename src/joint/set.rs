@@ -1,13 +1,13 @@
 //! JointPrefixSet, that is implemened as a simple binary tree, based on the
 //! [`super::JointPrefixMap`].
 
-use crate::AsView;
 use crate::PrefixSet;
+use crate::{AsView, TrieView};
 use either::{Left, Right};
 
 use super::{map::CoverKeys, JointPrefix};
 
-/// Set of prefixes, organized in a tree. This strucutre gives efficient access to the longest
+/// Set of prefixes, organized in a tree. This structure gives efficient access to the longest
 /// prefix in the set that contains another prefix.
 ///
 /// Access the individual sets `self.t1` and `self.t2` to perform set operations (using
@@ -79,7 +79,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         self.len() == 0
     }
 
-    /// Check wether some prefix is present in the set, without using longest prefix match.
+    /// Check whether some prefix is present in the set, without using longest prefix match.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -101,8 +101,10 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         fork_ref!(self, prefix, contains)
     }
 
-    /// Get a reference to the stored prefix. This function allows you to retrieve the host part of
-    /// the prefix. The returned prefix will always have the same network address and prefix length.
+    /// Get the canonical reconstructed prefix by exact prefix matching.
+    ///
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits masked out by the prefix length are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -110,7 +112,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
     /// set.insert("192.168.0.254/24".parse()?);
-    /// assert_eq!(set.get(&"192.168.0.0/24".parse()?), Some("192.168.0.254/24".parse()?));
+    /// assert_eq!(set.get(&"192.168.0.0/24".parse()?), Some("192.168.0.0/24".parse()?));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -120,7 +122,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         fork_ref!(self, prefix as P, get)
     }
 
-    /// Get the longest prefix in the set that contains the given preifx.
+    /// Get the longest prefix in the set that contains the given prefix.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -142,7 +144,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         fork_ref!(self, prefix as P, get_lpm)
     }
 
-    /// Get the shortest prefix in the set that contains the given preifx.
+    /// Get the shortest prefix in the set that contains the given prefix.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -170,8 +172,8 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// - If the set did not previously contain this value, `true` is returned.
     /// - If the set already contained this value, `false` is returned.
     ///
-    /// This operation will always replace the currently stored prefix. This allows you to store
-    /// additional information in the host aprt of the prefix.
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits masked out by the prefix length are not preserved.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -211,10 +213,9 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         fork_ref!(self, prefix, remove)
     }
 
-    /// Removes a prefix from the set, returning wether the prefix was present or not. In contrast
-    /// to [`Self::remove`], his operation will keep the tree structure as is, but only remove the
-    /// element from it. This allows any future `insert` on the same prefix to be faster. However
-    /// future reads from the tree might be a bit slower because they need to traverse more nodes.
+    /// Removes a prefix from the set, returning whether the prefix was present or not. In contrast
+    /// to [`Self::remove`], this operation only removes the stored value and may leave empty trie
+    /// nodes in place.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -226,9 +227,6 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// assert!(set.contains(&prefix));
     /// assert!(set.remove_keep_tree(&prefix));
     /// assert!(!set.contains(&prefix));
-    ///
-    /// // future inserts of the same key are now faster!
-    /// set.insert(prefix);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -394,7 +392,8 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     }
 
     /// Iterate over all prefixes in the set that covers the given `prefix` (including `prefix`
-    /// itself if that is present in the set). The returned iterator yields `&'a P`.
+    /// itself if that is present in the set). The returned iterator yields reconstructed prefixes
+    /// `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -419,7 +418,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn cover<'a, 'p>(&'a self, prefix: &'p P) -> CoverKeys<'a, 'p, P, ()> {
+    pub fn cover<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, ()> {
         CoverKeys(match prefix.p1_or_p2_ref() {
             Left(p1) => super::map::Cover::P1(self.t1.0.cover(p1)),
             Right(p2) => super::map::Cover::P2(self.t2.0.cover(p2)),
@@ -430,8 +429,8 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// `self.t1.view().union(&other.t1).chain(self.t2.view().union(&other.t2))`.
     ///
     /// If a prefix is present in both trees, the iterator will yield both elements. Otherwise, the
-    /// iterator will yield the element of one map together with the longest prefix match in
-    /// the other map. Elements are of type `P`.
+    /// iterator will yield the element from the side where it is present. Elements are
+    /// reconstructed prefixes `P`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -463,8 +462,8 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// ```
     pub fn union<'a>(&'a self, other: &'a JointPrefixSet<P>) -> Union<'a, P> {
         Union(super::map::Union {
-            i1: Some(self.t1.view().union(&other.t1)),
-            i2: Some(self.t2.view().union(&other.t2)),
+            i1: Some(self.t1.view().union(&other.t1).into_iter()),
+            i2: Some(self.t2.view().union(&other.t2).into_iter()),
         })
     }
 
@@ -508,14 +507,20 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// ```
     pub fn intersection<'a>(&'a self, other: &'a JointPrefixSet<P>) -> Intersection<'a, P> {
         Intersection(super::map::Intersection {
-            i1: Some(self.t1.view().intersection(&other.t1)),
-            i2: Some(self.t2.view().intersection(&other.t2)),
+            i1: self
+                .t1
+                .view()
+                .intersection(&other.t1)
+                .map(IntoIterator::into_iter),
+            i2: self
+                .t2
+                .view()
+                .intersection(&other.t2)
+                .map(IntoIterator::into_iter),
         })
     }
 
-    /// Iterate over the all elements in `self` that are not present in `other`. Each item will
-    /// return a reference to the prefix and value in `self`, as well as the longest prefix match of
-    /// `other`.
+    /// Iterate over the all elements in `self` that are not present in `other`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -542,17 +547,17 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// assert_eq!(
     ///     set_a.difference(&set_b).collect::<Vec<_>>(),
     ///     vec![
-    ///         (net!("192.168.0.0/24"), Some(net!("192.168.0.0/23"))),
-    ///         (net!("192.168.2.0/23"), Some(net!("192.168.0.0/22"))),
-    ///         (net!("2001::1:0:0/97"), Some(net!("2001::1:0:0/96"))),
+    ///         (net!("192.168.0.0/24"), None),
+    ///         (net!("192.168.2.0/23"), None),
+    ///         (net!("2001::1:0:0/97"), None),
     ///     ]
     /// );
     /// # }
     /// ```
     pub fn difference<'a>(&'a self, other: &'a JointPrefixSet<P>) -> Difference<'a, P> {
         Difference(super::map::Difference {
-            i1: Some(self.t1.view().difference(&other.t1)),
-            i2: Some(self.t2.view().difference(&other.t2)),
+            i1: Some(self.t1.view().difference(&other.t1).into_iter()),
+            i2: Some(self.t2.view().difference(&other.t2).into_iter()),
         })
     }
 
@@ -592,8 +597,8 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         other: &'a JointPrefixSet<P>,
     ) -> CoveringDifference<'a, P> {
         CoveringDifference(super::map::CoveringDifference {
-            i1: Some(self.t1.view().covering_difference(&other.t1)),
-            i2: Some(self.t2.view().covering_difference(&other.t2)),
+            i1: Some(self.t1.view().covering_difference(&other.t1).into_iter()),
+            i2: Some(self.t2.view().covering_difference(&other.t2).into_iter()),
         })
     }
 }
@@ -608,8 +613,7 @@ impl<P> PartialEq for JointPrefixSet<P>
 where
     P: JointPrefix + PartialEq,
 {
-    /// Compare two prefix sets to contain the same prefixes. This also compares the host-part of
-    /// the prefix:
+    /// Compare two prefix sets by their canonical reconstructed prefixes.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -617,7 +621,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set1: JointPrefixSet<ipnet::IpNet> = ["10.0.0.0/8".parse()?].into_iter().collect();
     /// let mut set2: JointPrefixSet<ipnet::IpNet> = ["10.0.0.1/8".parse()?].into_iter().collect();
-    /// assert_ne!(set1, set2);
+    /// assert_eq!(set1, set2);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -766,8 +770,9 @@ impl<P: JointPrefix> Iterator for Intersection<'_, P> {
 }
 
 /// An iterator over the difference of two [`JointPrefixSet`]s. The iterator yields prefixes that
-/// are in `self`, but ont in `other`. The iterator also yields the longest prefix match in `other`
-/// (if it exists). The iterator yields first prefixes of `P1`, followed by those of `P2`.
+/// are in `self`, but not in `other`. The iterator item type is `(P, Option<P>)`; plain
+/// difference currently yields `None` for the optional right-side prefix. The iterator yields first
+/// prefixes of `P1`, followed by those of `P2`.
 pub struct Difference<'a, P: JointPrefix>(super::map::Difference<'a, P, (), ()>);
 
 impl<P: JointPrefix> Iterator for Difference<'_, P> {

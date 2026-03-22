@@ -1,1502 +1,899 @@
-//! A [`TrieView`] (or a [`TrieViewMut`]) is a pointer to a specific element in a PrefixTrie, representing the sub-tree
-//! rooted at that node.
+//! Composable trie-view trait for [`crate::PrefixMap`].
 //!
-//! This module allows you to perform Set operations (union, intersection, difference) on
-//! [`PrefixMap`]s and [`PrefixSet`]s, optionally of only a trie-view.
+//! # Architecture
+//!
+//! [`TrieView`] is a **trait** implemented by any cursor (mutable or immutable)
+//! into a prefix trie:
+//! - [`TrieRef`]: an immutable cursor yielding `&T`
+//! - [`TrieRefMut`]: a mutable cursor yielding `&mut T`
+//! - Composed views: [`IntersectionView`], [`UnionView`], [`CoveringUnionView`],
+//!   [`DifferenceView`], [`CoveringDifferenceView`]
+//!
+//! This design makes set operations **composable**:
+//! ```ignore
+//! a.view().intersection(b.view()).intersection(c.view()).iter()
+//! a.view_mut().intersection(b.view()).into_iter()
+//! ```
+//!
+//! # Safety contract for `get_data`, `get_child`, and `reposition`
+//!
+//! The three unsafe primitives carry the following contracts:
+//!
+//! - **`get_data`**: each `data_bit` must be passed **at most once** per view instance.
+//! - **`get_child`**: each `child_bit` must be passed **at most once** per view instance.
+//! - For mutable views, values reached through different data bits, values reachable through
+//!   different child bits, and values stored in a node versus values reachable through its child
+//!   views must be disjoint from each other.
+//! - **`reposition`**: the returned cursor shares the same underlying node as `self`.
+//!   For mutable views the caller must ensure the two cursors' effective bitmaps are
+//!   disjoint, or that the original is not used for data access after the call.
+//!
+//! All default methods uphold these invariants internally.
+//!
+//! # Clone and mutable views
+//!
+//! The `TrieView` trait does **not** require `Self: Clone`. Mutable views
+//! ([`TrieRefMut`]) intentionally do not implement `Clone` to prevent aliasing
+//! `&mut` references. Methods that need to retain an earlier cursor while descending,
+//! such as [`find_lpm`][TrieView::find_lpm], require `Self: Clone`. Methods that
+//! return an element directly, such as [`find_lpm_value`][TrieView::find_lpm_value],
+//! can work with mutable views because they do not need to return a saved cursor.
+//!
+//! Composed views implement `Clone` only when their sides do. This naturally means clone-backed
+//! methods such as [`find_lpm`][TrieView::find_lpm] are unavailable on composed mutable views,
+//! while consuming methods such as [`find_lpm_value`][TrieView::find_lpm_value] remain usable.
 
-#[cfg(test)]
-#[cfg(feature = "ipnet")]
-mod test;
+pub mod covering_difference;
+pub mod covering_union;
+pub mod difference;
+pub mod intersection;
+pub(crate) mod iter;
+pub mod trie_ref;
+pub mod trie_ref_mut;
+pub mod union;
 
-mod difference;
-mod intersection;
-mod union;
-use std::num::NonZeroUsize;
+pub use covering_difference::CoveringDifferenceView;
+pub use covering_union::{CoveringUnionItem, CoveringUnionView};
+pub use difference::DifferenceView;
+pub use intersection::IntersectionView;
+pub use iter::{ViewIter, ViewKeys, ViewValues};
+pub use trie_ref::TrieRef;
+pub use trie_ref_mut::TrieRefMut;
+pub use union::{UnionItem, UnionView};
 
-pub use difference::{
-    CoveringDifference, CoveringDifferenceMut, Difference, DifferenceItem, DifferenceMut,
-    DifferenceMutItem,
-};
-pub use intersection::{Intersection, IntersectionMut};
-pub use union::{Union, UnionItem, UnionMut};
+use num_traits::{One, PrimInt, Zero};
 
 use crate::{
-    inner::{Direction, DirectionForInsert, Node, Table},
-    map::{Iter, IterMut, Keys, Values, ValuesMut},
-    to_right, Prefix, PrefixMap, PrefixSet,
+    prefix::mask_from_prefix_len,
+    Prefix,
+    {
+        node::{child_bit, data_bit, data_lpm_mask, DATA_BIT_TO_PREFIX},
+        table::K,
+    },
 };
 
-/// A trait for creating a [`TrieView`] of `self`.
-pub trait AsView: Sized {
-    /// The prefix type of the returned view
-    type P: Prefix;
-    /// The value type of the returned view
-    type T;
-
-    /// Get a TrieView rooted at the origin (referencing the entire trie).
-    fn view(&self) -> TrieView<'_, Self::P, Self::T>;
-
-    /// Get a TrieView rooted at the given `prefix`. If that `prefix` is not part of the trie, `None`
-    /// is returned. Calling this function is identical to `self.view().find(prefix)`.
-    fn view_at(&self, prefix: Self::P) -> Option<TrieView<'_, Self::P, Self::T>> {
-        self.view().find(prefix)
-    }
-}
-
-impl<'a, P: Prefix + Clone, T> AsView for TrieView<'a, P, T> {
-    type P = P;
-    type T = T;
-
-    fn view(&self) -> TrieView<'a, P, T> {
-        self.clone()
-    }
-}
-
-impl<'a, P: Prefix + Clone, T> AsView for &TrieView<'a, P, T> {
-    type P = P;
-    type T = T;
-
-    fn view(&self) -> TrieView<'a, P, T> {
-        (*self).clone()
-    }
-}
-
-impl<P: Prefix + Clone, T> AsView for TrieViewMut<'_, P, T> {
-    type P = P;
-    type T = T;
-
-    fn view(&self) -> TrieView<'_, P, T> {
-        TrieView {
-            table: self.table,
-            loc: self.loc.clone(),
-        }
-    }
-}
-
-impl<P: Prefix, T> AsView for PrefixMap<P, T> {
-    type P = P;
-    type T = T;
-
-    fn view(&self) -> TrieView<'_, P, T> {
-        TrieView {
-            table: &self.table,
-            loc: ViewLoc::Node(0),
-        }
-    }
-}
-
-impl<P: Prefix> AsView for PrefixSet<P> {
-    type P = P;
-    type T = ();
-
-    fn view(&self) -> TrieView<'_, P, ()> {
-        TrieView {
-            table: &self.0.table,
-            loc: ViewLoc::Node(0),
-        }
-    }
-}
-
-/// A subtree of a prefix-trie rooted at a specific node.
+/// An immutable or mutable view into a (possibly composed) prefix trie.
 ///
-/// The view can point to one of three possible things:
-/// - A node in the tree that is actually present in the map,
-/// - A branching node that does not exist in the map, but is needed for the tree structure (or that
-///   was deleted using the function `remove_keep_tree`)
-/// - A virtual node that does not exist as a node in the tree. This is only the case if you call
-///   [`TrieView::find`] or [`AsView::view_at`] with a node that is not present in the tree, but
-///   that contains elements present in the tree. Virtual nodes are treated as if they are actually
-///   present in the tree as branching nodes.
-pub struct TrieView<'a, P, T> {
-    table: &'a Table<P, T>,
-    loc: ViewLoc<P>,
-}
+/// # Required methods
+///
+/// Eight methods that concrete and composed views must implement:
+/// - **Position**: [`Self::depth`], [`Self::key`], [`Self::prefix_len`]
+/// - **Bitmaps**: [`Self::data_bitmap`], [`Self::child_bitmap`]
+/// - **Primitives** (unsafe): [`Self::get_data`], [`Self::get_child`], [`Self::reposition`]
+///
+/// # Default methods
+///
+/// All other methods (`left`/`right`/`find`/`find_lpm`/`iter`/etc.) are
+/// provided as defaults built from the eight required methods.
+pub trait TrieView<'a>: Sized {
+    /// The prefix type.
+    type P: Prefix;
+    /// The value type yielded by this view (e.g. `&'a T`, `&'a mut T`, `(&'a L, &'a R)`).
+    type T: 'a;
 
-#[derive(Clone, Copy)]
-enum ViewLoc<P> {
-    Node(usize),
-    Virtual(P, NonZeroUsize),
-}
+    /// Depth of the underlying `MultiBitNode`: always a multiple of `K`.
+    fn depth(&self) -> u32;
 
-impl<P> ViewLoc<P> {
-    fn idx(&self) -> usize {
-        match self {
-            ViewLoc::Node(i) => *i,
-            ViewLoc::Virtual(_, i) => i.get(),
-        }
+    /// Accumulated key bits; only the top [`prefix_len`][Self::prefix_len] bits are significant.
+    fn key(&self) -> <Self::P as Prefix>::R;
+
+    /// Binary-tree depth of this view's root position (`depth <= prefix_len < depth + K`).
+    fn prefix_len(&self) -> u32;
+
+    /// Effective data bitmap (node bitmap ANDed with cover mask and any set-op filter).
+    ///
+    /// A set bit at position `b` means there is a value accessible via
+    /// [`get_data(b)`][Self::get_data].
+    fn data_bitmap(&self) -> u32;
+
+    /// Effective child bitmap (node bitmap ANDed with cover mask and any set-op filter).
+    ///
+    /// A set bit at position `b` means there is a non-empty sub-trie reachable via
+    /// [`get_child(b)`][Self::get_child].
+    fn child_bitmap(&self) -> u32;
+
+    /// Return the value at `data_bit`.
+    ///
+    /// # Safety
+    /// Each `data_bit` must be passed to this method **at most once** per view instance.
+    /// For mutable views (`T = &'a mut T`), calling with the same bit twice produces two
+    /// aliasing `&'a mut T` references -> undefined behavior.
+    ///
+    /// # Panics
+    /// May panic or return garbage if `data_bit` is not set in [`data_bitmap`][Self::data_bitmap].
+    unsafe fn get_data(&mut self, data_bit: u32) -> Self::T;
+
+    /// Return a child view at `child_bit`.
+    ///
+    /// The returned view has `depth = self.depth() + K`, `prefix_len = self.depth() + K`,
+    /// and `key = extend_repr(self.key(), self.depth(), child_bit)`.
+    ///
+    /// # Safety
+    /// Each `child_bit` must be passed to this method **at most once** per view instance.
+    /// For mutable views, calling with the same bit twice creates two views with overlapping
+    /// mutable access to the same child node -> undefined behavior. Different bits always
+    /// refer to disjoint child nodes and are safe to combine.
+    ///
+    /// # Panics
+    /// May panic if `child_bit` is not set in [`child_bitmap`][Self::child_bitmap].
+    unsafe fn get_child(&mut self, child_bit: u32) -> Self;
+
+    /// Move the cursor to a different location within the same multibit-node.
+    ///
+    /// The underlying node location (and all data pointers) remain unchanged; only the
+    /// position cursor is updated.
+    ///
+    /// # Safety
+    /// For mutable views, the returned cursor shares the same `raw_ptr` and `node_loc`
+    /// as `self`. The caller must ensure that the returned cursor and `self` are never
+    /// simultaneously used to access overlapping data -> either by ensuring their effective
+    /// bitmaps are disjoint or by not accessing `self`'s data after the call (as in
+    /// `navigate_to` and `step`).
+    unsafe fn reposition(&mut self, key: <Self::P as Prefix>::R, prefix_len: u32);
+
+    // -----------------------------------------------------------------------------
+    // Default implementations
+    // -----------------------------------------------------------------------------
+
+    /// Whether the sub-trie rooted at this view position is non-empty.
+    ///
+    /// A shallow bitmap check: `true` means data or children exist worth exploring.
+    /// `false` means the sub-trie is definitely empty.
+    #[inline]
+    fn is_non_empty(&self) -> bool {
+        self.data_bitmap() != 0 || self.child_bitmap() != 0
     }
-}
 
-impl<P: Copy, T> Copy for TrieView<'_, P, T> {}
-
-impl<P: Clone, T> Clone for TrieView<'_, P, T> {
-    fn clone(&self) -> Self {
-        Self {
-            table: self.table,
-            loc: self.loc.clone(),
-        }
-    }
-}
-
-impl<P: std::fmt::Debug, T: std::fmt::Debug> std::fmt::Debug for TrieView<'_, P, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("View").field(self.prefix()).finish()
-    }
-}
-
-impl<P, L, Rhs> PartialEq<Rhs> for TrieView<'_, P, L>
-where
-    P: Prefix + PartialEq,
-    L: PartialEq<Rhs::T>,
-    Rhs: crate::AsView<P = P>,
-{
-    fn eq(&self, other: &Rhs) -> bool {
-        self.iter()
-            .zip(other.view().iter())
-            .all(|((lp, lt), (rp, rt))| lt == rt && lp == rp)
-    }
-}
-
-impl<P, T> Eq for TrieView<'_, P, T>
-where
-    P: Prefix + Eq + Clone,
-    T: Eq,
-{
-}
-
-impl<'a, P, T> TrieView<'a, P, T>
-where
-    P: Prefix,
-{
-    /// Find `prefix`, returning a new view that points to the first node that is contained
-    /// within that prefix (or `prefix` itself). Only the current view is searched. If `prefix`
-    /// is not present in the current view referenced by `self` (including any sub-prefix of
-    /// `prefix`), the function returns `None`.
+    /// Reconstruct the prefix at this view's root position.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
     /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    ///     (net!("192.168.4.0/22"), 5),
-    /// ]);
-    /// let sub = map.view();
-    /// assert_eq!(
-    ///     sub.find(net!("192.168.0.0/21")).unwrap().keys().collect::<Vec<_>>(),
-    ///     vec![
-    ///         &net!("192.168.0.0/22"),
-    ///         &net!("192.168.0.0/24"),
-    ///         &net!("192.168.2.0/23"),
-    ///         &net!("192.168.4.0/22"),
-    ///     ]
-    /// );
-    /// assert_eq!(
-    ///     sub.find(net!("192.168.0.0/22")).unwrap().keys().collect::<Vec<_>>(),
-    ///     vec![
-    ///         &net!("192.168.0.0/22"),
-    ///         &net!("192.168.0.0/24"),
-    ///         &net!("192.168.2.0/23"),
-    ///     ]
-    /// );
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/20"), 1);
+    /// map.insert(net!("192.168.0.0/22"), 2);
+    ///
+    /// let view = map.view().find(&net!("192.168.0.0/21")).unwrap();
+    /// assert_eq!(view.prefix(), net!("192.168.0.0/21"));
     /// # }
     /// ```
-    pub fn find(&self, prefix: P) -> Option<TrieView<'a, P, T>> {
-        let mut idx = self.loc.idx();
-        loop {
-            match self.table.get_direction_for_insert(idx, &prefix) {
-                DirectionForInsert::Enter { next, .. } => {
-                    idx = next;
-                }
-                DirectionForInsert::Reached => {
-                    return Some(Self {
-                        table: self.table,
-                        loc: ViewLoc::Node(idx),
-                    });
-                }
-                DirectionForInsert::NewChild { right, .. } => {
-                    // view at a virtual node between idx and the right child of idx.
-                    return Some(Self {
-                        table: self.table,
-                        loc: ViewLoc::Virtual(prefix, self.table.get_child(idx, right).unwrap()),
-                    });
-                }
-                DirectionForInsert::NewLeaf { .. } | DirectionForInsert::NewBranch { .. } => {
-                    return None;
-                }
-            }
+    #[inline]
+    fn prefix(&self) -> Self::P {
+        let masked = self.key() & mask_from_prefix_len(self.prefix_len() as u8);
+        Self::P::from_repr_len(masked, self.prefix_len() as u8)
+    }
+
+    /// Return the value stored exactly at this view's root position, if any.
+    ///
+    /// This method consumes the view, which makes it suitable for mutable views.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/20"), 1);
+    /// map.insert(net!("192.168.0.0/22"), 2);
+    ///
+    /// assert_eq!(map.view().find_exact(&net!("192.168.0.0/22")).unwrap().value(), Some(&2));
+    /// assert_eq!(map.view().find(&net!("192.168.0.0/21")).unwrap().value(), None);
+    /// # }
+    /// ```
+    #[inline]
+    fn value(mut self) -> Option<Self::T> {
+        let data_bit = data_bit(self.key(), self.prefix_len());
+        if (self.data_bitmap() >> data_bit) & 1 == 1 {
+            // SAFETY: `value` consumes the view and calls `get_data` for one bit.
+            Some(unsafe { self.get_data(data_bit) })
+        } else {
+            None
         }
     }
 
-    /// Find `prefix`, returning a new view that points to that node. Only the current view is
-    /// searched. If this prefix is not present in the view pointed to by `self`, the function
-    /// returns `None`.
+    /// Return the prefix and value stored exactly at this view's root position, if any.
+    ///
+    /// This method consumes the view, which makes it suitable for mutable views.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
     /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    ///     (net!("192.168.4.0/22"), 5),
-    /// ]);
-    /// let sub = map.view();
-    /// assert!(sub.find_exact(&net!("192.168.0.0/21")).is_none());
-    /// assert_eq!(
-    ///     sub.find_exact(&net!("192.168.0.0/22")).unwrap().keys().collect::<Vec<_>>(),
-    ///     vec![
-    ///         &net!("192.168.0.0/22"),
-    ///         &net!("192.168.0.0/24"),
-    ///         &net!("192.168.2.0/23"),
-    ///     ]
-    /// );
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/22"), 2);
     ///
-    /// // If the prefix does not exist, the function returns `None`:
-    /// assert_eq!(map.view().find_exact(&net!("10.0.0.0/8")), None);
+    /// let view = map.view().find_exact(&net!("192.168.0.0/22")).unwrap();
+    /// assert_eq!(view.prefix_value(), Some((net!("192.168.0.0/22"), &2)));
     /// # }
     /// ```
-    pub fn find_exact(&self, prefix: &P) -> Option<TrieView<'a, P, T>> {
-        let mut idx = self.loc.idx();
-        loop {
-            match self.table.get_direction(idx, prefix) {
-                Direction::Reached => {
-                    return self.table[idx].value.is_some().then_some(Self {
-                        table: self.table,
-                        loc: ViewLoc::Node(idx),
-                    });
-                }
-                Direction::Enter { next, .. } => idx = next.get(),
-                Direction::Missing => return None,
-            }
+    #[inline]
+    fn prefix_value(mut self) -> Option<(Self::P, Self::T)> {
+        let data_bit = data_bit(self.key(), self.prefix_len());
+        if (self.data_bitmap() >> data_bit) & 1 == 1 {
+            let prefix = self.prefix();
+            // SAFETY: `prefix_value` consumes the view and calls `get_data` for one bit.
+            Some((prefix, unsafe { self.get_data(data_bit) }))
+        } else {
+            None
         }
     }
 
-    /// Find the longest match of `prefix`, returning a new view that points to that node. Only
-    /// the given view is searched. If the prefix is not present in the view pointed to by
-    /// `self`, the function returns `None`.
-    ///
-    /// Only views to nodes that are present in the map are returned, not to branching nodes.
+    /// Return a view into the left (0-bit) child sub-trie, or `None` if empty.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
     /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    ///     (net!("192.168.4.0/22"), 5),
-    /// ]);
-    /// let sub = map.view();
-    /// assert_eq!(
-    ///     sub.find_lpm(&net!("192.168.0.0/21")).unwrap().keys().collect::<Vec<_>>(),
-    ///     vec![
-    ///         &net!("192.168.0.0/20"),
-    ///         &net!("192.168.0.0/22"),
-    ///         &net!("192.168.0.0/24"),
-    ///         &net!("192.168.2.0/23"),
-    ///         &net!("192.168.4.0/22"),
-    ///     ]
-    /// );
-    /// assert_eq!(
-    ///     sub.find_lpm(&net!("192.168.0.0/22")).unwrap().keys().collect::<Vec<_>>(),
-    ///     vec![
-    ///         &net!("192.168.0.0/22"),
-    ///         &net!("192.168.0.0/24"),
-    ///         &net!("192.168.2.0/23"),
-    ///     ]
-    /// );
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("10.0.0.0/8"), 1);
+    ///
+    /// let left = map.view().left().unwrap();
+    /// assert_eq!(left.prefix(), net!("0.0.0.0/1"));
+    /// assert_eq!(left.keys().collect::<Vec<_>>(), vec![net!("10.0.0.0/8")]);
     /// # }
     /// ```
-    pub fn find_lpm(&self, prefix: &P) -> Option<TrieView<'a, P, T>> {
-        let mut idx = self.loc.idx();
-        let mut best_match = None;
-        loop {
-            if self.table[idx].value.is_some() {
-                best_match = Some(idx);
+    #[inline]
+    fn left(self) -> Option<Self> {
+        self.step(false)
+    }
+
+    /// Return a view into the right (1-bit) child sub-trie, or `None` if empty.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("128.0.0.0/1"), 1);
+    ///
+    /// let right = map.view().right().unwrap();
+    /// assert_eq!(right.prefix(), net!("128.0.0.0/1"));
+    /// assert_eq!(right.value(), Some(&1));
+    /// # }
+    /// ```
+    #[inline]
+    fn right(self) -> Option<Self> {
+        self.step(true)
+    }
+
+    /// Navigate toward `(target_key, target_len)` from this view's node.
+    ///
+    /// Returns `None` if a required child node does not exist in [`child_bitmap`][Self::child_bitmap].
+    fn navigate_to(mut self, target_key: <Self::P as Prefix>::R, target_len: u32) -> Option<Self> {
+        while target_len >= self.depth() + K {
+            let child_bit = child_bit(self.depth(), target_key);
+            if (self.child_bitmap() >> child_bit) & 1 == 0 {
+                return None;
             }
-            match self.table.get_direction(idx, prefix) {
-                Direction::Enter { next, .. } => idx = next.get(),
-                _ => {
-                    return best_match.map(|idx| Self {
-                        table: self.table,
-                        loc: ViewLoc::Node(idx),
-                    });
-                }
-            }
+            // SAFETY: follows a single path; each child_bit used exactly once per
+            // view instance before view is replaced by the returned child.
+            self = unsafe { self.get_child(child_bit) };
         }
+        // SAFETY: view is replaced by the repositioned cursor; the old position is
+        // not used for data access after this point.
+        unsafe { self.reposition(target_key, target_len) }
+        Some(self)
     }
 
-    /// Get the left branch at the current view. The right branch contains all prefix that are
-    /// contained within `self.prefix()`, and for which the next bit is set to 0.
+    /// Navigate to `prefix` and return the view if the sub-trie is non-empty.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
     /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # {
-    /// let map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     net!("1.0.0.0/8"),
-    ///     net!("1.0.0.0/16"),
-    ///     net!("1.0.128.0/17"),
-    ///     net!("1.1.0.0/16"),
-    /// ]);
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/20"), 1);
+    /// map.insert(net!("192.168.0.0/22"), 2);
+    /// map.insert(net!("192.168.0.0/24"), 3);
     ///
-    /// let view = map.view_at(net!("1.0.0.0/8")).unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
-    ///
-    /// let view = view.left().unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
-    ///
-    /// let view = view.left().unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/16"));
-    ///
-    /// assert!(view.left().is_none());
-    /// # }
-    /// ```
-    pub fn left(&self) -> Option<Self> {
-        match &self.loc {
-            ViewLoc::Node(idx) => Some(Self {
-                table: self.table,
-                loc: ViewLoc::Node(self.table[*idx].left?.get()),
-            }),
-            ViewLoc::Virtual(p, idx) => {
-                // first, check if the node is on the left of the virtual one.
-                if !to_right(p, &self.table[*idx].prefix) {
-                    Some(Self {
-                        table: self.table,
-                        loc: ViewLoc::Node(idx.get()),
-                    })
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    /// Get the right branch at the current view. The right branch contains all prefix that are
-    /// contained within `self.prefix()`, and for which the next bit is set to 1.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     net!("1.0.0.0/8"),
-    ///     net!("1.0.0.0/16"),
-    ///     net!("1.1.0.0/16"),
-    ///     net!("1.1.0.0/24"),
-    /// ]);
-    ///
-    /// let view = map.view_at(net!("1.0.0.0/8")).unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
-    ///
-    /// assert!(view.right().is_none());
-    /// let view = view.left().unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
-    ///
-    /// let view = view.right().unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.1.0.0/16"));
-    ///
-    /// assert!(view.right().is_none());
-    /// # }
-    /// ```
-    pub fn right(&self) -> Option<Self> {
-        match &self.loc {
-            ViewLoc::Node(idx) => Some(Self {
-                table: self.table,
-                loc: ViewLoc::Node(self.table[*idx].right?.get()),
-            }),
-            ViewLoc::Virtual(p, idx) => {
-                // first, check if the node is on the right of the virtual one.
-                if to_right(p, &self.table[*idx].prefix) {
-                    Some(Self {
-                        table: self.table,
-                        loc: ViewLoc::Node(idx.get()),
-                    })
-                } else {
-                    None
-                }
-            }
-        }
-    }
-}
-
-impl<'a, P, T> TrieView<'a, P, T> {
-    /// Iterate over all elements in the given view (including the element itself), in
-    /// lexicographic order.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    /// ]);
-    /// let sub = map.view_at(net!("192.168.0.0/22")).unwrap();
-    /// assert_eq!(
-    ///     sub.iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (&net!("192.168.0.0/22"), &2),
-    ///         (&net!("192.168.0.0/24"), &3),
-    ///         (&net!("192.168.2.0/23"), &4),
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    pub fn iter(&self) -> Iter<'a, P, T> {
-        Iter::new(self.table, vec![self.loc.idx()])
-    }
-
-    /// Iterate over all keys in the given view (including the element itself), in lexicographic
-    /// order.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    /// ]);
-    /// let sub = map.view_at(net!("192.168.0.0/22")).unwrap();
+    /// let sub = map.view().find(&net!("192.168.0.0/21")).unwrap();
     /// assert_eq!(
     ///     sub.keys().collect::<Vec<_>>(),
-    ///     vec![&net!("192.168.0.0/22"), &net!("192.168.0.0/24"), &net!("192.168.2.0/23")]
+    ///     vec![net!("192.168.0.0/22"), net!("192.168.0.0/24")]
     /// );
     /// # }
     /// ```
-    pub fn keys(&self) -> Keys<'a, P, T> {
-        Keys { inner: self.iter() }
-    }
-
-    /// Iterate over all values in the given view (including the element itself), in lexicographic
-    /// order.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    /// ]);
-    /// let sub = map.view_at(net!("192.168.0.0/22")).unwrap();
-    /// assert_eq!(sub.values().collect::<Vec<_>>(), vec![&2, &3, &4]);
-    /// # }
-    /// ```
-    pub fn values(&self) -> Values<'a, P, T> {
-        Values { inner: self.iter() }
-    }
-
-    /// Get a reference to the prefix that is currently pointed at. This prefix might not exist
-    /// explicitly in the map/set, but may be used as a branching node (or when you call
-    /// `remove_keep_tree`).
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    /// ]);
-    ///
-    /// assert_eq!(map.view_at(net!("192.168.0.0/20")).unwrap().prefix(), &net!("192.168.0.0/20"));
-    /// assert_eq!(map.view_at(net!("192.168.0.0/21")).unwrap().prefix(), &net!("192.168.0.0/21"));
-    /// assert_eq!(map.view_at(net!("192.168.0.0/22")).unwrap().prefix(), &net!("192.168.0.0/22"));
-    /// # }
-    /// ```
-    pub fn prefix(&self) -> &P {
-        match &self.loc {
-            ViewLoc::Node(idx) => &self.table[*idx].prefix,
-            ViewLoc::Virtual(p, _) => p,
-        }
-    }
-
-    /// Get a reference to the value at the root of the current view. This function may return
-    /// `None` if `self` is pointing at a branching node.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    /// ]);
-    ///
-    /// assert_eq!(map.view_at(net!("192.168.0.0/20")).unwrap().value(), Some(&1));
-    /// assert_eq!(map.view_at(net!("192.168.0.0/21")).unwrap().value(), None);
-    /// assert_eq!(map.view_at(net!("192.168.0.0/22")).unwrap().value(), Some(&2));
-    /// # }
-    /// ```
-    pub fn value(&self) -> Option<&'a T> {
-        match &self.loc {
-            ViewLoc::Node(idx) => self.table[*idx].value.as_ref(),
-            ViewLoc::Virtual(_, _) => None,
-        }
-    }
-
-    /// Get a reference to both the prefix and the value. This function may return `None` if either
-    /// `self` is pointing at a branching node.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    /// ]);
-    ///
-    /// assert_eq!(
-    ///     map.view_at(net!("192.168.0.0/20")).unwrap().prefix_value(),
-    ///     Some((&net!("192.168.0.0/20"), &1))
-    /// );
-    /// assert_eq!(map.view_at(net!("192.168.0.0/21")).unwrap().prefix_value(), None);
-    /// # }
-    /// ```
-    pub fn prefix_value(&self) -> Option<(&'a P, &'a T)> {
-        match &self.loc {
-            ViewLoc::Node(idx) => self.table[*idx].prefix_value(),
-            ViewLoc::Virtual(_, _) => None,
-        }
-    }
-}
-
-impl<'a, P, T> IntoIterator for TrieView<'a, P, T> {
-    type Item = (&'a P, &'a T);
-    type IntoIter = Iter<'a, P, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-/// A trait for creating a [`TrieViewMut`] of `self`.
-pub trait AsViewMut<'a, P: Prefix, T>: Sized {
-    /// Get a mutable view rooted at the origin (referencing the entire trie).
-    fn view_mut(self) -> TrieViewMut<'a, P, T>;
-
-    /// Get a mutable view rooted at the given `prefix`. If that `prefix` is not part of the trie, `None`
-    /// is returned. Calling this function is identical to `self.view().find(prefix)`.
-    fn view_mut_at(self, prefix: P) -> Option<TrieViewMut<'a, P, T>> {
-        self.view_mut().find(prefix).ok()
-    }
-}
-
-impl<'a, P: Prefix, T> AsViewMut<'a, P, T> for TrieViewMut<'a, P, T> {
-    fn view_mut(self) -> TrieViewMut<'a, P, T> {
-        self
-    }
-}
-
-impl<'a, P: Prefix, T> AsViewMut<'a, P, T> for &'a mut PrefixMap<P, T> {
-    fn view_mut(self) -> TrieViewMut<'a, P, T> {
-        // Safety: We borrow the prefixmap mutably here. Thus, this is the only mutable reference,
-        // and we can create such a view to the root (referencing the entire tree mutably).
-        unsafe { TrieViewMut::new(&self.table, ViewLoc::Node(0)) }
-    }
-}
-
-impl<'a, P: Prefix> AsViewMut<'a, P, ()> for &'a mut PrefixSet<P> {
-    fn view_mut(self) -> TrieViewMut<'a, P, ()> {
-        self.0.view_mut()
-    }
-}
-
-/// A mutable view of a prefix-trie rooted at a specific node.
-///
-/// **Note**: You can get a `TrieView` from `TrieViewMut` by calling [`AsView::view`]. This will
-/// create a view that has an immutable reference to the mutable view. This allows you to temprarily
-/// borrow the subtrie immutably (to perform set operations). Once all references are dropped, you
-/// can still use the mutable reference.
-///
-/// ```
-/// # use prefix_trie::*;
-/// # #[cfg(feature = "ipnet")]
-/// # macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-/// # #[cfg(feature = "ipnet")]
-/// # {
-/// # let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-/// #     (net!("192.168.0.0/20"), 1),
-/// #     (net!("192.168.0.0/22"), 2),
-/// #     (net!("192.168.0.0/24"), 3),
-/// #     (net!("192.168.2.0/23"), 4),
-/// # ]);
-/// # let other: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-/// #     (net!("192.168.0.0/22"), 10),
-/// #     (net!("192.168.0.0/23"), 20),
-/// #     (net!("192.168.2.0/24"), 30),
-/// # ]);
-/// let mut view: TrieViewMut<_, _> = // ...;
-/// # map.view_mut();
-/// // find the first element that is in the view and in another map.
-/// if let Some((p, _, _)) = view.view().union(&other).find_map(|u| u.both()) {
-///     // remove that element from the map.
-///     let p = p.clone();
-///     view.find(p).unwrap().remove();
-/// }
-/// # }
-/// ```
-///
-/// The view can point to one of three possible things:
-/// - A node in the tree that is actually present in the map,
-/// - A branching node that does not exist in the map, but is needed for the tree structure (or that
-///   was deleted using the function `remove_keep_tree`)
-/// - A virtual node that does not exist as a node in the tree. This is only the case if you call
-///   [`TrieViewMut::find`] or [`AsViewMut::view_mut_at`] with a node that is not present in the
-///   tree, but that contains elements present in the tree. Virtual nodes are treated as if they are
-///   actually present in the tree as branching.
-pub struct TrieViewMut<'a, P, T> {
-    table: &'a Table<P, T>,
-    loc: ViewLoc<P>,
-}
-
-impl<'a, P, T> TrieViewMut<'a, P, T> {
-    /// # Safety
-    /// - First, ensure that `'a` is tied to a mutable reference `&'a Table<P, T>`.
-    /// - Second, you must guarantee that, if multiple `TrieViewMut` exist, all of them point to
-    ///   nodes that are located on separate sub-trees. You must guarantee that no `TrieViewMut` is
-    ///   contained within another `TrieViewMut` or `TrieView`. Also, you must guarantee that no
-    ///   `TrieView` is contained within a `TrieViewMut`.
-    unsafe fn new(table: &'a Table<P, T>, loc: ViewLoc<P>) -> Self {
-        Self { table, loc }
-    }
-}
-
-impl<P: std::fmt::Debug, T: std::fmt::Debug> std::fmt::Debug for TrieViewMut<'_, P, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ViewMut").field(self.prefix()).finish()
-    }
-}
-
-impl<P, L, Rhs> PartialEq<Rhs> for TrieViewMut<'_, P, L>
-where
-    P: Prefix + PartialEq + Clone,
-    L: PartialEq<Rhs::T>,
-    Rhs: crate::AsView<P = P>,
-{
-    fn eq(&self, other: &Rhs) -> bool {
-        self.view()
-            .iter()
-            .zip(other.view().iter())
-            .all(|((lp, lt), (rp, rt))| lt == rt && lp == rp)
-    }
-}
-
-impl<P, T> Eq for TrieViewMut<'_, P, T>
-where
-    P: Prefix + Eq + Clone,
-    T: Eq,
-{
-}
-
-impl<P, T> TrieViewMut<'_, P, T>
-where
-    P: Prefix,
-{
-    /// Find `prefix`, returning a new view that points to the first node that is contained
-    /// within that prefix (or `prefix` itself). Only the current view is searched. If `prefix`
-    /// is not present in the current view referenced by `self` (including any sub-prefix of
-    /// `prefix`), the function returns the previous view as `Err(self)`.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    ///     (net!("192.168.4.0/22"), 5),
-    /// ]);
-    /// map.view_mut().find(net!("192.168.0.0/21")).unwrap().values_mut().for_each(|x| *x += 10);
-    /// assert_eq!(
-    ///     map.into_iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (net!("192.168.0.0/20"), 1),
-    ///         (net!("192.168.0.0/22"), 12),
-    ///         (net!("192.168.0.0/24"), 13),
-    ///         (net!("192.168.2.0/23"), 14),
-    ///         (net!("192.168.4.0/22"), 15),
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    pub fn find(self, prefix: P) -> Result<Self, Self> {
-        // Safety: We own the entire sub-tree, including `idx` (which was reached from
-        // `self.idx`). Here, we return a new TrieViewMut pointing to that node (which
-        // is still not covered by any other view), while dropping `self`.
-
-        let mut idx = self.loc.idx();
-        loop {
-            match self.table.get_direction_for_insert(idx, &prefix) {
-                DirectionForInsert::Enter { next, .. } => {
-                    idx = next;
-                }
-                DirectionForInsert::Reached => {
-                    let new_loc = ViewLoc::Node(idx);
-                    return unsafe { Ok(Self::new(self.table, new_loc)) };
-                }
-                DirectionForInsert::NewChild { right, .. } => {
-                    // view at a virtual node between idx and the right child of idx.
-                    let new_loc =
-                        ViewLoc::Virtual(prefix, self.table.get_child(idx, right).unwrap());
-                    return unsafe { Ok(Self::new(self.table, new_loc)) };
-                }
-                DirectionForInsert::NewLeaf { .. } | DirectionForInsert::NewBranch { .. } => {
-                    return Err(self);
-                }
-            }
-        }
-    }
-
-    /// Find `prefix`, returning a new view that points to that node. Only the current view is
-    /// searched. If this prefix is not present in the view pointed to by `self`, the function
-    /// returns the previous view as `Err(self)`.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    ///     (net!("192.168.4.0/22"), 5),
-    /// ]);
-    /// assert!(map.view_mut().find_exact(&net!("192.168.0.0/21")).is_err());
-    /// map.view_mut().find_exact(&net!("192.168.0.0/22")).unwrap().values_mut().for_each(|x| *x += 10);
-    /// assert_eq!(
-    ///     map.into_iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (net!("192.168.0.0/20"), 1),
-    ///         (net!("192.168.0.0/22"), 12),
-    ///         (net!("192.168.0.0/24"), 13),
-    ///         (net!("192.168.2.0/23"), 14),
-    ///         (net!("192.168.4.0/22"), 5),
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    ///
-    /// If the node does not exist, then the function returns the original view:
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// # macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::from_iter([(net!("192.168.0.0/20"), 1)]);
-    /// let view_mut = map.view_mut();
-    /// let view = view_mut.find_exact(&net!("10.0.0.0/8")).unwrap_err();
-    /// assert_eq!(view.view().iter().collect::<Vec<_>>(), vec![(&net!("192.168.0.0/20"), &1)]);
-    /// # }
-    /// ```
-    pub fn find_exact(self, prefix: &P) -> Result<Self, Self> {
-        let mut idx = self.loc.idx();
-        loop {
-            match self.table.get_direction(idx, prefix) {
-                Direction::Reached => {
-                    return if self.table[idx].value.is_some() {
-                        // Safety: We own the entire sub-tree, including `idx` (which was reached
-                        // from `self.idx`). Here, we return a new TrieViewMut pointing to that node
-                        // (which is still not covered by any other view), while dropping `self`.
-                        unsafe { Ok(Self::new(self.table, ViewLoc::Node(idx))) }
-                    } else {
-                        Err(self)
-                    };
-                }
-                Direction::Enter { next, .. } => idx = next.get(),
-                Direction::Missing => return Err(self),
-            }
-        }
-    }
-
-    /// Find the longest match of `prefix`, returning a new view that points to that node. Only
-    /// the given view is searched. If the prefix is not present in the view pointed to by
-    /// `self`, the function returns the previous view as `Err(self)`.
-    ///
-    /// Only views to nodes that are present in the map are returned, not to branching nodes.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    ///     (net!("192.168.4.0/22"), 5),
-    /// ]);
-    /// map.view_mut().find_lpm(&net!("192.168.0.0/22")).unwrap().values_mut().for_each(|x| *x += 10);
-    /// map.view_mut().find_lpm(&net!("192.168.0.0/23")).unwrap().values_mut().for_each(|x| *x += 100);
-    /// assert_eq!(
-    ///     map.into_iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (net!("192.168.0.0/20"), 1),
-    ///         (net!("192.168.0.0/22"), 112),
-    ///         (net!("192.168.0.0/24"), 113),
-    ///         (net!("192.168.2.0/23"), 114),
-    ///         (net!("192.168.4.0/22"), 5),
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    ///
-    /// If the node does not exist, then the function returns the original view:
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// # macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::from_iter([(net!("192.168.0.0/20"), 1)]);
-    /// let view_mut = map.view_mut();
-    /// let view = view_mut.find_lpm(&net!("10.0.0.0/8")).unwrap_err();
-    /// assert_eq!(view.view().iter().collect::<Vec<_>>(), vec![(&net!("192.168.0.0/20"), &1)]);
-    /// # }
-    /// ```
-    pub fn find_lpm(self, prefix: &P) -> Result<Self, Self> {
-        let mut idx = self.loc.idx();
-        let mut best_match = None;
-        loop {
-            if self.table[idx].value.is_some() {
-                best_match = Some(idx);
-            }
-            match self.table.get_direction(idx, prefix) {
-                Direction::Enter { next, .. } => idx = next.get(),
-                _ => {
-                    return if let Some(idx) = best_match {
-                        // Safety: We own the entire sub-tree, including `idx` (which was reached
-                        // from `self.idx`). Here, we return a new TrieViewMut pointing to that node
-                        // (which is still not covered by any other view), while dropping `self`.
-                        unsafe { Ok(Self::new(self.table, ViewLoc::Node(idx))) }
-                    } else {
-                        Err(self)
-                    };
-                }
-            }
-        }
-    }
-
-    /// Get the left branch at the current view. The right branch contains all prefix that are
-    /// contained within `self.prefix()`, and for which the next bit is set to 0. If the node has no
-    /// children to the left, the function will return the previous view as `Err(self)`.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     net!("1.0.0.0/8"),
-    ///     net!("1.0.0.0/16"),
-    ///     net!("1.0.128.0/17"),
-    ///     net!("1.1.0.0/16"),
-    /// ]);
-    ///
-    /// let view = map.view_mut_at(net!("1.0.0.0/8")).unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
-    ///
-    /// let view = view.left().unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
-    ///
-    /// let view = view.left().unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/16"));
-    ///
-    /// assert!(view.left().is_err());
-    /// # }
-    /// ```
-    pub fn left(self) -> Result<Self, Self> {
-        // Safety: We assume `self` was created while satisfying the safety conditions from
-        // `TrieViewMut::new`. Thus, `self` is the only TrieView referencing that root. Here, we
-        // construct a new `TrieViewMut` of the left child while destroying `self`, and thus,
-        // the safety conditions remain satisfied.
-
-        let left_idx = match &self.loc {
-            ViewLoc::Node(idx) => self.table[*idx].left,
-            ViewLoc::Virtual(p, idx) => {
-                // first, check if the node is on the left of the virtual one.
-                if !to_right(p, &self.table[*idx].prefix) {
-                    Some(*idx)
-                } else {
-                    None
-                }
-            }
-        };
-
-        if let Some(idx) = left_idx {
-            unsafe { Ok(Self::new(self.table, ViewLoc::Node(idx.get()))) }
+    #[inline]
+    fn find(self, prefix: &Self::P) -> Option<Self> {
+        let view = self.navigate_to(prefix.mask(), prefix.prefix_len() as u32)?;
+        if view.is_non_empty() {
+            Some(view)
         } else {
-            Err(self)
+            None
         }
     }
 
-    /// Get the right branch at the current view. The right branch contains all prefix that are
-    /// contained within `self.prefix()`, and for which the next bit is set to 1. If the node has no
-    /// children to the right, the function will return the previous view as `Err(self)`.
+    /// Navigate to `prefix` and return the view only if a value is stored exactly there.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
     /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # {
-    /// let mut map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     net!("1.0.0.0/8"),
-    ///     net!("1.0.0.0/16"),
-    ///     net!("1.1.0.0/16"),
-    ///     net!("1.1.0.0/24"),
-    /// ]);
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/20"), 1);
+    /// map.insert(net!("192.168.0.0/22"), 2);
     ///
-    /// let view = map.view_mut_at(net!("1.0.0.0/8")).unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
-    ///
-    /// let view = view.right().unwrap_err(); // there is no view on the right.
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/8"));
-    ///
-    /// let view = view.left().unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.0.0.0/15"));
-    ///
-    /// let view = view.right().unwrap();
-    /// assert_eq!(view.prefix(), &net!("1.1.0.0/16"));
-    ///
-    /// assert!(view.right().is_err());
+    /// assert!(map.view().find_exact(&net!("192.168.0.0/21")).is_none());
+    /// assert_eq!(
+    ///     map.view().find_exact(&net!("192.168.0.0/22")).unwrap().value(),
+    ///     Some(&2)
+    /// );
     /// # }
     /// ```
-    pub fn right(self) -> Result<Self, Self> {
-        // Safety: We assume `self` was created while satisfying the safety conditions from
-        // `TrieViewMut::new`. Thus, `self` is the only TrieView referencing that root. Here, we
-        // construct a new `TrieViewMut` of the right child while destroying `self`, and thus,
-        // the safety conditions remain satisfied.
-
-        let right_idx = match &self.loc {
-            ViewLoc::Node(idx) => self.table[*idx].right,
-            ViewLoc::Virtual(p, idx) => {
-                // first, check if the node is on the right of the virtual one.
-                if to_right(p, &self.table[*idx].prefix) {
-                    Some(*idx)
-                } else {
-                    None
-                }
-            }
-        };
-
-        if let Some(idx) = right_idx {
-            unsafe { Ok(Self::new(self.table, ViewLoc::Node(idx.get()))) }
+    #[inline]
+    fn find_exact(self, prefix: &Self::P) -> Option<Self> {
+        let view = self.navigate_to(prefix.mask(), prefix.prefix_len() as u32)?;
+        let data_bit = data_bit(view.key(), view.prefix_len());
+        if (view.data_bitmap() >> data_bit) & 1 == 1 {
+            Some(view)
         } else {
-            Err(self)
+            None
         }
     }
 
-    /// Returns `True` whether `self` has children to the left.
+    /// Navigate to `prefix` and return its prefix/value pair if a value is stored exactly there.
+    ///
+    /// This method consumes the view and does not require `Self: Clone`, so it also works with
+    /// mutable views.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
     /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # {
-    /// let mut map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     net!("1.0.0.0/8"),
-    ///     net!("1.0.0.0/9"),
-    /// ]);
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/22"), 2);
     ///
-    /// assert!(map.view_mut_at(net!("1.0.0.0/8")).unwrap().has_left());
-    /// assert!(!map.view_mut_at(net!("1.0.0.0/9")).unwrap().has_left());
+    /// assert_eq!(
+    ///     map.view().find_exact_value(&net!("192.168.0.0/22")),
+    ///     Some((net!("192.168.0.0/22"), &2))
+    /// );
+    /// assert_eq!(map.view().find_exact_value(&net!("192.168.0.0/21")), None);
     /// # }
     /// ```
-    pub fn has_left(&self) -> bool {
-        match &self.loc {
-            ViewLoc::Node(idx) => self.table[*idx].left.is_some(),
-            ViewLoc::Virtual(p, idx) => {
-                // first, check if the node is on the right of the virtual one.
-                !to_right(p, &self.table[*idx].prefix)
+    #[inline]
+    fn find_exact_value(self, prefix: &Self::P) -> Option<(Self::P, Self::T)> {
+        let view = self.navigate_to(prefix.mask(), prefix.prefix_len() as u32)?;
+        view.prefix_value()
+    }
+
+    /// Find the view pointing at the longest prefix match for `prefix`.
+    ///
+    /// This method requires `Self: Clone` because the search must remember the best matching view
+    /// while it continues descending toward more-specific prefixes.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/20"), 1);
+    /// map.insert(net!("192.168.0.0/22"), 2);
+    ///
+    /// let view = map.view().find_lpm(&net!("192.168.0.0/21")).unwrap();
+    /// assert_eq!(view.prefix(), net!("192.168.0.0/20"));
+    /// assert_eq!(view.value(), Some(&1));
+    /// # }
+    /// ```
+    fn find_lpm(mut self, prefix: &Self::P) -> Option<Self>
+    where
+        Self: Clone,
+    {
+        let target_key = prefix.mask();
+        let target_len = prefix.prefix_len() as u32;
+        if !contains_key::<Self::P>(self.key(), self.prefix_len(), target_key, target_len) {
+            return None;
+        }
+        let mut best = None;
+
+        loop {
+            if let Some(data_bit) = lpm_data_bit(&self, target_key, target_len) {
+                let prefix = reconstruct_prefix::<Self::P>(self.depth(), self.key(), data_bit);
+                let mut view = self.clone();
+                // SAFETY: the cloned cursor is moved within its current multibit node.
+                unsafe { view.reposition(prefix.mask(), prefix.prefix_len() as u32) };
+                best = Some(view);
             }
+
+            if target_len < self.depth() + K {
+                return best;
+            }
+
+            let child_bit = child_bit(self.depth(), target_key);
+            if (self.child_bitmap() >> child_bit) & 1 == 0 {
+                return best;
+            }
+
+            // SAFETY: follows a single path; each child bit is used at most once per view.
+            self = unsafe { self.get_child(child_bit) };
         }
     }
 
-    /// Returns `True` whether `self` has children to the right.
+    /// Find the longest prefix match for `prefix` and return its prefix/value pair.
+    ///
+    /// This method does not require `Self: Clone`; it can therefore be used with views that yield
+    /// mutable references. It consumes the view and only returns the matched element, not a cursor.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
     /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # {
-    /// let mut map: PrefixSet<ipnet::Ipv4Net> = PrefixSet::from_iter([
-    ///     net!("1.0.0.0/8"),
-    ///     net!("1.128.0.0/9"),
-    /// ]);
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/20"), 1);
+    /// map.insert(net!("192.168.0.0/22"), 2);
     ///
-    /// assert!(map.view_mut_at(net!("1.0.0.0/8")).unwrap().has_right());
-    /// assert!(!map.view_mut_at(net!("1.128.0.0/9")).unwrap().has_right());
+    /// let (prefix, value) = (&mut map)
+    ///     .view()
+    ///     .find_lpm_value(&net!("192.168.0.0/21"))
+    ///     .unwrap();
+    ///
+    /// assert_eq!(prefix, net!("192.168.0.0/20"));
+    /// *value += 10;
+    /// assert_eq!(map.get(&net!("192.168.0.0/20")), Some(&11));
     /// # }
     /// ```
-    pub fn has_right(&self) -> bool {
-        match &self.loc {
-            ViewLoc::Node(idx) => self.table[*idx].right.is_some(),
-            ViewLoc::Virtual(p, idx) => {
-                // first, check if the node is on the right of the virtual one.
-                to_right(p, &self.table[*idx].prefix)
+    fn find_lpm_value(mut self, prefix: &Self::P) -> Option<(Self::P, Self::T)> {
+        let target_key = prefix.mask();
+        let target_len = prefix.prefix_len() as u32;
+        if !contains_key::<Self::P>(self.key(), self.prefix_len(), target_key, target_len) {
+            return None;
+        }
+        let mut best = None;
+
+        loop {
+            if let Some(data_bit) = lpm_data_bit(&self, target_key, target_len) {
+                let prefix = reconstruct_prefix::<Self::P>(self.depth(), self.key(), data_bit);
+                drop(best.take());
+                // SAFETY: each node on the target path is visited at most once, and we keep only
+                // the most-specific matched value.
+                best = Some((prefix, unsafe { self.get_data(data_bit) }));
             }
+
+            if target_len < self.depth() + K {
+                return best;
+            }
+
+            let child_bit = child_bit(self.depth(), target_key);
+            if (self.child_bitmap() >> child_bit) & 1 == 0 {
+                return best;
+            }
+
+            // SAFETY: follows a single path; each child bit is used at most once per view.
+            self = unsafe { self.get_child(child_bit) };
         }
     }
 
-    /// Split `self` into two views, one pointing to the left and one pointing to the right child.
+    /// Return an iterator over all `(prefix, value)` pairs in this sub-trie.
     ///
     /// ```
-    /// # use prefix_trie::*;
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
     /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, &'static str> = PrefixMap::from_iter([
-    ///     (net!("1.0.0.0/8"), "a"),
-    ///     (net!("1.0.0.0/9"), "b"),
-    ///     (net!("1.128.0.0/9"), "c"),
-    ///     (net!("1.128.0.0/10"), "d"),
-    /// ]);
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/20"), 1);
+    /// map.insert(net!("192.168.0.0/22"), 2);
+    /// map.insert(net!("192.168.0.0/24"), 3);
     ///
-    /// let view_at_a = map.view_mut_at(net!("1.0.0.0/8")).unwrap();
-    /// assert_eq!(view_at_a.value(), Some(&"a"));
-    ///
-    /// let (Some(view_at_b), Some(view_at_c)) = view_at_a.split() else { unreachable!() };
-    /// assert_eq!(view_at_b.value(), Some(&"b"));
-    /// assert_eq!(view_at_c.value(), Some(&"c"));
-    ///
-    /// let (Some(view_at_d), None) = view_at_c.split() else { unreachable!() };
-    /// assert_eq!(view_at_d.value(), Some(&"d"));
+    /// let sub = map.view().find(&net!("192.168.0.0/22")).unwrap();
+    /// assert_eq!(
+    ///     sub.iter().collect::<Vec<_>>(),
+    ///     vec![(net!("192.168.0.0/22"), &2), (net!("192.168.0.0/24"), &3)]
+    /// );
     /// # }
     /// ```
-    pub fn split(self) -> (Option<Self>, Option<Self>) {
-        let (left, right) = match &self.loc {
-            ViewLoc::Node(idx) => (self.table[*idx].left, self.table[*idx].right),
-            ViewLoc::Virtual(p, idx) => {
-                // check if the node is on the right or the left of the virtual one.
-                if to_right(p, &self.table[*idx].prefix) {
-                    (None, Some(*idx))
-                } else {
-                    (Some(*idx), None)
-                }
-            }
+    #[inline]
+    fn iter(self) -> ViewIter<'a, Self> {
+        ViewIter::new(self)
+    }
+
+    /// Return an iterator over all prefixes in this sub-trie.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/20"), 1);
+    /// map.insert(net!("192.168.0.0/22"), 2);
+    /// map.insert(net!("192.168.0.0/24"), 3);
+    ///
+    /// let sub = map.view().find(&net!("192.168.0.0/22")).unwrap();
+    /// assert_eq!(
+    ///     sub.keys().collect::<Vec<_>>(),
+    ///     vec![net!("192.168.0.0/22"), net!("192.168.0.0/24")]
+    /// );
+    /// # }
+    /// ```
+    #[inline]
+    fn keys(self) -> ViewKeys<'a, Self> {
+        ViewKeys::new(self)
+    }
+
+    /// Return an iterator over all values in this sub-trie.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("192.168.0.0/20"), 1);
+    /// map.insert(net!("192.168.0.0/22"), 2);
+    /// map.insert(net!("192.168.0.0/24"), 3);
+    ///
+    /// let sub = map.view().find(&net!("192.168.0.0/22")).unwrap();
+    /// assert_eq!(sub.values().copied().collect::<Vec<_>>(), vec![2, 3]);
+    /// # }
+    /// ```
+    #[inline]
+    fn values(self) -> ViewValues<'a, Self> {
+        ViewValues::new(self)
+    }
+
+    /// Return the intersection of `self` and `other` as a view, or `None` if disjoint.
+    ///
+    /// The returned [`IntersectionView`] iterates over every prefix present in **both**
+    /// sub-tries, yielding `(prefix, (left_value, right_value))` in lexicographic order.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut left = PrefixMap::new();
+    /// left.insert(net!("10.0.0.0/8"), 1);
+    /// left.insert(net!("10.1.0.0/16"), 2);
+    ///
+    /// let mut right = PrefixMap::new();
+    /// right.insert(net!("10.1.0.0/16"), 20);
+    /// right.insert(net!("10.1.1.0/24"), 30);
+    ///
+    /// let got: Vec<_> = left
+    ///     .view()
+    ///     .intersection(&right)
+    ///     .unwrap()
+    ///     .iter()
+    ///     .map(|(prefix, (left, right))| (prefix, *left, *right))
+    ///     .collect();
+    ///
+    /// assert_eq!(got, vec![(net!("10.1.0.0/16"), 2, 20)]);
+    /// # }
+    /// ```
+    #[inline]
+    fn intersection<R>(self, other: R) -> Option<IntersectionView<'a, Self, R::View>>
+    where
+        R: AsView<'a, P = Self::P>,
+    {
+        IntersectionView::new(self, other.view())
+    }
+
+    /// Return the union of `self` and `other` as a view.
+    ///
+    /// The returned [`UnionView`] iterates over every prefix present in **either** sub-trie,
+    /// yielding `(prefix, UnionItem)` in lexicographic order.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # use prefix_trie::trieview::union::UnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut left = PrefixMap::new();
+    /// left.insert(net!("10.0.0.0/8"), 1);
+    /// left.insert(net!("10.1.0.0/16"), 2);
+    ///
+    /// let mut right = PrefixMap::new();
+    /// right.insert(net!("10.1.0.0/16"), 20);
+    /// right.insert(net!("10.1.1.0/24"), 30);
+    ///
+    /// let got: Vec<_> = left
+    ///     .view()
+    ///     .union(&right)
+    ///     .iter()
+    ///     .map(|(prefix, item)| match item {
+    ///         UnionItem::Left(left) => (prefix, Some(*left), None),
+    ///         UnionItem::Right(right) => (prefix, None, Some(*right)),
+    ///         UnionItem::Both(left, right) => (prefix, Some(*left), Some(*right)),
+    ///     })
+    ///     .collect();
+    ///
+    /// assert_eq!(
+    ///     got,
+    ///     vec![
+    ///         (net!("10.0.0.0/8"), Some(1), None),
+    ///         (net!("10.1.0.0/16"), Some(2), Some(20)),
+    ///         (net!("10.1.1.0/24"), None, Some(30)),
+    ///     ]
+    /// );
+    /// # }
+    /// ```
+    #[inline]
+    fn union<R>(self, other: R) -> UnionView<'a, Self, R::View>
+    where
+        R: AsView<'a, P = Self::P>,
+    {
+        UnionView::new(self, other.view())
+    }
+
+    /// Return the covering union of `self` and `other` as a view.
+    ///
+    /// The returned [`CoveringUnionView`] iterates over every prefix present in either sub-trie.
+    /// For prefixes present on only one side, the yielded item includes the longest prefix match
+    /// from the opposite side when one exists inside that opposite view.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # use prefix_trie::trieview::CoveringUnionItem;
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut left = PrefixMap::new();
+    /// left.insert(net!("10.1.0.0/16"), 2);
+    ///
+    /// let mut right = PrefixMap::new();
+    /// right.insert(net!("10.0.0.0/8"), 10);
+    ///
+    /// let (_, item) = left
+    ///     .view()
+    ///     .covering_union(&right)
+    ///     .iter()
+    ///     .find(|(prefix, _)| prefix == &net!("10.1.0.0/16"))
+    ///     .unwrap();
+    ///
+    /// match item {
+    ///     CoveringUnionItem::Left {
+    ///         left,
+    ///         right_lpm: Some((right_prefix, right)),
+    ///     } => {
+    ///         assert_eq!(*left, 2);
+    ///         assert_eq!(right_prefix, net!("10.0.0.0/8"));
+    ///         assert_eq!(*right, 10);
+    ///     }
+    ///     _ => panic!("expected a left-only prefix covered by the right side"),
+    /// }
+    /// # }
+    /// ```
+    #[inline]
+    fn covering_union<R>(self, other: R) -> CoveringUnionView<'a, Self, R::View>
+    where
+        Self: Clone,
+        R: AsView<'a, P = Self::P>,
+        R::View: Clone,
+    {
+        CoveringUnionView::new(self, other.view())
+    }
+
+    /// Return the difference of `self` minus `other` as a view.
+    ///
+    /// The returned [`DifferenceView`] iterates over every prefix present in `self` but
+    /// **not** in `other`, yielding values from `self` in lexicographic order.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut left = PrefixMap::new();
+    /// left.insert(net!("10.0.0.0/8"), 1);
+    /// left.insert(net!("10.1.0.0/16"), 2);
+    /// left.insert(net!("10.1.1.0/24"), 3);
+    ///
+    /// let mut right = PrefixMap::new();
+    /// right.insert(net!("10.1.0.0/16"), 20);
+    ///
+    /// let got: Vec<_> = left
+    ///     .view()
+    ///     .difference(&right)
+    ///     .iter()
+    ///     .map(|(prefix, value)| (prefix, *value))
+    ///     .collect();
+    ///
+    /// assert_eq!(got, vec![(net!("10.0.0.0/8"), 1), (net!("10.1.1.0/24"), 3)]);
+    /// # }
+    /// ```
+    #[inline]
+    fn difference<R>(self, other: R) -> DifferenceView<'a, Self, R::View>
+    where
+        R: AsView<'a, P = Self::P>,
+    {
+        DifferenceView::new(self, other.view())
+    }
+
+    /// Return the covering difference of `self` minus `other` as a view.
+    ///
+    /// Iterates over every prefix `P_l` in `self` for which no covering prefix `P_r`
+    /// exists in `other` (`P_r.len ≤ P_l.len` and `P_r` matches `P_l`'s leading bits).
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut left = PrefixMap::new();
+    /// left.insert(net!("10.0.0.0/8"), 1);
+    /// left.insert(net!("10.1.0.0/16"), 2);
+    /// left.insert(net!("10.1.1.0/24"), 3);
+    ///
+    /// let mut right = PrefixMap::new();
+    /// right.insert(net!("10.1.0.0/16"), 20);
+    ///
+    /// let got: Vec<_> = left
+    ///     .view()
+    ///     .covering_difference(&right)
+    ///     .iter()
+    ///     .map(|(prefix, value)| (prefix, *value))
+    ///     .collect();
+    ///
+    /// assert_eq!(got, vec![(net!("10.0.0.0/8"), 1)]);
+    /// # }
+    /// ```
+    #[inline]
+    fn covering_difference<R>(self, other: R) -> CoveringDifferenceView<'a, Self, R::View>
+    where
+        R: AsView<'a, P = Self::P>,
+    {
+        CoveringDifferenceView::new(self, other.view())
+    }
+
+    // -----------------------------------------------------------------------------
+    // Private helper
+    // -----------------------------------------------------------------------------
+
+    /// Step one binary level deeper, going left (0-bit) or right (1-bit).
+    fn step(mut self, go_right: bool) -> Option<Self> {
+        let new_prefix_len = self.prefix_len() + 1;
+        let new_key = if go_right {
+            let bit_pos = <Self::P as Prefix>::R::zero().count_zeros() - self.prefix_len() - 1;
+            self.key() | <Self::P as Prefix>::R::one().unsigned_shl(bit_pos)
+        } else {
+            self.key()
         };
 
-        // Safety: We assume `self` was created while satisfying the safety conditions from
-        // `TrieViewMut::new`. Thus, `self` is the only TrieView referencing that root. Here, we
-        // construct two new `TrieViewMut`s, one on the left and one on the right. Thus, they are
-        // siblings and don't overlap. Further, we destroy `self`, ensuring that the safety
-        // guarantees remain satisfied.
-        unsafe {
-            (
-                left.map(|idx| Self::new(self.table, ViewLoc::Node(idx.get()))),
-                right.map(|idx| Self::new(self.table, ViewLoc::Node(idx.get()))),
-            )
+        if new_prefix_len < self.depth() + K {
+            // Intra-node: narrow the position cursor within the same node.
+            // SAFETY: self is not used for data access after this; only `view` is used.
+            unsafe { self.reposition(new_key, new_prefix_len) };
+            if self.is_non_empty() {
+                Some(self)
+            } else {
+                None
+            }
+        } else {
+            // Cross into a child node (new_prefix_len == depth + K).
+            let child_bit = child_bit(self.depth(), new_key);
+            if (self.child_bitmap() >> child_bit) & 1 == 0 {
+                return None;
+            }
+            // SAFETY: step is called for one direction at a time; child_bit is used once.
+            Some(unsafe { self.get_child(child_bit) })
         }
     }
 }
 
-impl<P, T> TrieViewMut<'_, P, T> {
-    /// Iterate over all elements in the given view (including the element itself), in
-    /// lexicographic order, with a mutable reference to the value.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("1.0.0.0/8"), 1),
-    ///     (net!("1.0.0.0/16"), 2),
-    ///     (net!("1.0.1.0/24"), 3),
-    ///     (net!("1.1.0.0/16"), 4),
-    /// ]);
-    ///
-    /// map.view_mut_at(net!("1.0.0.0/16")).unwrap().iter_mut().for_each(|(_, x)| *x *= 10);
-    /// assert_eq!(
-    ///     map.into_iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (net!("1.0.0.0/8"), 1),
-    ///         (net!("1.0.0.0/16"), 20),
-    ///         (net!("1.0.1.0/24"), 30),
-    ///         (net!("1.1.0.0/16"), 4),
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    pub fn iter_mut(&mut self) -> IterMut<'_, P, T> {
-        // Safety: Here, we assume the TrieView was created using the `TrieViewMut::new` function,
-        // and that the safety conditions from that function were satisfied. These safety conditions
-        // comply with the safety conditions from `IterMut::new()`. Further, `self` is borrowed
-        // mutably for the lifetime of the mutable iterator.
-        unsafe { IterMut::new(self.table, vec![self.loc.idx()]) }
+fn contains_key<P: Prefix>(
+    root_key: P::R,
+    root_len: u32,
+    target_key: P::R,
+    target_len: u32,
+) -> bool {
+    if root_len > target_len {
+        return false;
     }
+    let mask = mask_from_prefix_len(root_len as u8);
+    root_key & mask == target_key & mask
+}
 
-    /// Iterate over mutable references to all values in the given view (including the element
-    /// itself), in lexicographic order.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    /// ]);
-    ///
-    /// map.view_mut_at(net!("192.168.0.0/22")).unwrap().values_mut().for_each(|x| *x *= 10);
-    /// assert_eq!(
-    ///     map.into_iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (net!("192.168.0.0/20"), 1),
-    ///         (net!("192.168.0.0/22"), 20),
-    ///         (net!("192.168.0.0/24"), 30),
-    ///         (net!("192.168.2.0/23"), 40),
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    pub fn values_mut(&mut self) -> ValuesMut<'_, P, T> {
-        ValuesMut {
-            inner: self.iter_mut(),
-        }
-    }
-
-    /// Get a reference to the prefix that is currently pointed at. This prefix might not exist
-    /// explicitly in the map/set. Instead, it might be a branching or a virtual node. In both
-    /// cases, this function returns the prefix of that node.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("1.0.0.0/20"), 1),
-    ///     (net!("1.0.0.0/22"), 2),
-    /// ]);
-    ///
-    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/20")).unwrap().prefix(), &net!("1.0.0.0/20"));
-    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/21")).unwrap().prefix(), &net!("1.0.0.0/21"));
-    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/22")).unwrap().prefix(), &net!("1.0.0.0/22"));
-    /// # }
-    /// ```
-    pub fn prefix(&self) -> &P {
-        match &self.loc {
-            ViewLoc::Node(idx) => &self.table[*idx].prefix,
-            ViewLoc::Virtual(p, _) => p,
-        }
-    }
-
-    /// Get a reference to the value at the root of the current view. This function may return
-    /// `None` if `self` is pointing at a branching or a virtual node.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("1.0.0.0/20"), 1),
-    ///     (net!("1.0.0.0/22"), 2),
-    /// ]);
-    ///
-    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/20")).unwrap().value(), Some(&1));
-    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/21")).unwrap().value(), None);
-    /// assert_eq!(map.view_mut_at(net!("1.0.0.0/22")).unwrap().value(), Some(&2));
-    /// # }
-    /// ```
-    pub fn value(&self) -> Option<&T> {
-        match &self.loc {
-            ViewLoc::Node(idx) => self.table[*idx].value.as_ref(),
-            ViewLoc::Virtual(_, _) => None,
-        }
-    }
-
-    fn node_mut(&mut self) -> Option<&mut Node<P, T>> {
-        // Safety: In the following, we assume that the safety conditions of `TrieViewMut::new` were
-        // satisfied. In that case, we know that we are the only ones owning a mutable reference to
-        // a tree that contains that root node. Therefore, it is safe to take a mutable reference of
-        // that value.
-        match &self.loc {
-            ViewLoc::Node(idx) => unsafe { Some(self.table.get_mut(*idx)) },
-            ViewLoc::Virtual(_, _) => None,
-        }
-    }
-
-    /// Get a mutable reference to the value at the root of the current view. This function may
-    /// return `None` if `self` is pointing at a branching node.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("1.0.0.0/20"), 1),
-    ///     (net!("1.0.0.0/22"), 2),
-    /// ]);
-    /// *map.view_mut_at(net!("1.0.0.0/22")).unwrap().value_mut().unwrap() *= 10;
-    /// assert_eq!(Vec::from_iter(map), vec![(net!("1.0.0.0/20"), 1), (net!("1.0.0.0/22"), 20)]);
-    /// # }
-    /// ```
-    pub fn value_mut(&mut self) -> Option<&mut T> {
-        self.node_mut()?.value.as_mut()
-    }
-
-    /// Get a reference to both the prefix and the value. This function may return `None` if either
-    /// `self` is pointing at a branching node.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    /// ]);
-    ///
-    /// assert_eq!(
-    ///     map.view_mut_at(net!("192.168.0.0/20")).unwrap().prefix_value(),
-    ///     Some((&net!("192.168.0.0/20"), &1))
-    /// );
-    /// assert_eq!(map.view_mut_at(net!("192.168.0.0/21")).unwrap().prefix_value(), None);
-    /// # }
-    /// ```
-    pub fn prefix_value(&self) -> Option<(&P, &T)> {
-        match &self.loc {
-            ViewLoc::Node(idx) => self.table[*idx].prefix_value(),
-            ViewLoc::Virtual(_, _) => None,
-        }
-    }
-
-    /// Get a reference to both the prefix and the value (the latter is mutable). This function may
-    /// return `None` if either `self` is pointing at a branching node.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("1.0.0.0/20"), 1),
-    ///     (net!("1.0.0.0/22"), 2),
-    /// ]);
-    /// *map.view_mut_at(net!("1.0.0.0/22")).unwrap().prefix_value_mut().unwrap().1 *= 10;
-    /// assert_eq!(Vec::from_iter(map), vec![(net!("1.0.0.0/20"), 1), (net!("1.0.0.0/22"), 20)]);
-    /// # }
-    /// ```
-    pub fn prefix_value_mut(&mut self) -> Option<(&P, &mut T)> {
-        self.node_mut()?.prefix_value_mut()
-    }
-
-    /// Remove the element at the current position of the view. The tree structure is not modified
-    /// (similar to calling [`PrefixMap::remove_keep_tree`].)
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    ///     (net!("192.168.4.0/22"), 5),
-    /// ]);
-    /// let mut view = map.view_mut_at(net!("192.168.0.0/22")).unwrap();
-    /// assert_eq!(view.remove(), Some(2));
-    /// assert_eq!(
-    ///     view.into_iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (&net!("192.168.0.0/24"), &mut 3),
-    ///         (&net!("192.168.2.0/23"), &mut 4),
-    ///     ]
-    /// );
-    /// assert_eq!(
-    ///     map.into_iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (net!("192.168.0.0/20"), 1),
-    ///         (net!("192.168.0.0/24"), 3),
-    ///         (net!("192.168.2.0/23"), 4),
-    ///         (net!("192.168.4.0/22"), 5),
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    pub fn remove(&mut self) -> Option<T> {
-        self.node_mut()?.value.take()
-    }
-
-    /// Set the value of the node currently pointed at. This operation fails if the current view
-    /// points at a virtual node, returning `Err(value)`. In such a case, you may want to go to the
-    /// next node (e.g., using [`TrieViewMut::split`]).
-    ///
-    /// This operation will only modify the value, and keep the prefix unchanged (in contrast to
-    /// `PrefixMap::insert`).
-    ///
-    /// This is an implementation detail of mutable views. Since you can have multiple different
-    /// mutable views pointing to different parts in the tree, it is not safe to modify the tree
-    /// structure itself.
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/20"), 1),
-    ///     (net!("192.168.0.0/22"), 2),
-    ///     (net!("192.168.0.0/24"), 3),
-    ///     (net!("192.168.2.0/23"), 4),
-    ///     (net!("192.168.8.0/22"), 5),
-    /// ]);
-    /// let mut view = map.view_mut_at(net!("192.168.0.0/22")).unwrap();
-    /// assert_eq!(view.set(20), Ok(Some(2)));
-    /// assert_eq!(
-    ///     view.into_iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (&net!("192.168.0.0/22"), &mut 20),
-    ///         (&net!("192.168.0.0/24"), &mut 3),
-    ///         (&net!("192.168.2.0/23"), &mut 4),
-    ///     ]
-    /// );
-    /// assert_eq!(
-    ///     map.iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         (&net!("192.168.0.0/20"), &1),
-    ///         (&net!("192.168.0.0/22"), &20),
-    ///         (&net!("192.168.0.0/24"), &3),
-    ///         (&net!("192.168.2.0/23"), &4),
-    ///         (&net!("192.168.8.0/22"), &5),
-    ///     ]
-    /// );
-    /// # }
-    /// ```
-    ///
-    /// Calling `set` on a view that points to a virtual node will fail:
-    ///
-    /// ```
-    /// # use prefix_trie::*;
-    /// # #[cfg(feature = "ipnet")]
-    /// macro_rules! net { ($x:literal) => {$x.parse::<ipnet::Ipv4Net>().unwrap()}; }
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # {
-    /// let mut map: PrefixMap<ipnet::Ipv4Net, usize> = PrefixMap::from_iter([
-    ///     (net!("192.168.0.0/24"), 1),
-    ///     (net!("192.168.2.0/24"), 2),
-    /// ]);
-    /// assert_eq!(map.view_mut_at(net!("192.168.0.0/23")).unwrap().set(10), Err(10));
-    /// # }
-    pub fn set(&mut self, value: T) -> Result<Option<T>, T> {
-        match self.node_mut() {
-            Some(n) => Ok(n.value.replace(value)),
-            None => Err(value),
-        }
+fn lpm_data_bit<'a, V: TrieView<'a>>(
+    view: &V,
+    target_key: <V::P as Prefix>::R,
+    target_len: u32,
+) -> Option<u32> {
+    let data_bits = view.data_bitmap() & data_lpm_mask(view.depth(), target_key, target_len);
+    if data_bits == 0 {
+        None
+    } else {
+        Some(u32::BITS - 1 - data_bits.leading_zeros())
     }
 }
 
-impl<'a, P, T> IntoIterator for TrieViewMut<'a, P, T> {
-    type Item = (&'a P, &'a mut T);
-    type IntoIter = IterMut<'a, P, T>;
+/// Reconstruct the prefix at `data_bit` within the node starting at `depth`.
+pub(crate) fn reconstruct_prefix<P: Prefix>(depth: u32, key: P::R, data_bit: u32) -> P {
+    let (offset, level) = DATA_BIT_TO_PREFIX[data_bit as usize];
+    let prefix_len = depth + level as u32;
+    let root = key & mask_from_prefix_len(depth as u8);
+    let offset_r = <P::R as num_traits::cast::NumCast>::from(offset).unwrap();
+    let offset_bits = K - 1;
+    let total_width = P::num_bits();
+    let shifted = if total_width > depth + offset_bits {
+        offset_r << (total_width - (depth + offset_bits)) as usize
+    } else {
+        offset_r >> (depth + offset_bits - total_width) as usize
+    };
+    P::from_repr_len(root | shifted, prefix_len as u8)
+}
 
-    fn into_iter(self) -> Self::IntoIter {
-        // Safety: Here, we assume the TrieView was created using the `TrieViewMut::new` function,
-        // and that the safety conditions from that function were satisfied. These safety conditions
-        // comply with the safety conditions from `IterMut::new()`.
-        unsafe { IterMut::new(self.table, vec![self.loc.idx()]) }
+/// Trait that is implemented on structures that can be turned into a view.
+pub trait AsView<'a> {
+    /// The prefix type.
+    type P: Prefix;
+    /// The concrete view type returned by [`view`][AsView::view].
+    type View: TrieView<'a, P = Self::P>;
+
+    /// Get a view rooted at the origin (the entire trie).
+    fn view(self) -> Self::View;
+
+    /// Get a view rooted at `prefix`, or `None` if the sub-trie is empty.
+    fn view_at(self, prefix: &Self::P) -> Option<Self::View>
+    where
+        Self: Sized,
+    {
+        self.view().find(prefix)
     }
 }

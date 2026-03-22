@@ -1,7 +1,7 @@
 use crate::joint::{JointPrefix, JointPrefixMap, JointPrefixSet};
 use crate::*;
 use ipnet::{Ipv4Net, Ipv6Net};
-use num_traits::{NumCast, PrimInt};
+use num_traits::NumCast;
 use std::fmt::Debug;
 
 fn ipv4<P: Prefix>(s: &str) -> P {
@@ -9,7 +9,7 @@ fn ipv4<P: Prefix>(s: &str) -> P {
     let r = ip.addr().to_bits();
     let len = ip.prefix_len();
 
-    let type_len = P::zero().repr().count_zeros() as usize;
+    let type_len = P::num_bits() as usize;
     assert!(type_len == 32);
 
     let r: <P as Prefix>::R = <<P as Prefix>::R as NumCast>::from(r).unwrap();
@@ -21,7 +21,7 @@ fn ipv6<P: Prefix>(s: &str) -> P {
     let r = ip.addr().to_bits();
     let len = ip.prefix_len();
 
-    let type_len = P::zero().repr().count_zeros() as usize;
+    let type_len = P::num_bits() as usize;
     assert!(type_len == 128);
 
     let r: <P as Prefix>::R = <<P as Prefix>::R as NumCast>::from(r).unwrap();
