@@ -46,10 +46,10 @@ impl<'a, P, T> Iterator for Iter<'a, P, T> {
         while let Some(cur) = self.nodes.pop() {
             let node = &self.table.as_ref()?[cur];
             if let Some(right) = node.right {
-                self.nodes.push(right);
+                self.nodes.push(right.get());
             }
             if let Some(left) = node.left {
-                self.nodes.push(left);
+                self.nodes.push(left.get());
             }
             if let Some(v) = &node.value {
                 return Some((&node.prefix, v));
@@ -102,10 +102,10 @@ impl<P: Prefix, T> Iterator for IntoIter<P, T> {
         while let Some(cur) = self.nodes.pop() {
             let node = &mut self.table[cur];
             if let Some(right) = node.right {
-                self.nodes.push(right);
+                self.nodes.push(right.get());
             }
             if let Some(left) = node.left {
-                self.nodes.push(left);
+                self.nodes.push(left.get());
             }
             if let Some(v) = node.value.take() {
                 return Some((std::mem::replace(&mut node.prefix, P::zero()), v));
@@ -216,13 +216,12 @@ impl<'a, P, T> Iterator for IterMut<'a, P, T> {
             let node: &'a mut Node<P, T> = unsafe { self.table.as_ref()?.get_mut(cur) };
 
             if let Some(right) = node.right {
-                self.nodes.push(right);
+                self.nodes.push(right.get());
             }
             if let Some(left) = node.left {
-                self.nodes.push(left);
+                self.nodes.push(left.get());
             }
-            if node.value.is_some() {
-                let v = node.value.as_mut().unwrap();
+            if let Some(v) = &mut node.value {
                 return Some((&node.prefix, v));
             }
         }
@@ -258,7 +257,7 @@ pub(super) fn lpm_children_iter_start<P: Prefix, T>(table: &Table<P, T>, prefix:
             break vec![idx];
         }
         let right = to_right(cur_p, prefix);
-        match table.get_child(idx, right) {
+        match table.get_child(idx, right).map(|x| x.get()) {
             Some(c) => {
                 cur_p = &table[c].prefix;
                 if cur_p.contains(prefix) {
@@ -306,7 +305,7 @@ where
         // check if self.idx is None. If so, then check if the first branch is present in the map
         if self.idx.is_none() {
             self.idx = Some(0);
-            let entry = &self.table[0];
+            let entry = &self.table[0usize];
             if let Some(value) = entry.value.as_ref() {
                 return Some((&entry.prefix, value));
             }
@@ -320,8 +319,8 @@ where
             else {
                 return None;
             };
-            self.idx = Some(next);
-            let entry = &self.table[next];
+            self.idx = Some(next.get());
+            let entry = &self.table[next.get()];
             if let Some(value) = entry.value.as_ref() {
                 return Some((&entry.prefix, value));
             }

@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use crate::to_right;
 
 use super::*;
@@ -388,10 +390,10 @@ impl<'a, P: Prefix, L, R> Iterator for Difference<'a, P, L, R> {
                 DifferenceIndex::OnlyL(l) => {
                     let node_l = &self.table_l[l];
                     if let Some(right) = node_l.right {
-                        self.extend([DifferenceIndex::OnlyL(right)], lpm_r);
+                        self.extend([DifferenceIndex::OnlyL(right.get())], lpm_r);
                     }
                     if let Some(left) = node_l.left {
-                        self.extend([DifferenceIndex::OnlyL(left)], lpm_r);
+                        self.extend([DifferenceIndex::OnlyL(left.get())], lpm_r);
                     }
                     if let Some(value) = node_l.value.as_ref() {
                         return Some(DifferenceItem {
@@ -468,10 +470,10 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifference<'a, P, L, R> {
                 DifferenceIndex::OnlyL(l) => {
                     let node_l = &self.table_l[l];
                     if let Some(right) = node_l.right {
-                        self.nodes.extend([DifferenceIndex::OnlyL(right)]);
+                        self.nodes.extend([DifferenceIndex::OnlyL(right.get())]);
                     }
                     if let Some(left) = node_l.left {
-                        self.nodes.extend([DifferenceIndex::OnlyL(left)]);
+                        self.nodes.extend([DifferenceIndex::OnlyL(left.get())]);
                     }
                     if let Some(value) = node_l.value.as_ref() {
                         return Some((&node_l.prefix, value));
@@ -555,10 +557,10 @@ impl<'a, P: Prefix, L, R> Iterator for DifferenceMut<'a, P, L, R> {
                 DifferenceIndex::OnlyL(l) => {
                     let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(right) = node_l.right {
-                        self.extend([DifferenceIndex::OnlyL(right)], lpm_r);
+                        self.extend([DifferenceIndex::OnlyL(right.get())], lpm_r);
                     }
                     if let Some(left) = node_l.left {
-                        self.extend([DifferenceIndex::OnlyL(left)], lpm_r);
+                        self.extend([DifferenceIndex::OnlyL(left.get())], lpm_r);
                     }
                     if let Some(value) = node_l.value.as_mut() {
                         return Some(DifferenceMutItem {
@@ -642,10 +644,10 @@ impl<'a, P: Prefix, L, R> Iterator for CoveringDifferenceMut<'a, P, L, R> {
                 DifferenceIndex::OnlyL(l) => {
                     let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(right) = node_l.right {
-                        self.nodes.extend([DifferenceIndex::OnlyL(right)]);
+                        self.nodes.extend([DifferenceIndex::OnlyL(right.get())]);
                     }
                     if let Some(left) = node_l.left {
-                        self.nodes.extend([DifferenceIndex::OnlyL(left)]);
+                        self.nodes.extend([DifferenceIndex::OnlyL(left.get())]);
                     }
                     if let Some(value) = node_l.value.as_mut() {
                         return Some((&node_l.prefix, value));
@@ -680,10 +682,10 @@ impl<'a, P: Prefix, L, R> DifferenceMut<'a, P, L, R> {
 fn next_indices<'a, P: Prefix, L, R>(
     table_l: &'a Table<P, L>,
     table_r: &'a Table<P, R>,
-    l: Option<usize>,
-    r: Option<usize>,
+    l: Option<impl Into<usize>>,
+    r: Option<impl Into<usize>>,
 ) -> Vec<DifferenceIndex> {
-    match (l, r) {
+    match (l.map(|x| x.into()), r.map(|x| x.into())) {
         (None, Some(_)) => vec![],
         (Some(l), None) => vec![DifferenceIndex::OnlyL(l)],
         (Some(l), Some(r)) => {
@@ -714,8 +716,8 @@ fn next_indices_first_a<'a, P: Prefix, L, R>(
     table_l: &'a Table<P, L>,
     table_r: &'a Table<P, R>,
     l: usize,
-    ll: Option<usize>,
-    lr: Option<usize>,
+    ll: Option<NonZeroUsize>,
+    lr: Option<NonZeroUsize>,
     r: usize,
 ) -> Vec<DifferenceIndex> {
     match (ll, lr) {
@@ -725,11 +727,11 @@ fn next_indices_first_a<'a, P: Prefix, L, R>(
         (Some(ll), Some(lr)) => {
             if to_right(&table_l[l].prefix, &table_r[r].prefix) {
                 let mut idxes = next_indices(table_l, table_r, Some(lr), Some(r));
-                idxes.push(DifferenceIndex::OnlyL(ll));
+                idxes.push(DifferenceIndex::OnlyL(ll.get()));
                 idxes
             } else {
                 let mut idxes = next_indices(table_l, table_r, Some(ll), Some(r));
-                idxes.insert(0, DifferenceIndex::OnlyL(lr));
+                idxes.insert(0, DifferenceIndex::OnlyL(lr.get()));
                 idxes
             }
         }
@@ -741,8 +743,8 @@ fn next_indices_first_b<'a, P: Prefix, L, R>(
     table_r: &'a Table<P, R>,
     l: usize,
     r: usize,
-    rl: Option<usize>,
-    rr: Option<usize>,
+    rl: Option<NonZeroUsize>,
+    rr: Option<NonZeroUsize>,
 ) -> Vec<DifferenceIndex> {
     match (rl, rr) {
         (None, None) => vec![DifferenceIndex::OnlyL(l)],

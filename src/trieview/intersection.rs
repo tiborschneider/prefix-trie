@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use crate::to_right;
 
 use super::*;
@@ -287,10 +289,10 @@ impl<'a, P: Prefix, L, R> Iterator for IntersectionMut<'a, P, L, R> {
 fn next_indices<'a, P: Prefix, L, R>(
     table_l: &'a Table<P, L>,
     table_r: &'a Table<P, R>,
-    node_l: Option<usize>,
-    node_r: Option<usize>,
+    node_l: Option<impl Into<usize>>,
+    node_r: Option<impl Into<usize>>,
 ) -> Option<IntersectionIndex> {
-    match (node_l, node_r) {
+    match (node_l.map(|x| x.into()), node_r.map(|x| x.into())) {
         (None, Some(_)) => None,
         (Some(_), None) => None,
         (Some(a), Some(b)) => {
@@ -317,8 +319,8 @@ fn next_indices_first_a<'a, P: Prefix, L, R>(
     table_l: &'a Table<P, L>,
     table_r: &'a Table<P, R>,
     l: usize,
-    ll: Option<usize>,
-    lr: Option<usize>,
+    ll: Option<NonZeroUsize>,
+    lr: Option<NonZeroUsize>,
     r: usize,
 ) -> Option<IntersectionIndex> {
     match (ll, lr) {
@@ -340,8 +342,8 @@ fn next_indices_first_b<'a, P: Prefix, L, R>(
     table_r: &'a Table<P, R>,
     l: usize,
     r: usize,
-    rl: Option<usize>,
-    rr: Option<usize>,
+    rl: Option<NonZeroUsize>,
+    rr: Option<NonZeroUsize>,
 ) -> Option<IntersectionIndex> {
     match (rl, rr) {
         (None, None) => None,

@@ -2,17 +2,18 @@
 
 use std::{
     cell::UnsafeCell,
+    num::NonZeroUsize,
     ops::{Index, IndexMut},
 };
 
-use crate::{to_right, Prefix};
+use crate::{Prefix, to_right};
 
 #[derive(Clone)]
 pub(crate) struct Node<P, T> {
     pub(crate) prefix: P,
     pub(crate) value: Option<T>,
-    pub(crate) left: Option<usize>,
-    pub(crate) right: Option<usize>,
+    pub(crate) left: Option<NonZeroUsize>,
+    pub(crate) right: Option<NonZeroUsize>,
 }
 
 impl<P, T> Node<P, T> {
@@ -62,11 +63,11 @@ impl<P, T> AsMut<Vec<Node<P, T>>> for Table<P, T> {
     }
 }
 
-impl<P, T> Index<usize> for Table<P, T> {
+impl<P, T, I: Into<usize>> Index<I> for Table<P, T> {
     type Output = Node<P, T>;
 
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.as_ref()[index]
+    fn index(&self, index: I) -> &Self::Output {
+        &self.as_ref()[index.into()]
     }
 }
 
@@ -100,7 +101,7 @@ pub(crate) enum Direction {
     /// The prefix is already reached.
     Reached,
     /// Enter the next index and search again.
-    Enter { next: usize, right: bool },
+    Enter { next: NonZeroUsize, right: bool },
     /// The node was not found.
     Missing,
 }
@@ -155,45 +156,55 @@ impl<P, T> Table<P, T> {
 impl<P: Prefix, T> Table<P, T> {
     /// Get the child of a node, either to the left or the right
     #[inline(always)]
-    pub(crate) fn get_child(&self, idx: usize, right: bool) -> Option<usize> {
+    pub(crate) fn get_child(&self, idx: impl Into<usize>, right: bool) -> Option<NonZeroUsize> {
         if right {
-            self[idx].right
+            self[idx.into()].right
         } else {
-            self[idx].left
+            self[idx.into()].left
         }
     }
 
     /// set the child of a node (either to the left or the right), and return the index of the old child.
     #[inline(always)]
-    pub(crate) fn set_child(&mut self, idx: usize, child: usize, right: bool) -> Option<usize> {
+    pub(crate) fn set_child(
+        &mut self,
+        idx: impl Into<usize>,
+        child: NonZeroUsize,
+        right: bool,
+    ) -> Option<NonZeroUsize> {
         if right {
-            self[idx].right.replace(child)
+            self[idx.into()].right.replace(child)
         } else {
-            self[idx].left.replace(child)
+            self[idx.into()].left.replace(child)
         }
     }
 
     /// remove a child from a node (just the reference).
     #[inline(always)]
-    pub(crate) fn clear_child(&mut self, idx: usize, right: bool) -> Option<usize> {
+    pub(crate) fn clear_child(
+        &mut self,
+        idx: impl Into<usize>,
+        right: bool,
+    ) -> Option<NonZeroUsize> {
         if right {
-            self[idx].right.take()
+            self[idx.into()].right.take()
         } else {
-            self[idx].left.take()
+            self[idx.into()].left.take()
         }
     }
 
-    /// Get the directions from some node `idx` to get to `prefix`.
+    /// Get the directions from some node `cur` to get to `prefix`.
     #[inline(always)]
-    pub(crate) fn get_direction(&self, cur: usize, prefix: &P) -> Direction {
+    pub(crate) fn get_direction(&self, cur: impl Into<usize>, prefix: &P) -> Direction {
+        let cur: usize = cur.into();
         let cur_p = &self[cur].prefix;
         if cur_p.eq(prefix) {
             Direction::Reached
         } else {
             let right = to_right(cur_p, prefix);
             match self.get_child(cur, right) {
-                Some(child) if self[child].prefix.contains(prefix) => {
-                    Direction::Enter { next: child, right }
+                Some(next) if self[next].prefix.contains(prefix) => {
+                    Direction::Enter { next, right }
                 }
                 _ => Direction::Missing,
             }
@@ -208,10 +219,13 @@ impl<P: Prefix, T> Table<P, T> {
             DirectionForInsert::Reached
         } else {
             let right = to_right(cur_p, prefix);
-            if let Some(child) = self.get_child(cur, right) {
-                let child_p = &self[child].prefix;
+            if let Some(next) = self.get_child(cur, right) {
+                let child_p = &self[next].prefix;
                 if child_p.contains(prefix) {
-                    DirectionForInsert::Enter { next: child, right }
+                    DirectionForInsert::Enter {
+                        next: next.get(),
+                        right,
+                    }
                 } else if prefix.contains(child_p) {
                     DirectionForInsert::NewChild {
                         right,

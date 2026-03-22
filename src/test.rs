@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use ipnet::Ipv4Net;
 use num_traits::{NumCast, PrimInt};
 
@@ -46,11 +48,11 @@ impl<P: Prefix> TestNode<P> {
             right: None,
         });
         if let Some(left) = self.left.take() {
-            let left = left.build(map);
+            let left = NonZeroUsize::new(left.build(map)).unwrap();
             map.table[idx].left = Some(left);
         }
         if let Some(right) = self.right.take() {
-            let right = right.build(map);
+            let right = NonZeroUsize::new(right.build(map)).unwrap();
             map.table[idx].right = Some(right);
         }
         idx

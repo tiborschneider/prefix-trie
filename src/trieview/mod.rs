@@ -11,6 +11,8 @@ mod test;
 mod difference;
 mod intersection;
 mod union;
+use std::num::NonZeroUsize;
+
 pub use difference::{
     CoveringDifference, CoveringDifferenceMut, Difference, DifferenceItem, DifferenceMut,
     DifferenceMutItem,
@@ -19,9 +21,10 @@ pub use intersection::{Intersection, IntersectionMut};
 pub use union::{Union, UnionItem, UnionMut};
 
 use crate::{
+    Prefix, PrefixMap, PrefixSet,
     inner::{Direction, DirectionForInsert, Node, Table},
     map::{Iter, IterMut, Keys, Values, ValuesMut},
-    to_right, Prefix, PrefixMap, PrefixSet,
+    to_right,
 };
 
 /// A trait for creating a [`TrieView`] of `self`.
@@ -113,13 +116,14 @@ pub struct TrieView<'a, P, T> {
 #[derive(Clone, Copy)]
 enum ViewLoc<P> {
     Node(usize),
-    Virtual(P, usize),
+    Virtual(P, NonZeroUsize),
 }
 
 impl<P> ViewLoc<P> {
     fn idx(&self) -> usize {
         match self {
-            ViewLoc::Node(i) | ViewLoc::Virtual(_, i) => *i,
+            ViewLoc::Node(i) => *i,
+            ViewLoc::Virtual(_, i) => i.get(),
         }
     }
 }
@@ -215,7 +219,7 @@ where
                     return Some(Self {
                         table: self.table,
                         loc: ViewLoc::Node(idx),
-                    })
+                    });
                 }
                 DirectionForInsert::NewChild { right, .. } => {
                     // view at a virtual node between idx and the right child of idx.
@@ -225,7 +229,7 @@ where
                     });
                 }
                 DirectionForInsert::NewLeaf { .. } | DirectionForInsert::NewBranch { .. } => {
-                    return None
+                    return None;
                 }
             }
         }
@@ -272,9 +276,9 @@ where
                     return self.table[idx].value.is_some().then_some(Self {
                         table: self.table,
                         loc: ViewLoc::Node(idx),
-                    })
+                    });
                 }
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 Direction::Missing => return None,
             }
         }
@@ -329,12 +333,12 @@ where
                 best_match = Some(idx);
             }
             match self.table.get_direction(idx, prefix) {
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 _ => {
                     return best_match.map(|idx| Self {
                         table: self.table,
                         loc: ViewLoc::Node(idx),
-                    })
+                    });
                 }
             }
         }
@@ -373,14 +377,14 @@ where
         match &self.loc {
             ViewLoc::Node(idx) => Some(Self {
                 table: self.table,
-                loc: ViewLoc::Node(self.table[*idx].left?),
+                loc: ViewLoc::Node(self.table[*idx].left?.get()),
             }),
             ViewLoc::Virtual(p, idx) => {
                 // first, check if the node is on the left of the virtual one.
                 if !to_right(p, &self.table[*idx].prefix) {
                     Some(Self {
                         table: self.table,
-                        loc: ViewLoc::Node(*idx),
+                        loc: ViewLoc::Node(idx.get()),
                     })
                 } else {
                     None
@@ -423,14 +427,14 @@ where
         match &self.loc {
             ViewLoc::Node(idx) => Some(Self {
                 table: self.table,
-                loc: ViewLoc::Node(self.table[*idx].right?),
+                loc: ViewLoc::Node(self.table[*idx].right?.get()),
             }),
             ViewLoc::Virtual(p, idx) => {
                 // first, check if the node is on the right of the virtual one.
                 if to_right(p, &self.table[*idx].prefix) {
                     Some(Self {
                         table: self.table,
-                        loc: ViewLoc::Node(*idx),
+                        loc: ViewLoc::Node(idx.get()),
                     })
                 } else {
                     None
@@ -794,7 +798,7 @@ where
                     return unsafe { Ok(Self::new(self.table, new_loc)) };
                 }
                 DirectionForInsert::NewLeaf { .. } | DirectionForInsert::NewBranch { .. } => {
-                    return Err(self)
+                    return Err(self);
                 }
             }
         }
@@ -861,7 +865,7 @@ where
                         Err(self)
                     };
                 }
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 Direction::Missing => return Err(self),
             }
         }
@@ -924,7 +928,7 @@ where
                 best_match = Some(idx);
             }
             match self.table.get_direction(idx, prefix) {
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 _ => {
                     return if let Some(idx) = best_match {
                         // Safety: We own the entire sub-tree, including `idx` (which was reached
@@ -988,7 +992,7 @@ where
         };
 
         if let Some(idx) = left_idx {
-            unsafe { Ok(Self::new(self.table, ViewLoc::Node(idx))) }
+            unsafe { Ok(Self::new(self.table, ViewLoc::Node(idx.get()))) }
         } else {
             Err(self)
         }
@@ -1046,7 +1050,7 @@ where
         };
 
         if let Some(idx) = right_idx {
-            unsafe { Ok(Self::new(self.table, ViewLoc::Node(idx))) }
+            unsafe { Ok(Self::new(self.table, ViewLoc::Node(idx.get()))) }
         } else {
             Err(self)
         }
@@ -1155,8 +1159,8 @@ where
         // guarantees remain satisfied.
         unsafe {
             (
-                left.map(|idx| Self::new(self.table, ViewLoc::Node(idx))),
-                right.map(|idx| Self::new(self.table, ViewLoc::Node(idx))),
+                left.map(|idx| Self::new(self.table, ViewLoc::Node(idx.get()))),
+                right.map(|idx| Self::new(self.table, ViewLoc::Node(idx.get()))),
             )
         }
     }

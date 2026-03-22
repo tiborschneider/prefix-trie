@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use crate::to_right;
 
 use super::*;
@@ -395,10 +397,10 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                 UnionIndex::OnlyL(l) => {
                     let node_l = &self.table_l[l];
                     if let Some(right) = node_l.right {
-                        self.extend([UnionIndex::OnlyL(right)], lpm_l, lpm_r);
+                        self.extend([UnionIndex::OnlyL(right.get())], lpm_l, lpm_r);
                     }
                     if let Some(left) = node_l.left {
-                        self.extend([UnionIndex::OnlyL(left)], lpm_l, lpm_r);
+                        self.extend([UnionIndex::OnlyL(left.get())], lpm_l, lpm_r);
                     }
                     if let Some(x) =
                         self.get_next(&node_l.prefix, node_l.value.as_ref(), None, lpm_l, lpm_r)
@@ -409,10 +411,10 @@ impl<'a, P: Prefix, L, R> Iterator for Union<'a, P, L, R> {
                 UnionIndex::OnlyR(r) => {
                     let node_r = &self.table_r[r];
                     if let Some(right) = node_r.right {
-                        self.extend([UnionIndex::OnlyR(right)], lpm_l, lpm_r);
+                        self.extend([UnionIndex::OnlyR(right.get())], lpm_l, lpm_r);
                     }
                     if let Some(left) = node_r.left {
-                        self.extend([UnionIndex::OnlyR(left)], lpm_l, lpm_r);
+                        self.extend([UnionIndex::OnlyR(left.get())], lpm_l, lpm_r);
                     }
                     if let Some(x) =
                         self.get_next(&node_r.prefix, None, node_r.value.as_ref(), lpm_l, lpm_r)
@@ -495,10 +497,10 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                 UnionIndex::OnlyL(l) => {
                     let node_l = unsafe { self.table_l.get_mut(l) };
                     if let Some(right) = node_l.right {
-                        self.nodes.push(UnionIndex::OnlyL(right));
+                        self.nodes.push(UnionIndex::OnlyL(right.get()));
                     }
                     if let Some(left) = node_l.left {
-                        self.nodes.push(UnionIndex::OnlyL(left));
+                        self.nodes.push(UnionIndex::OnlyL(left.get()));
                     }
                     if node_l.value.is_some() {
                         return Some((&node_l.prefix, node_l.value.as_mut(), None));
@@ -507,10 +509,10 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
                 UnionIndex::OnlyR(r) => {
                     let node_r = unsafe { self.table_r.get_mut(r) };
                     if let Some(right) = node_r.right {
-                        self.nodes.push(UnionIndex::OnlyR(right));
+                        self.nodes.push(UnionIndex::OnlyR(right.get()));
                     }
                     if let Some(left) = node_r.left {
-                        self.nodes.push(UnionIndex::OnlyR(left));
+                        self.nodes.push(UnionIndex::OnlyR(left.get()));
                     }
                     if node_r.value.is_some() {
                         return Some((&node_r.prefix, None, node_r.value.as_mut()));
@@ -525,36 +527,36 @@ impl<'a, P: Prefix, L, R> Iterator for UnionMut<'a, P, L, R> {
 fn next_indices<'a, P: Prefix, L, R>(
     table_l: &'a Table<P, L>,
     table_r: &'a Table<P, R>,
-    node_l: Option<usize>,
-    node_r: Option<usize>,
+    l: Option<impl Into<usize>>,
+    r: Option<impl Into<usize>>,
 ) -> Vec<UnionIndex> {
-    match (node_l, node_r) {
-        (None, Some(b)) => vec![UnionIndex::OnlyR(b)],
-        (Some(a), None) => vec![UnionIndex::OnlyL(a)],
-        (Some(a), Some(b)) => {
-            let p_a = &table_l[a].prefix;
-            let p_b = &table_r[b].prefix;
-            if p_a.prefix_len() == p_b.prefix_len() {
-                match p_a.mask().cmp(&p_b.mask()) {
+    match (l.map(|l| l.into()), r.map(|r| r.into())) {
+        (None, Some(r)) => vec![UnionIndex::OnlyR(r)],
+        (Some(l), None) => vec![UnionIndex::OnlyL(l)],
+        (Some(l), Some(r)) => {
+            let p_l = &table_l[l].prefix;
+            let p_r = &table_r[r].prefix;
+            if p_l.prefix_len() == p_r.prefix_len() {
+                match p_l.mask().cmp(&p_r.mask()) {
                     std::cmp::Ordering::Less => {
-                        vec![UnionIndex::OnlyR(b), UnionIndex::OnlyL(a)]
+                        vec![UnionIndex::OnlyR(r), UnionIndex::OnlyL(l)]
                     }
                     std::cmp::Ordering::Equal => {
-                        vec![UnionIndex::Both(a, b)]
+                        vec![UnionIndex::Both(l, r)]
                     }
                     std::cmp::Ordering::Greater => {
-                        vec![UnionIndex::OnlyL(a), UnionIndex::OnlyR(b)]
+                        vec![UnionIndex::OnlyL(l), UnionIndex::OnlyR(r)]
                     }
                 }
-            } else if p_a.contains(p_b) {
-                vec![UnionIndex::FirstL(a, b)]
-            } else if p_b.contains(p_a) {
-                vec![UnionIndex::FirstR(a, b)]
+            } else if p_l.contains(p_r) {
+                vec![UnionIndex::FirstL(l, r)]
+            } else if p_r.contains(p_l) {
+                vec![UnionIndex::FirstR(l, r)]
             } else {
-                if p_a.mask() < p_b.mask() {
-                    vec![UnionIndex::OnlyR(b), UnionIndex::OnlyL(a)]
+                if p_l.mask() < p_r.mask() {
+                    vec![UnionIndex::OnlyR(r), UnionIndex::OnlyL(l)]
                 } else {
-                    vec![UnionIndex::OnlyL(a), UnionIndex::OnlyR(b)]
+                    vec![UnionIndex::OnlyL(l), UnionIndex::OnlyR(r)]
                 }
             }
         }
@@ -566,8 +568,8 @@ fn next_indices_first_l<'a, P: Prefix, L, R>(
     table_l: &'a Table<P, L>,
     table_r: &'a Table<P, R>,
     l: usize,
-    ll: Option<usize>,
-    lr: Option<usize>,
+    ll: Option<NonZeroUsize>,
+    lr: Option<NonZeroUsize>,
     r: usize,
 ) -> Vec<UnionIndex> {
     match (ll, lr) {
@@ -577,11 +579,11 @@ fn next_indices_first_l<'a, P: Prefix, L, R>(
         (Some(ll), Some(lr)) => {
             if to_right(&table_l[l].prefix, &table_r[r].prefix) {
                 let mut idxes = next_indices(table_l, table_r, Some(lr), Some(r));
-                idxes.push(UnionIndex::OnlyL(ll));
+                idxes.push(UnionIndex::OnlyL(ll.get()));
                 idxes
             } else {
                 let mut idxes = next_indices(table_l, table_r, Some(ll), Some(r));
-                idxes.insert(0, UnionIndex::OnlyL(lr));
+                idxes.insert(0, UnionIndex::OnlyL(lr.get()));
                 idxes
             }
         }
@@ -593,8 +595,8 @@ fn next_indices_first_r<'a, P: Prefix, L, R>(
     table_r: &'a Table<P, R>,
     l: usize,
     r: usize,
-    rl: Option<usize>,
-    rr: Option<usize>,
+    rl: Option<NonZeroUsize>,
+    rr: Option<NonZeroUsize>,
 ) -> Vec<UnionIndex> {
     match (rl, rr) {
         (None, None) => vec![UnionIndex::OnlyL(l)],
@@ -603,11 +605,11 @@ fn next_indices_first_r<'a, P: Prefix, L, R>(
         (Some(rl), Some(rr)) => {
             if to_right(&table_r[r].prefix, &table_l[l].prefix) {
                 let mut idxes = next_indices(table_l, table_r, Some(l), Some(rr));
-                idxes.push(UnionIndex::OnlyR(rl));
+                idxes.push(UnionIndex::OnlyR(rl.get()));
                 idxes
             } else {
                 let mut idxes = next_indices(table_l, table_r, Some(l), Some(rl));
-                idxes.insert(0, UnionIndex::OnlyR(rr));
+                idxes.insert(0, UnionIndex::OnlyR(rr.get()));
                 idxes
             }
         }

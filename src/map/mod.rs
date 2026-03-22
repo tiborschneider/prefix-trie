@@ -1,8 +1,10 @@
 //! Implementation of the Prefix Map.
 
+use std::num::NonZeroUsize;
+
 use crate::{
-    inner::{Direction, DirectionForInsert, Node, Table},
     Prefix,
+    inner::{Direction, DirectionForInsert, Node, Table},
 };
 
 // Include the entry and iter module last, to ensure correct docs.
@@ -19,7 +21,7 @@ pub use iter::*;
 #[derive(Clone)]
 pub struct PrefixMap<P, T> {
     pub(crate) table: Table<P, T>,
-    free: Vec<usize>,
+    free: Vec<NonZeroUsize>,
     count: usize,
 }
 
@@ -79,7 +81,7 @@ where
         loop {
             match self.table.get_direction(idx, prefix) {
                 Direction::Reached => return self.table[idx].value.as_ref(),
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 Direction::Missing => return None,
             }
         }
@@ -107,7 +109,7 @@ where
         loop {
             match self.table.get_direction(idx, prefix) {
                 Direction::Reached => return self.table[idx].value.as_mut(),
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 Direction::Missing => return None,
             }
         }
@@ -134,7 +136,7 @@ where
         loop {
             match self.table.get_direction(idx, prefix) {
                 Direction::Reached => return self.table[idx].prefix_value(),
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 Direction::Missing => return None,
             }
         }
@@ -164,7 +166,7 @@ where
         loop {
             best_match = self.table[idx].prefix_value().or(best_match);
             match self.table.get_direction(idx, prefix) {
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 _ => return best_match,
             }
         }
@@ -197,7 +199,7 @@ where
                 best_match
             };
             match self.table.get_direction(idx, prefix) {
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 _ => break,
             }
         }
@@ -230,7 +232,7 @@ where
         loop {
             match self.table.get_direction(idx, prefix) {
                 Direction::Reached => return self.table[idx].value.is_some(),
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 Direction::Missing => return false,
             }
         }
@@ -263,7 +265,7 @@ where
                 .map(|(p, _)| p)
                 .or(best_match);
             match self.table.get_direction(idx, prefix) {
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 _ => return best_match,
             }
         }
@@ -288,7 +290,7 @@ where
     /// # fn main() {}
     pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(&'a P, &'a T)> {
         // Handle the special case, where the root is populated
-        if let Some(x) = self.table[0].prefix_value() {
+        if let Some(x) = self.table[0usize].prefix_value() {
             return Some(x);
         }
         let mut idx = 0;
@@ -299,7 +301,7 @@ where
                     // Go until the first node with a value
                     match self.table[next].prefix_value() {
                         Some(x) => return Some(x),
-                        None => idx = next,
+                        None => idx = next.get(),
                     }
                 }
                 Direction::Missing => return None,
@@ -447,7 +449,7 @@ where
                     return Entry::Occupied(OccupiedEntry {
                         node: &mut self.table[idx],
                         prefix,
-                    })
+                    });
                 }
                 direction => {
                     return Entry::Vacant(VacantEntry {
@@ -455,7 +457,7 @@ where
                         prefix,
                         idx,
                         direction,
-                    })
+                    });
                 }
             }
         }
@@ -497,7 +499,7 @@ where
                     parent_right = right;
                     grandparent = parent;
                     parent = Some(idx);
-                    idx = next;
+                    idx = next.get();
                 }
                 Direction::Missing => return None,
             }
@@ -535,7 +537,7 @@ where
         let value = loop {
             match self.table.get_direction(idx, prefix) {
                 Direction::Reached => break self.table[idx].value.take(),
-                Direction::Enter { next, .. } => idx = next,
+                Direction::Enter { next, .. } => idx = next.get(),
                 Direction::Missing => break None,
             }
         };
@@ -581,7 +583,7 @@ where
         loop {
             match self.table.get_direction_for_insert(idx, prefix) {
                 DirectionForInsert::Reached => {
-                    return self._do_remove_children(parent, parent_right)
+                    return self._do_remove_children(parent, parent_right);
                 }
                 DirectionForInsert::Enter { next, right } => {
                     parent_right = right;
@@ -590,7 +592,7 @@ where
                 }
                 DirectionForInsert::NewLeaf { .. } | DirectionForInsert::NewBranch { .. } => return,
                 DirectionForInsert::NewChild { right, .. } => {
-                    return self._do_remove_children(idx, right)
+                    return self._do_remove_children(idx, right);
                 }
             }
         }
@@ -1032,7 +1034,7 @@ where
         self.table.clear_child(idx, right);
         while let Some(idx) = to_free.pop() {
             let mut dec = 0;
-            let node = &mut self.table[idx];
+            let node = &mut self.table[idx.get()];
             let value = node.value.take();
             // decrease the count if `value` is something
             if value.is_some() {
@@ -1052,12 +1054,12 @@ where
     /// insert a new node into the table and return its index. This function also increments the
     /// count by 1, but only if `value` is `Some`.
     #[inline(always)]
-    fn new_node(&mut self, prefix: P, value: Option<T>) -> usize {
+    fn new_node(&mut self, prefix: P, value: Option<T>) -> NonZeroUsize {
         if value.is_some() {
             self.count += 1;
         }
         if let Some(idx) = self.free.pop() {
-            let node = &mut self.table[idx];
+            let node = &mut self.table[idx.get()];
             node.prefix = prefix;
             node.value = value;
             node.left = None;
@@ -1065,7 +1067,7 @@ where
             idx
         } else {
             let table = self.table.as_mut();
-            let idx = table.len();
+            let idx = NonZeroUsize::new(table.len()).expect("Table is never empty.");
             table.push(Node {
                 prefix,
                 value,
@@ -1101,6 +1103,7 @@ where
             // if the node has both left and right set, then it must remain in the tree.
         } else if !(has_left || has_right) {
             if let Some(par) = par {
+                let idx = NonZeroUsize::new(idx).expect("Parent is set, so must be non-root");
                 // if the node is a leaf, simply remove it.
                 self.table.clear_child(par, par_right);
                 self.free.push(idx);
@@ -1120,6 +1123,7 @@ where
         } else {
             // one child remains. simply connect that child directly to the parent if the parent is Something.
             if let Some(par) = par {
+                let idx = NonZeroUsize::new(idx).expect("Parent is set, so must be non-root");
                 let child_right = has_right;
                 let child = self.table.clear_child(idx, child_right).unwrap();
                 self.table.set_child(par, child, par_right);
@@ -1146,13 +1150,13 @@ where
         let mut idx_removed = false;
         let mut par_removed = false;
         if let Some(left) = self.table[idx].left {
-            (f, idx_removed) = self._retain(left, Some(idx), false, par, par_right, f);
+            (f, idx_removed) = self._retain(left.get(), Some(idx), false, par, par_right, f);
         }
         if let Some(right) = self.table[idx].right {
             if idx_removed {
-                (f, par_removed) = self._retain(right, par, par_right, grp, grp_right, f);
+                (f, par_removed) = self._retain(right.get(), par, par_right, grp, grp_right, f);
             } else {
-                (f, _) = self._retain(right, Some(idx), true, par, par_right, f);
+                (f, _) = self._retain(right.get(), Some(idx), true, par, par_right, f);
             }
         }
         // then, check if we need to delete the node
