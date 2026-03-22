@@ -6,7 +6,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use crate::{Prefix, to_right};
+use crate::{to_right, Prefix};
 
 #[derive(Clone)]
 pub(crate) struct Node<P, T> {

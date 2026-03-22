@@ -21,10 +21,9 @@ pub use intersection::{Intersection, IntersectionMut};
 pub use union::{Union, UnionItem, UnionMut};
 
 use crate::{
-    Prefix, PrefixMap, PrefixSet,
     inner::{Direction, DirectionForInsert, Node, Table},
     map::{Iter, IterMut, Keys, Values, ValuesMut},
-    to_right,
+    to_right, Prefix, PrefixMap, PrefixSet,
 };
 
 /// A trait for creating a [`TrieView`] of `self`.

@@ -3,8 +3,8 @@
 use std::num::NonZeroUsize;
 
 use crate::{
-    Prefix,
     inner::{Direction, DirectionForInsert, Node, Table},
+    Prefix,
 };
 
 // Include the entry and iter module last, to ensure correct docs.
