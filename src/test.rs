@@ -707,6 +707,39 @@ mod t {
         );
     }
 
+    #[test]
+    fn regression_free_list_on_parent_collapse<P: Prefix + Copy + PartialEq>() {
+        // Regression test for issue #23: Memory leak when removing leaf nodes
+
+        let mut pm = Map::<P>::new();
+
+        // a custom tree to force a valueless branch node
+        // root -> branch(10.0.0.0/8) -> [leaf1(10.0.0.0/10), leaf2(10.128.0.0/10)]
+        pm.insert(ip("10.0.0.0/10"), 1);
+        pm.insert(ip("10.128.0.0/10"), 2);
+
+        // the initial size of the underlying memory vector
+        let initial_table_size = pm.table.as_ref().len();
+        assert_eq!(initial_table_size, 4); // including the root and the branch nodes
+
+        // Remove a leaf, which triggers the parent branch to collapse.
+        assert_eq!(pm.remove(&ip("10.128.0.0/10")), Some(2));
+
+        // Cycle insert and remove multiple times.
+        for i in 3..=20 {
+            pm.insert(ip("10.128.0.0/10"), i);
+            pm.remove(&ip("10.128.0.0/10"));
+        }
+
+        // Final verification: the memory footprint should not have grown.
+        let final_table_size = pm.table.as_ref().len();
+        assert_eq!(
+            final_table_size, initial_table_size,
+            "Memory Leak Detected! The internal table grew from {} to {} nodes. Collapsed branch nodes are not being added to the free list.",
+            initial_table_size, final_table_size
+        );
+    }
+
     #[instantiate_tests(<(u32, u8)>)]
     mod raw32 {}
 

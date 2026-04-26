@@ -1111,11 +1111,15 @@ where
                 // current node. but only do that if the grandparent is something.
                 if let Some(grp) = grp {
                     if self.table[par].value.is_none() {
+                        let par_idx = NonZeroUsize::new(par)
+                            .expect("Grandparent is set, so parent must be non-root");
                         if let Some(sibling) = self.table.get_child(par, !par_right) {
                             self.table.set_child(grp, sibling, grp_right);
+                            self.free.push(par_idx);
                             return (value, true);
                         } else {
                             self.table.clear_child(grp, grp_right);
+                            self.free.push(par_idx);
                         }
                     }
                 }
