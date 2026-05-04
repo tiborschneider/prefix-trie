@@ -3,8 +3,8 @@
 use std::num::NonZeroUsize;
 
 use crate::{
-    inner::{Direction, DirectionForInsert, Node, Table},
     Prefix,
+    inner::{Direction, DirectionForInsert, Node, Table},
 };
 
 // Include the entry and iter module last, to ensure correct docs.
@@ -1193,4 +1193,28 @@ where
     P: Prefix + Eq,
     T: Eq,
 {
+}
+
+#[cfg(test)]
+impl<P, T> PrefixMap<P, T> {
+    /// Check that no memory was leaked in the datastructure.
+    #[track_caller]
+    pub(crate) fn assert_no_memory_leak(&self) {
+        let mut unmarked = std::collections::BTreeSet::from_iter(0..self.table.as_ref().len());
+        let mut stack = vec![0usize];
+        while let Some(node) = stack.pop() {
+            unmarked.remove(&node);
+            if let Some(left) = self.table.as_ref().get(node).and_then(|x| x.left) {
+                stack.push(left.into());
+            }
+            if let Some(right) = self.table.as_ref().get(node).and_then(|x| x.right) {
+                stack.push(right.into());
+            }
+        }
+        for node in self.free.iter() {
+            let node: usize = (*node).into();
+            unmarked.remove(&node);
+        }
+        assert!(unmarked.is_empty(), "Memory leak detected!");
+    }
 }

@@ -13,6 +13,9 @@ fn _new(list: Vec<(TestPrefix, i32)>) -> bool {
         hmap.insert(p, t);
     }
 
+    // assert that no memory was leaked.
+    pmap.assert_no_memory_leak();
+
     // assert that the iterator of both is the same
     pmap.into_iter().eq(hmap.into_iter().sorted())
 }
@@ -35,6 +38,9 @@ fn _new_mods(list: Vec<Operation<TestPrefix, i32>>) -> bool {
         }
     }
 
+    // assert that no memory was leaked.
+    pmap.assert_no_memory_leak();
+
     // assert that the iterator of both is the same
     pmap.into_iter().eq(hmap.into_iter().sorted())
 }
@@ -56,6 +62,9 @@ fn _new_mods_entry(list: Vec<Operation<TestPrefix, i32>>) -> bool {
             }
         }
     }
+
+    // assert that no memory was leaked.
+    pmap.assert_no_memory_leak();
 
     // assert that the iterator of both is the same
     pmap.into_iter().eq(hmap.into_iter().sorted())
@@ -128,6 +137,7 @@ qc!(remove_children, _remove_children);
 fn _remove_children((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
     let want = select(&map, |p, _| !root.contains(p));
     map.remove_children(&root);
+    map.assert_no_memory_leak();
     map.len() == want.len() && map.into_iter().eq(want)
 }
 
@@ -135,6 +145,7 @@ qc!(retain, _retain);
 fn _retain((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
     let want = select(&map, |p, _| !(root.contains(p) && p.1 >= root.1 + 2));
     map.retain(|p, _| !(root.contains(p) && p.1 >= root.1 + 2));
+    map.assert_no_memory_leak();
     map.into_iter().eq(want)
 }
 
