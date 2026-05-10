@@ -31,10 +31,10 @@ ipnet = ["dep:ipnet"]
 cidr = ["dep:cidr"]
 
 [dependencies]
-ipnet = { version = "2", optional = true}
+ipnet = { version = "2.3.0", optional = true}
 ipnetwork = { version = "0.20", optional = true }
 cidr = { version = "0.3", optional = true }
-num-traits = "0.2"
+num-traits = "0.2.4"
 serde = { version = "1", optional = true}
 either = "1"
 
