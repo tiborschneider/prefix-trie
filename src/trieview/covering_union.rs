@@ -52,50 +52,6 @@ pub enum CoveringUnionItem<P, L, R> {
     },
 }
 
-impl<P, L, R> CoveringUnionItem<P, L, R> {
-    /// Get a reference to the left exact element, if present.
-    pub fn left(&self) -> Option<&L> {
-        match self {
-            CoveringUnionItem::Left { left, .. } | CoveringUnionItem::Both { left, .. } => {
-                Some(left)
-            }
-            CoveringUnionItem::Right { .. } => None,
-        }
-    }
-
-    /// Get a reference to the right exact element, if present.
-    pub fn right(&self) -> Option<&R> {
-        match self {
-            CoveringUnionItem::Right { right, .. } | CoveringUnionItem::Both { right, .. } => {
-                Some(right)
-            }
-            CoveringUnionItem::Left { .. } => None,
-        }
-    }
-
-    /// Get the left longest prefix match attached to a right-only item.
-    pub fn left_lpm(&self) -> Option<(&P, &L)> {
-        match self {
-            CoveringUnionItem::Right {
-                left_lpm: Some((prefix, value)),
-                ..
-            } => Some((prefix, value)),
-            _ => None,
-        }
-    }
-
-    /// Get the right longest prefix match attached to a left-only item.
-    pub fn right_lpm(&self) -> Option<(&P, &R)> {
-        match self {
-            CoveringUnionItem::Left {
-                right_lpm: Some((prefix, value)),
-                ..
-            } => Some((prefix, value)),
-            _ => None,
-        }
-    }
-}
-
 /// An immutable view over the covering union of two [`TrieView`]s.
 ///
 /// Returned by [`TrieView::covering_union`]. The exact union traversal is delegated to

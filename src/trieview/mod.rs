@@ -10,9 +10,28 @@
 //!   [`DifferenceView`], [`CoveringDifferenceView`]
 //!
 //! This design makes set operations **composable**:
-//! ```ignore
-//! a.view().intersection(b.view()).intersection(c.view()).iter()
-//! a.view_mut().intersection(b.view()).into_iter()
+//!
+//! ```
+//! # use prefix_trie::{PrefixMap, PrefixSet, AsView, TrieView};
+//! # use prefix_trie::trieview::union::UnionItem;
+//! # type P = (u32, u8);
+//! let mut target: PrefixMap::<P, _> = [((0, 8), 1), ((0, 16), 2), ((0, 24), 3)].into_iter().collect();
+//! let source:     PrefixMap::<P, _> = [((0, 8), 9), ((0, 16), 1)].into_iter().collect();
+//! let ignore:     PrefixSet::<P>    = [ (0, 10)].into_iter().collect();
+//!
+//! (&mut target)
+//!     .view()
+//!     .union(&source)
+//!     .covering_difference(&ignore)
+//!     .values()
+//!     .for_each(|x| if let UnionItem::Both(l, r) = x {
+//!         *l += *r
+//!     });
+//!
+//! assert_eq!(
+//!     target.into_iter().collect::<Vec<_>>(),
+//!     vec![((0, 8), 10), ((0, 16), 2), ((0, 24), 3)], // only (0, 8) got updated
+//! );
 //! ```
 //!
 //! # Safety contract for `get_data`, `get_child`, and `reposition`
