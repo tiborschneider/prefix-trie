@@ -13,6 +13,7 @@ mod views;
 enum Operation<P, T> {
     Add(P, T),
     Remove(P),
+    RemoveChildren(P),
 }
 
 #[cfg(miri)]
@@ -99,16 +100,30 @@ impl<P: Prefix + Arbitrary, T: Arbitrary> Arbitrary for PrefixMap<P, T> {
 impl<P: Arbitrary, T: Arbitrary> Arbitrary for Operation<P, T> {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
         let p = P::arbitrary(g);
-        if g.choose(&[
-            true, true, true, true, true, true, true, false, false, false,
-        ])
-        .copied()
-        .unwrap_or_default()
+        match g
+            .choose(&[
+                "add",
+                "add",
+                "add",
+                "add",
+                "add",
+                "add",
+                "add",
+                "remove",
+                "remove",
+                "remove",
+                "remove_children",
+            ])
+            .copied()
+            .unwrap_or_default()
         {
-            let t = T::arbitrary(g);
-            Self::Add(p, t)
-        } else {
-            Self::Remove(p)
+            "add" => {
+                let t = T::arbitrary(g);
+                Self::Add(p, t)
+            }
+            "remove" => Self::Remove(p),
+            "remove_children" => Self::RemoveChildren(p),
+            _ => unreachable!(),
         }
     }
 
@@ -123,6 +138,9 @@ impl<P: Arbitrary, T: Arbitrary> Arbitrary for Operation<P, T> {
                 )
             }
             Operation::Remove(p) => Box::new(p.clone().shrink().map(|p| Operation::Remove(p))),
+            Operation::RemoveChildren(p) => {
+                Box::new(p.clone().shrink().map(|p| Operation::RemoveChildren(p)))
+            }
         }
     }
 }

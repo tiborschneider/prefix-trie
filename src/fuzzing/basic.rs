@@ -63,10 +63,45 @@ fn _new_mods(list: Vec<Operation<TestPrefix, i32>>) -> bool {
                 pmap.remove(&p);
                 hmap.remove(&p);
             }
+            Operation::RemoveChildren(p) => {
+                pmap.remove_children(&p);
+                hmap.retain(|x, _| !p.contains(x));
+            }
         }
     }
 
     pmap.check_memory_alloc() && pmap.into_iter().eq(hmap.into_iter().sorted())
+}
+
+qc!(mods_clone, _mods_clone);
+fn _mods_clone(list: Vec<Operation<TestPrefix, i32>>) -> bool {
+    let mut pmap = PrefixMap::new();
+
+    for op in list {
+        match op {
+            Operation::Add(p, t) => {
+                pmap.insert(p, t);
+            }
+            Operation::Remove(p) => {
+                pmap.remove(&p);
+            }
+            Operation::RemoveChildren(p) => {
+                pmap.remove_children(&p);
+            }
+        }
+    }
+
+    if !pmap.check_memory_alloc() {
+        return false;
+    }
+
+    let cloned = pmap.clone();
+
+    if !cloned.check_memory_alloc() {
+        return false;
+    }
+
+    cloned == pmap
 }
 
 qc!(new_mods_entry, _new_mods_entry);
@@ -83,6 +118,10 @@ fn _new_mods_entry(list: Vec<Operation<TestPrefix, i32>>) -> bool {
             Operation::Remove(p) => {
                 pmap.remove(&p);
                 hmap.remove(&p);
+            }
+            Operation::RemoveChildren(p) => {
+                pmap.remove_children(&p);
+                hmap.retain(|x, _| !p.contains(x));
             }
         }
     }
@@ -101,6 +140,9 @@ fn _equality(list: Vec<Operation<TestPrefix, i32>>) -> bool {
             }
             Operation::Remove(p) => {
                 map.remove(&p);
+            }
+            Operation::RemoveChildren(p) => {
+                map.remove_children(&p);
             }
         }
     }
@@ -123,6 +165,9 @@ fn _equality_keep_tree(list: Vec<Operation<TestPrefix, i32>>) -> bool {
             Operation::Remove(p) => {
                 map.remove_keep_tree(&p);
             }
+            Operation::RemoveChildren(p) => {
+                map.remove_children(&p);
+            }
         }
     }
 
@@ -143,6 +188,9 @@ fn _equality_set(list: Vec<Operation<TestPrefix, ()>>) -> bool {
             }
             Operation::Remove(p) => {
                 set.remove(&p);
+            }
+            Operation::RemoveChildren(p) => {
+                set.remove_children(&p);
             }
         }
     }
@@ -209,151 +257,32 @@ qc!(cover_after_keep_tree_mods, _cover_after_keep_tree_mods);
 fn _cover_after_keep_tree_mods(
     (ops, query): (Vec<Operation<TestPrefix, i32>>, TestPrefix),
 ) -> bool {
-    let mut map = PrefixMap::new();
-    let mut reference = HashMap::new();
+    let mut pmap = PrefixMap::new();
+    let mut hmap = HashMap::new();
 
     for op in ops {
         match op {
-            Operation::Add(prefix, value) => {
-                map.insert(prefix, value);
-                reference.insert(prefix, value);
+            Operation::Add(p, value) => {
+                pmap.insert(p, value);
+                hmap.insert(p, value);
             }
-            Operation::Remove(prefix) => {
-                map.remove_keep_tree(&prefix);
-                reference.remove(&prefix);
+            Operation::Remove(p) => {
+                pmap.remove_keep_tree(&p);
+                hmap.remove(&p);
+            }
+            Operation::RemoveChildren(p) => {
+                pmap.remove_children(&p);
+                hmap.retain(|x, _| !p.contains(x));
             }
         }
     }
 
-    let want = expected_cover_from_ref(&reference, &query);
-    let got = map
+    let want = expected_cover_from_ref(&hmap, &query);
+    let got = pmap
         .cover(&query)
         .map(|(prefix, value)| (prefix, *value))
         .collect::<Vec<_>>();
-    map.check_memory_alloc() && got == want
-}
-
-// ============ PrefixMap Integration Tests ============
-
-qc!(dense_new, _dense_new);
-fn _dense_new(list: Vec<(TestPrefix, i32)>) -> bool {
-    let mut pmap = PrefixMap::new();
-    let mut hmap = HashMap::new();
-
-    for (p, t) in list.clone() {
-        pmap.insert(p, t);
-        hmap.insert(p, t);
-    }
-
-    if !pmap.check_memory_alloc() {
-        return false;
-    }
-
-    // assert that the iterator of both is the same
-    let pmap_data = pmap.into_iter().collect_vec();
-    let hmap_data = hmap.into_iter().sorted().collect_vec();
-    pmap_data == hmap_data
-}
-
-qc!(dense_new_mods, _dense_new_mods);
-fn _dense_new_mods(list: Vec<Operation<TestPrefix, i32>>) -> bool {
-    let mut pmap = PrefixMap::new();
-    let mut hmap = HashMap::new();
-
-    for op in list {
-        match op {
-            Operation::Add(p, t) => {
-                pmap.insert(p, t);
-                hmap.insert(p, t);
-            }
-            Operation::Remove(p) => {
-                pmap.remove(&p);
-                hmap.remove(&p);
-            }
-        }
-    }
-
-    if !pmap.check_memory_alloc() {
-        return false;
-    }
-
-    // assert that the iterator of both is the same
-    pmap.into_iter().eq(hmap.into_iter().sorted())
-}
-
-qc!(dense_mods_clone, _dense_mods_clone);
-fn _dense_mods_clone(list: Vec<Operation<TestPrefix, i32>>) -> bool {
-    let mut pmap = PrefixMap::new();
-
-    for op in list {
-        match op {
-            Operation::Add(p, t) => {
-                pmap.insert(p, t);
-            }
-            Operation::Remove(p) => {
-                pmap.remove(&p);
-            }
-        }
-    }
-
-    if !pmap.check_memory_alloc() {
-        return false;
-    }
-
-    let cloned = pmap.clone();
-
-    if !cloned.check_memory_alloc() {
-        eprintln!("Cloned datastructure contains memory corruption");
-        return false;
-    }
-
-    cloned == pmap
-}
-
-qc!(dense_new_mods_entry, _dense_new_mods_entry);
-fn _dense_new_mods_entry(list: Vec<Operation<TestPrefix, i32>>) -> bool {
-    let mut pmap = PrefixMap::new();
-    let mut hmap = HashMap::new();
-
-    for op in list {
-        match op {
-            Operation::Add(p, t) => {
-                let _ = pmap.entry(p).insert(t);
-                hmap.insert(p, t);
-            }
-            Operation::Remove(p) => {
-                pmap.remove(&p);
-                hmap.remove(&p);
-            }
-        }
-    }
-
-    if !pmap.check_memory_alloc() {
-        return false;
-    }
-
-    // assert that the iterator of both is the same
-    pmap.into_iter().eq(hmap.into_iter().sorted())
-}
-
-qc!(dense_remove_children, _dense_remove_children);
-fn _dense_remove_children((mut pmap, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
-    let want = select(&pmap, |p, _| !root.contains(p));
-    pmap.remove_children(&root);
-    if !pmap.check_memory_alloc() {
-        return false;
-    }
-    pmap.len() == want.len() && pmap.into_iter().eq(want)
-}
-
-qc!(dense_retain, _dense_retain);
-fn _dense_retain((mut pmap, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
-    let want = select(&pmap, |p, _| !(root.contains(p) && p.1 >= root.1 + 2));
-    pmap.retain(|p, _| !(root.contains(&p) && p.1 >= root.1 + 2));
-    if !pmap.check_memory_alloc() {
-        return false;
-    }
-    pmap.into_iter().eq(want)
+    pmap.check_memory_alloc() && got == want
 }
 
 qc!(drop_check, _drop_check);
