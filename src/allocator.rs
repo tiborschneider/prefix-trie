@@ -1,6 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    mem::{MaybeUninit, replace},
+    mem::{replace, MaybeUninit},
     ops::{Index, IndexMut},
 };
 

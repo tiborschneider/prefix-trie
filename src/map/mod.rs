@@ -2,14 +2,14 @@
 
 use std::marker::PhantomData;
 
-use crate::{Prefix, allocator::Loc};
+use crate::{allocator::Loc, Prefix};
 
 mod entry;
 mod iter;
 pub use entry::{Entry, OccupiedEntry, VacantEntry};
 pub use iter::*;
 
-use super::table::{ElementLoc, K, Location, Table};
+use super::table::{ElementLoc, Location, Table, K};
 
 /// Prefix map implemented as a TreeBitMap.
 #[derive(Clone)]
