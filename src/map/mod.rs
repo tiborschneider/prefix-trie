@@ -9,7 +9,7 @@ mod iter;
 pub use entry::{Entry, OccupiedEntry, VacantEntry};
 pub use iter::*;
 
-use super::table::{ElementLoc, Location, Table, K};
+use super::table::{Location, Table, K};
 
 /// Prefix map implemented as a TreeBitMap.
 #[derive(Clone)]
@@ -95,8 +95,7 @@ where
     pub fn get<'a>(&'a self, prefix: &P) -> Option<&'a T> {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        let element = self.table.find_element(key, prefix_len).present()?;
-        Some(self.table.get_data(element))
+        Some(self.table.find(key, prefix_len)?.get())
     }
 
     /// Get a mutable reference to a value of an element by matching exactly on the prefix.
@@ -119,8 +118,7 @@ where
     pub fn get_mut<'a>(&'a mut self, prefix: &P) -> Option<&'a mut T> {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        let element = self.table.find_element(key, prefix_len).present()?;
-        Some(self.table.get_data_mut(element))
+        Some(self.table.find_mut(key, prefix_len).present()?.get_mut())
     }
 
     /// Get the value of an element by matching exactly on the prefix.
@@ -161,8 +159,9 @@ where
     pub fn get_key_value<'a>(&'a self, prefix: &P) -> Option<(P, &'a T)> {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        let element = self.table.find_element(key, prefix_len).present()?;
-        Some((element.prefix(key), self.table.get_data(element)))
+        let r = self.table.find(key, prefix_len)?;
+        let p = r.prefix(key);
+        Some((p, r.get()))
     }
 
     /// Get a value of an element by using longest prefix matching
@@ -202,8 +201,9 @@ where
     pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T)> {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        let element = self.table.find_lpm(key, prefix_len)?;
-        Some((element.prefix(key), self.table.get_data(element)))
+        let r = self.table.find_lpm(key, prefix_len)?;
+        let p = r.prefix(key);
+        Some((p, r.get()))
     }
 
     /// Get a mutable reference to a value of an element by using longest prefix matching
@@ -229,8 +229,9 @@ where
     pub fn get_lpm_mut<'a>(&'a mut self, prefix: &P) -> Option<(P, &'a mut T)> {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        let element = self.table.find_lpm(key, prefix_len)?;
-        Some((element.prefix(key), self.table.get_data_mut(element)))
+        let r = self.table.find_lpm_mut(key, prefix_len)?;
+        let p = r.prefix::<P>(key);
+        Some((p, r.get_mut()))
     }
 
     /// Get the longest prefix in the datastructure that matches the given `prefix`.
@@ -291,7 +292,7 @@ where
     pub fn contains_key(&self, prefix: &P) -> bool {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        self.table.find_element(key, prefix_len).present().is_some()
+        self.table.find(key, prefix_len).is_some()
     }
 
     /// Get a value of an element by using shortest prefix matching.
@@ -318,8 +319,9 @@ where
     pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T)> {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        let element = self.table.find_spm(key, prefix_len)?;
-        Some((element.prefix(key), self.table.get_data(element)))
+        let r = self.table.find_spm(key, prefix_len)?;
+        let p = r.prefix(key);
+        Some((p, r.get()))
     }
 
     /// Get the shortest prefix in the datastructure that contains the given `prefix`.
@@ -386,12 +388,10 @@ where
     pub fn insert(&mut self, prefix: P, value: T) -> Option<T> {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        let element = self.table.find_node_or_insert(key, prefix_len);
-
-        match element {
-            Ok(present) => Some(self.table.replace_data(present, value)),
+        match self.table.find_or_insert_mut(key, prefix_len) {
+            Ok(present) => Some(present.replace(value)),
             Err(empty) => {
-                self.table.set_data(empty, value);
+                empty.insert(value);
                 self.count += 1;
                 None
             }
@@ -420,15 +420,16 @@ where
     /// # fn main() {}
     /// ```
     pub fn entry(&mut self, prefix: P) -> Entry<'_, P, T> {
-        // search the entry
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        match self.table.find_element(key, prefix_len) {
-            Location::Present(present) => {
-                Entry::Occupied(OccupiedEntry::new(self, present, prefix))
-            }
-            Location::Empty(empty) => Entry::Vacant(VacantEntry::empty(self, empty, prefix)),
-            Location::NoNode(no_node) => Entry::Vacant(VacantEntry::no_node(self, no_node, prefix)),
+        // Split borrows so that `loc` (borrowing `table`) and `count` (borrowing `count`)
+        // can coexist inside the returned Entry without a full `&mut PrefixMap` borrow.
+        let table = &mut self.table;
+        let count = &mut self.count;
+        match table.find_mut(key, prefix_len) {
+            Location::Present(r) => Entry::Occupied(OccupiedEntry::new(r, count, prefix)),
+            Location::Empty(e) => Entry::Vacant(VacantEntry::empty(e, count, prefix)),
+            Location::NoNode(n) => Entry::Vacant(VacantEntry::no_node(n, count, prefix)),
         }
     }
 
@@ -454,19 +455,21 @@ where
     pub fn remove(&mut self, prefix: &P) -> Option<T> {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        let (element, mut path) = self.table.find_element_with_path(key, prefix_len)?;
+        let (loc_mut, mut path) = self.table.find_mut_with_path(key, prefix_len)?;
 
-        // remove the node if it exists
-        let mut old_value = None;
-        if let Ok(present) = element {
-            old_value = Some(self.table.take_data(present));
+        let node_loc = loc_mut.node_loc();
+        let old_value = if let Some(present) = loc_mut.present() {
+            let val = present.take();
             self.count -= 1;
-        }
+            Some(val)
+        } else {
+            None
+        };
 
-        // clean up the tree
-        if !element.node().is_empty() {
-            self.table.cleanup_tree(element.node(), &mut path);
-        }
+        // cleanup_tree handles root internally (noop); call unconditionally.
+        // SAFETY: `node_loc` came from `find_mut_with_path`; `present.take()` only removes
+        // a data cell and does not alter node structure, so `node_loc` and `path` remain valid.
+        unsafe { self.table.cleanup_tree(node_loc, &mut path) };
 
         old_value
     }
@@ -493,9 +496,9 @@ where
     pub fn remove_keep_tree(&mut self, prefix: &P) -> Option<T> {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        let element = self.table.find_element(key, prefix_len).present()?;
+        let present = self.table.find_mut(key, prefix_len).present()?;
         self.count -= 1;
-        Some(self.table.take_data(element))
+        Some(present.take())
     }
 
     /// Remove all entries that are contained within `prefix`. This will change the tree
@@ -535,31 +538,37 @@ where
             return self.clear();
         }
 
-        let Some(element) = self.table.find_element(key, prefix_len).into_node() else {
+        let loc_mut = self.table.find_mut(key, prefix_len);
+        if matches!(loc_mut, super::table::Location::NoNode(_)) {
             return;
-        };
-        let node = element.node();
-        let depth = element.depth();
+        }
+        let node = loc_mut.node_loc();
+        let depth = loc_mut.depth();
+        drop(loc_mut);
 
         // fast-track delete this index if it covers the entire node
         if prefix_len % K == 0 {
-            self.count -= self.table.clear_node_and_children(node);
+            // SAFETY: `node` came from `find_mut` with no subsequent structural mutations.
+            self.count -= unsafe { self.table.clear_node_and_children(node) };
             return;
         }
 
-        // delete all elements within this node that are covered.
-        // Iterate in reverse bit order to avoid shifting lower-bit elements.
-        // This ensures that removing a higher-bit element doesn't shift the physical slot
-        // of a lower-bit element, maintaining slot validity across removals.
-        let covered = self
-            .table
-            .data_descendants(element.node(), depth, key, prefix_len);
-        for loc in covered.rev() {
-            // Refresh the loc against the current node state: a prior take_data on the same
-            // node may have triggered a tier downgrade, changing data_idx and slot positions.
-            let loc = loc.refresh(&self.table);
-            self.table.take_data(loc);
-            self.count -= 1;
+        // Collect bitmap bits of covered data elements (from current node state).
+        // SAFETY: `node` came from `find_mut`; no structural mutations have occurred yet.
+        let covered_bits: Vec<u32> =
+            unsafe { self.table.data_descendants(node, depth, key, prefix_len) }
+                .map(|mp| mp.bit)
+                .collect();
+        for bit in covered_bits {
+            let idx = super::table::DataIdx { node, bit, depth };
+            // SAFETY: We only remove data cells in this loop; the node allocator structure
+            // (MultiBitNode slots, child pointers) is not modified, so `node` remains valid.
+            // resolve_mut re-reads the current AllocIdx + bitmap bit on each call, so it
+            // correctly handles any tier downgrades that occurred on prior iterations.
+            if let Some(r) = unsafe { idx.resolve_mut(&mut self.table) } {
+                r.take();
+                self.count -= 1;
+            }
         }
 
         // Collect bitmap bits of covered children (from original bitmap).
@@ -572,17 +581,20 @@ where
 
         // First: clear each covered child's subtree using the original Loc (parent bitmap unchanged).
         for &child_bit in &covered_child_bits {
-            let child_loc = self
-                .table
-                .child(node, child_bit)
+            // SAFETY: `node` is still valid (data-only removals above did not affect node
+            // structure). `child_bit` is set in the child_bitmap (from `child_cover_locs`).
+            let child_loc = unsafe { self.table.child(node, child_bit) }
                 .expect("child_bit should exist in bitmap");
-            self.count -= self.table.clear_node_and_children(child_loc);
+            // SAFETY: `child_loc` was just obtained from a valid `node` via `child()`.
+            self.count -= unsafe { self.table.clear_node_and_children(child_loc) };
         }
 
-        // Then: remove covered children from parent in reverse bit order so that removing a
-        // higher-bit child does not shift the physical slot of a lower-bit child.
-        for &child_bit in covered_child_bits.iter().rev() {
-            self.table.remove_child_at(node, child_bit);
+        // Then: remove covered children from parent. `remove_child_at` re-reads the current
+        // bitmap each time, so order does not matter.
+        for &child_bit in &covered_child_bits {
+            // SAFETY: `node` is still valid; each `clear_node_and_children` above only freed
+            // the *child's* allocation, not the parent's. The child_bitmap bit is still set.
+            unsafe { self.table.remove_child_at(node, child_bit) };
         }
     }
 
@@ -604,7 +616,8 @@ where
     /// # fn main() {}
     /// ```
     pub fn clear(&mut self) {
-        let deleted = self.table.clear_node_and_children(Loc::root());
+        // SAFETY: `Loc::root()` is always a valid, live node location.
+        let deleted = unsafe { self.table.clear_node_and_children(Loc::root()) };
         debug_assert_eq!(deleted, self.count);
         self.count = 0;
     }

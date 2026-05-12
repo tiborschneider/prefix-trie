@@ -7,7 +7,7 @@ use crate::{
     {
         allocator::{Loc, RawPtr},
         node::{child_bit, LexIterElem, MaskedLexIter},
-        table::{Present, Table, K},
+        table::{DataIdx, Table, K},
         PrefixMap,
     },
 };
@@ -39,7 +39,9 @@ impl<P: Prefix, T> Default for Iter<'_, P, T> {
 impl<'a, P: Prefix, T> Iter<'a, P, T> {
     /// Create a new iterator that iterates over all
     pub(crate) fn new(table: &'a Table<T>) -> Self {
-        let lex = table.lex_iter(Loc::root(), 0, <P::R as Zero>::zero());
+        // SAFETY: `Loc::root()` is always valid. The `&'a Table<T>` borrow prevents
+        // structural mutations for the lifetime of the iterator, keeping all Locs valid.
+        let lex = unsafe { table.lex_iter(Loc::root(), 0, <P::R as Zero>::zero()) };
         Self::at_node(table, lex)
     }
 
@@ -65,11 +67,20 @@ impl<'a, P: Prefix, T> Iterator for Iter<'a, P, T> {
             };
 
             match next {
-                LexIterElem::Data(element) => {
-                    return Some((element.prefix(key), table.get_data(element)));
+                LexIterElem::Data(idx) => {
+                    // SAFETY: `Iter` holds `&'a Table`; no structural changes occur during
+                    // immutable iteration, so `idx.node` remains valid.
+                    let Some(r) = (unsafe { idx.resolve(table) }) else {
+                        continue;
+                    };
+                    let p = r.prefix(key);
+                    return Some((p, r.get()));
                 }
                 LexIterElem::Child(next_loc, depth, next_key) => {
-                    self.stack.push(table.lex_iter(next_loc, depth, next_key))
+                    // SAFETY: `next_loc` came from the previous `lex_iter` step; the borrow
+                    // of `table` prevents structural mutations, so `next_loc` remains valid.
+                    self.stack
+                        .push(unsafe { table.lex_iter(next_loc, depth, next_key) })
                 }
             }
         }
@@ -124,7 +135,9 @@ impl<P: Prefix, T> Default for IterMut<'_, P, T> {
 impl<'a, P: Prefix, T> IterMut<'a, P, T> {
     /// Create a new iterator that iterates over all
     pub(crate) fn new(table: &'a mut Table<T>) -> Self {
-        let lex = table.lex_iter(Loc::root(), 0, <P::R as Zero>::zero());
+        // SAFETY: `Loc::root()` is always valid. The `&'a mut Table<T>` borrow prevents
+        // structural mutations for the lifetime of the iterator, keeping all Locs valid.
+        let lex = unsafe { table.lex_iter(Loc::root(), 0, <P::R as Zero>::zero()) };
         Self::at_node(table, lex)
     }
 
@@ -150,19 +163,23 @@ impl<'a, P: Prefix, T> Iterator for IterMut<'a, P, T> {
             };
 
             match next {
-                LexIterElem::Data(element) => {
-                    // SAFETY:
-                    // - self has exclusive reference to the entire table
-                    // - the tree is acyclic, so each node will be visited at most once.
-                    // - The node was already accessed before, but it immediately released again.
-                    // - Internal index msut point to an initialized memory, as required by the iterator
-                    //   invariant.
-                    return Some((element.prefix(key), unsafe {
-                        table.unsafe_get_mut(&mut ptr, element)
-                    }));
+                LexIterElem::Data(idx) => {
+                    // SAFETY: `IterMut` holds exclusive access to the table data; no structural
+                    // changes occur, so `idx.node` remains valid.
+                    let Some(r) = (unsafe { idx.resolve(table) }) else {
+                        continue;
+                    };
+                    let p = r.prefix(key);
+                    // SAFETY: `IterMut` was created from `&'a mut Table`; ptr was obtained
+                    // from that same table. The tree is acyclic so each node is visited at most
+                    // once, guaranteeing no two live `&mut T` references to the same slot.
+                    return Some((p, unsafe { r.unsafe_get_mut(&mut ptr) }));
                 }
                 LexIterElem::Child(next_idx, depth, next_key) => {
-                    self.stack.push(table.lex_iter(next_idx, depth, next_key))
+                    // SAFETY: `next_idx` came from the previous `lex_iter` step; the exclusive
+                    // borrow of `table` prevents structural mutations, so `next_idx` remains valid.
+                    self.stack
+                        .push(unsafe { table.lex_iter(next_idx, depth, next_key) })
                 }
             }
         }
@@ -193,7 +210,9 @@ pub struct IntoIter<P: Prefix, T> {
 impl<P: Prefix, T> IntoIter<P, T> {
     /// Create a new iterator that iterates over all
     pub(crate) fn new(table: Table<T>) -> Self {
-        let lex = table.lex_iter(Loc::root(), 0, <P::R as Zero>::zero());
+        // SAFETY: `Loc::root()` is always valid. `IntoIter` owns the table, preventing
+        // any external structural mutations for its lifetime.
+        let lex = unsafe { table.lex_iter(Loc::root(), 0, <P::R as Zero>::zero()) };
         Self::at_node(table, lex)
     }
 
@@ -215,13 +234,22 @@ impl<P: Prefix, T> Iterator for IntoIter<P, T> {
             };
 
             match next {
-                LexIterElem::Data(loc) => {
-                    let loc = loc.refresh(&self.table);
-                    return Some((loc.prefix(key), self.table.take_data(loc)));
+                LexIterElem::Data(idx) => {
+                    // SAFETY: IntoIter owns the table; no external mutations possible.
+                    // `take()` clears the bitmap bit, so the MaskedLexIter snapshot may
+                    // yield already-taken bits; `resolve_mut` re-checks and returns None.
+                    let Some(r) = (unsafe { idx.resolve_mut(&mut self.table) }) else {
+                        continue;
+                    };
+                    let p = r.prefix(key);
+                    return Some((p, r.take()));
                 }
-                LexIterElem::Child(next_loc, depth, next_key) => self
-                    .stack
-                    .push(self.table.lex_iter(next_loc, depth, next_key)),
+                LexIterElem::Child(next_loc, depth, next_key) => {
+                    // SAFETY: `IntoIter` owns the table and makes no structural mutations;
+                    // `next_loc` came from the previous `lex_iter` step and remains valid.
+                    self.stack
+                        .push(unsafe { self.table.lex_iter(next_loc, depth, next_key) })
+                }
             }
         }
         None
@@ -292,7 +320,7 @@ where
 pub struct Cover<'a, P: Prefix, T> {
     table: &'a Table<T>,
     next_loc: Option<Loc>,
-    lpm_elements: Vec<Present>,
+    lpm_elements: Vec<DataIdx>,
     key: P::R,
     prefix_len: u32,
     depth: u32,
@@ -326,23 +354,32 @@ where
             let Some(loc) = self.lpm_elements.pop() else {
                 // fill the lpm_nodes
                 let loc = self.next_loc?; // if none, then exit.
-                self.lpm_elements = self
-                    .table
-                    .data_ancestors(loc, self.depth, self.key, self.prefix_len)
-                    .collect();
+                                          // SAFETY: `Cover` holds `&'a Table<T>` — no structural mutations are possible
+                                          // for the lifetime `'a`. `loc` starts as `Loc::root()` and is only updated to
+                                          // the result of a prior `child()` call, so it is always a valid, live node.
+                self.lpm_elements = unsafe {
+                    self.table
+                        .data_ancestors(loc, self.depth, self.key, self.prefix_len)
+                }
+                .collect();
                 self.lpm_elements.reverse();
                 let prefix_in_this_node = self.prefix_len < self.depth + K;
                 self.next_loc = if prefix_in_this_node {
                     None
                 } else {
                     let child_bit = child_bit(self.depth, self.key);
-                    self.table.child(loc, child_bit)
+                    // SAFETY: same invariant as above.
+                    unsafe { self.table.child(loc, child_bit) }
                 };
                 self.depth += K;
                 continue;
             };
 
-            return Some((loc.prefix(self.key), self.table.get_data(loc)));
+            // SAFETY: `loc` came from `data_ancestors`, which only yields bits set in the
+            // bitmap. `Cover` holds `&'a Table<T>` and never mutates node structure.
+            let r = unsafe { loc.resolve(self.table) }
+                .expect("Cover: data_ancestors yielded stale idx");
+            return Some((r.prefix(self.key), r.get()));
         }
     }
 }

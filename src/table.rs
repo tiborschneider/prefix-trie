@@ -3,21 +3,331 @@
 use num_traits::Zero;
 
 use crate::{
+    allocator::{AllocIdx, CellAllocator, Loc, NodeAllocator, RawPtr},
+    node::{
+        child_bit, child_cover_mask, data_bit, data_cover_mask, extend_repr, Key, MaskedLexIter,
+        MultiBitNode, DATA_BIT_TO_PREFIX,
+    },
     prefix::mask_from_prefix_len,
     Prefix,
-    {
-        allocator::{compute_slot, AllocIdx, CellAllocator, Loc, NodeAllocator, RawPtr},
-        node::{
-            child_bit, child_cover_mask, data_bit, data_cover_mask, extend_repr, Key,
-            MaskedLexIter, MultiBitNode, DATA_BIT_TO_PREFIX,
-        },
-    },
 };
+
+// ============================================================================
+// Resolved reference types
+// ============================================================================
+//
+// Safety model
+// ────────────
+// The types below borrow the `Table<T>` directly:
+//   • `Present<'a, T>`    : holds `&'a Table<T>`     -> immutable, gives `&'a T`
+//   • `PresentMut<'a, T>` : holds `&'a mut Table<T>` -> mutable, gives `&'a mut T`
+//   • `EmptyMut<'a, T>`   : holds `&'a mut Table<T>` -> insert into an empty slot
+//   • `NoNodeMut<'a, T>`  : holds `&'a mut Table<T>` -> create path + insert
+//   • `Location<'a, T>`   : enum over the three mutable variants
+//
+// Because the borrow is held, Rust's borrow checker prevents any concurrent
+// structural mutation (tier upgrade/downgrade, node insert/remove) while a
+// resolved reference is alive.
+//
+// For iterator/retain patterns where a resolved reference cannot outlive a
+// mutation, use `DataIdx` (no borrow, `Copy`) and re-resolve after each
+// mutation.
 
 /// Number of levels inside each node
 pub(crate) const K: u32 = 5;
 pub(crate) const NUM_DATA: usize = (1 << (K as usize)) - 1;
 pub(crate) const NUM_CHILDREN: usize = 1 << (K as usize);
+
+/// An unresolved index into the trie.
+///
+/// A `Copy` token that identifies a data slot without borrowing the table.
+/// Obtained from iterators or the `DataIdx { node, bit, depth }` constructor.
+/// Re-resolve with [`DataIdx::resolve`] / [`DataIdx::resolve_mut`].
+///
+/// # Safety invariant
+/// `node` stores a `Loc` that was valid at construction time.  If the *node*
+/// allocator has been structurally modified since (tier upgrade/downgrade on a
+/// parent's children allocation), `node` may point into freed memory and
+/// resolution is unsound.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DataIdx {
+    /// Location of the `MultiBitNode` containing this data element.
+    pub(crate) node: Loc,
+    /// Bitmap bit position within the node.
+    pub(crate) bit: u32,
+    /// Binary-tree depth of the node (multiple of `K`).
+    pub(crate) depth: u32,
+}
+
+impl DataIdx {
+    /// Resolve to an immutable reference.
+    ///
+    /// # Safety
+    /// `table.nodes` must not have been structurally modified since this
+    /// `DataIdx` was created; otherwise `self.node` may be dangling.
+    ///
+    /// Returns `None` if the bitmap bit is no longer set (element removed).
+    #[inline]
+    pub(crate) unsafe fn resolve<'a, T>(self, table: &'a Table<T>) -> Option<Present<'a, T>> {
+        let node = table.node(self.node);
+        if !node.has_data_bit(self.bit) {
+            return None;
+        }
+        let data = Loc::new(node.data_idx, self.bit, node.data_bitmap);
+        Some(Present {
+            table,
+            data,
+            depth: self.depth,
+        })
+    }
+
+    /// Resolve to a mutable reference.
+    ///
+    /// # Safety
+    /// Same as [`DataIdx::resolve`].
+    ///
+    /// Returns `None` if the bitmap bit is no longer set.
+    #[inline]
+    pub(crate) unsafe fn resolve_mut<'a, T>(
+        self,
+        table: &'a mut Table<T>,
+    ) -> Option<PresentMut<'a, T>> {
+        let node = table.node(self.node);
+        if !node.has_data_bit(self.bit) {
+            return None;
+        }
+        let data = Loc::new(node.data_idx, self.bit, node.data_bitmap);
+        Some(PresentMut {
+            table,
+            node: self.node,
+            data,
+            depth: self.depth,
+        })
+    }
+}
+
+/// An immutable resolved reference to a data element.
+///
+/// Holds `&'a Table<T>`, preventing structural mutations while alive.
+pub(crate) struct Present<'a, T> {
+    table: &'a Table<T>,
+    data: Loc,
+    depth: u32,
+}
+
+impl<'a, T> Present<'a, T> {
+    /// Get a shared reference to the value, with the table's lifetime.
+    #[inline]
+    pub(crate) fn get(self) -> &'a T {
+        // SAFETY: `Ref` is only constructed when the bitmap bit is set and
+        // `data.slot == compute_slot(data_bitmap, data.bit)`.
+        unsafe { self.table.cells.get(self.data) }
+    }
+
+    /// Get a mutable reference via a pre-acquired raw cell pointer.
+    ///
+    /// Used by [`IterMut`] to return `&'a mut T` while the iterator holds only `&'a Table<T>`.
+    ///
+    /// # Safety
+    /// No other live `&T` or `&mut T` references to this slot must exist, and `ptr` must have
+    /// been obtained from the same table.
+    #[inline]
+    #[allow(clippy::mut_from_ref)]
+    pub(crate) unsafe fn unsafe_get_mut(self, ptr: &mut RawPtr<T>) -> &'a mut T {
+        // SAFETY: `self.table` has lifetime 'a; `cells.unsafe_get_mut` is parameterized by
+        // that lifetime, so the returned reference inherits lifetime 'a from the table borrow.
+        unsafe { self.table.cells.unsafe_get_mut(ptr, self.data) }
+    }
+
+    /// Compute the prefix of this element.
+    pub(crate) fn prefix<P: Prefix>(&self, key: P::R) -> P {
+        prefix(key, self.depth, self.data.bit as usize)
+    }
+}
+
+/// A mutable resolved reference to a data element.
+///
+/// Holds `&'a mut Table<T>`, preventing any concurrent access.
+pub(crate) struct PresentMut<'a, T> {
+    table: &'a mut Table<T>,
+    node: Loc,
+    data: Loc,
+    depth: u32,
+}
+
+impl<'a, T> PresentMut<'a, T> {
+    /// Get a mutable reference to the value, with the table's lifetime.
+    /// Consumes `self` so that the exclusive borrow is released into `&'a mut T`.
+    #[inline]
+    pub(crate) fn get_mut(self) -> &'a mut T {
+        // SAFETY: bitmap bit is set, slot is correct, exclusive `&mut Table`.
+        unsafe { self.table.cells.get_mut(self.data) }
+    }
+
+    /// Get a shared reference to the value.
+    #[inline]
+    pub(crate) fn get(&self) -> &T {
+        // SAFETY: bitmap bit is set, slot is correct.
+        unsafe { self.table.cells.get(self.data) }
+    }
+
+    /// Get a mutable reference to the value, borrowing `self` mutably.
+    /// Unlike [`get_mut`], this does not consume `self`, so the `PresentMut` remains usable.
+    #[inline]
+    pub(crate) fn as_mut(&mut self) -> &mut T {
+        // SAFETY: bitmap bit is set, slot is correct, exclusive `&mut Table` via `&mut self`.
+        unsafe { self.table.cells.get_mut(self.data) }
+    }
+
+    /// Replace the value, returning the old one. Consumes `self`.
+    #[inline]
+    pub(crate) fn replace(self, val: T) -> T {
+        // SAFETY: bitmap bit is set, slot is correct.
+        unsafe { self.table.cells.replace(self.data, val) }
+    }
+
+    /// Remove and return the value. Consumes `self`.
+    #[inline]
+    pub(crate) fn take(self) -> T {
+        self.table
+            .cells
+            .remove_bit(&mut self.table.nodes[self.node], self.data)
+    }
+
+    /// Compute the prefix of this element.
+    pub(crate) fn prefix<P: Prefix>(&self, key: P::R) -> P {
+        prefix(key, self.depth, self.data.bit as usize)
+    }
+}
+
+/// A resolved reference to an *empty* data slot (bitmap bit is **not** set).
+///
+/// Holds `&'a mut Table<T>`.
+pub(crate) struct EmptyMut<'a, T> {
+    pub(crate) table: &'a mut Table<T>,
+    pub(crate) node: Loc,
+    pub(crate) data_bit: u32,
+    pub(crate) depth: u32,
+}
+
+impl<'a, T> EmptyMut<'a, T> {
+    /// Insert a value, consuming `self` and returning a mutable reference to
+    /// the newly inserted element.
+    #[inline]
+    pub(crate) fn insert(self, val: T) -> PresentMut<'a, T> {
+        let data =
+            self.table
+                .cells
+                .insert_new_bit(&mut self.table.nodes[self.node], self.data_bit, val);
+        PresentMut {
+            table: self.table,
+            node: self.node,
+            data,
+            depth: self.depth,
+        }
+    }
+}
+
+/// The last reachable node when no intermediate trie node exists on the path
+/// to the target prefix.
+pub(crate) struct NoNodeMut<'a, T> {
+    pub(crate) table: &'a mut Table<T>,
+    pub(crate) last_node: Loc,
+    pub(crate) last_depth: u32,
+}
+
+impl<'a, T> NoNodeMut<'a, T> {
+    /// Take one step toward `(key, prefix_len)`.
+    ///
+    /// If the target prefix fits within the current node (i.e. `prefix_len < last_depth + K`),
+    /// returns `Ok(EmptyMut)` ready for insertion.  Otherwise creates the next child node
+    /// (the `NoNodeMut` invariant guarantees it is absent) and returns `Err(NoNodeMut)` pointing
+    /// one level deeper.
+    #[inline(always)]
+    pub(crate) fn advance<R: Key>(self, key: R, prefix_len: u32) -> Result<EmptyMut<'a, T>, Self> {
+        let NoNodeMut {
+            table,
+            last_node,
+            last_depth,
+        } = self;
+        if prefix_len < last_depth + K {
+            let data_bit = data_bit(key, prefix_len);
+            Ok(EmptyMut {
+                table,
+                node: last_node,
+                data_bit,
+                depth: last_depth,
+            })
+        } else {
+            let child_bit = child_bit(last_depth, key);
+            // SAFETY: `NoNodeMut` is only constructed when `find_mut` (or a prior `advance`)
+            // could not follow the child pointer at `(last_node, child_bit)` — meaning that
+            // child bit is guaranteed to be unset in `last_node`'s child_bitmap.
+            // `insert_new_bit` requires the bit to be clear (asserted in debug mode); this
+            // invariant is upheld here.
+            let next_node = table.nodes.insert_new_bit(last_node, child_bit);
+            Err(NoNodeMut {
+                table,
+                last_node: next_node,
+                last_depth: last_depth + K,
+            })
+        }
+    }
+
+    /// Create all intermediate trie nodes needed to reach `(key, prefix_len)` and insert `val`.
+    /// The `NoNodeMut` invariant guarantees the data slot is unoccupied.
+    pub(crate) fn insert_path_and_data<R: Key>(
+        mut self,
+        key: R,
+        prefix_len: u32,
+        val: T,
+    ) -> PresentMut<'a, T> {
+        loop {
+            match self.advance(key, prefix_len) {
+                Ok(empty) => return empty.insert(val),
+                Err(next) => self = next,
+            }
+        }
+    }
+}
+
+/// Result of a mutable lookup.
+pub(crate) enum Location<'a, T> {
+    Present(PresentMut<'a, T>),
+    Empty(EmptyMut<'a, T>),
+    NoNode(NoNodeMut<'a, T>),
+}
+
+impl<'a, T> Location<'a, T> {
+    /// Return the inner `PresentMut` if the slot is occupied, `None` otherwise.
+    #[inline]
+    pub(crate) fn present(self) -> Option<PresentMut<'a, T>> {
+        match self {
+            Location::Present(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Return the node `Loc` regardless of variant.
+    #[inline]
+    pub(crate) fn node_loc(&self) -> Loc {
+        match self {
+            Location::Present(p) => p.node,
+            Location::Empty(e) => e.node,
+            Location::NoNode(n) => n.last_node,
+        }
+    }
+
+    /// Return the depth regardless of variant.
+    #[inline]
+    pub(crate) fn depth(&self) -> u32 {
+        match self {
+            Location::Present(p) => p.depth,
+            Location::Empty(e) => e.depth,
+            Location::NoNode(n) => n.last_depth,
+        }
+    }
+}
 
 /// A table to the dense prefix-trie that offers interior mutability.
 ///
@@ -68,15 +378,12 @@ impl<T> Drop for Table<T> {
 }
 
 // Safety:
-// - Sending a Table over thread boundary is fine. No-one besides us can have the raw pointer,
-//   otherwise, the map would be borrowed.
-// - Sending a reference of Table over thread boundaries (i.e., TrieView is Send) is safe,
-//   because we ensure that the existence of a TrieView on a sub-tree implies the absence of a
-//   TrieViewMut that overlaps with that sub-tree.
-// - Sending a mutable reference of Table over thread boundaries (i.e., TrieView is Send) is
-//   safe, because we ensure that the existence of a TrieViewMut on a sub-tree implies the absence
-//   of any other TrieView or TrieViewMut that overlaps with that sub-tree.
-// The same argument holds for Sync.
+// `CellAllocator` uses `UnsafeCell`, making `Table` `!Sync` by default. Manual impls are sound:
+// - Send: owning a Table (or &mut Table) and moving it across threads is safe — no external
+//   references can exist while the move happens.
+// - Sync: sharing `&Table` across threads is safe because `unsafe_get_mut` (the only path that
+//   produces `&mut T` from `&Table`) requires a `RawPtr` obtained from `&mut Table` and is only
+//   used in `IterMut`/`TrieRefMut`, which enforce disjoint access via the acyclic tree structure.
 unsafe impl<T: Send> Send for Table<T> {}
 unsafe impl<T: Sync> Sync for Table<T> {}
 
@@ -85,21 +392,17 @@ impl<T> Table<T> {
         self.cells.raw_ptr()
     }
 
-    /// get the root node
-    #[inline(always)]
-    pub(crate) fn root(&self) -> &MultiBitNode {
-        // Safety: no-one else owns a mutable reference to the table.
-        &self.nodes[Loc::root()]
-    }
-
     #[inline(always)]
     pub(crate) fn node(&self, pos: Loc) -> &MultiBitNode {
-        // Safety: no-one else owns a mutable reference to the table.
         &self.nodes[pos]
     }
 
+    /// Return the child node at `child_bit`, or `None` if absent.
+    // SAFETY: `pos` must be a valid, live node location: the `AllocIdx` inside `pos` must
+    // still point into the active node allocation (i.e. no tier upgrade/downgrade of `pos`'s
+    // parent has occurred since `pos` was obtained).
     #[inline(always)]
-    pub(crate) fn child(&self, pos: Loc, child_bit: u32) -> Option<Loc> {
+    pub(crate) unsafe fn child(&self, pos: Loc, child_bit: u32) -> Option<Loc> {
         let node = self.node(pos);
         if node.has_child_bit(child_bit) {
             Some(Loc::new(node.children_idx, child_bit, node.child_bitmap))
@@ -111,66 +414,15 @@ impl<T> Table<T> {
     /// Remove a child from a parent node and compact the children allocation.
     ///
     /// After insertion, each child occupies physical slot `compute_slot(child_bitmap, bit)`.
-    /// Simply calling `unset_child_offset` clears the bit but leaves the physical array unchanged,
-    /// making remaining children inaccessible at the wrong slots. This function correctly shifts
-    /// the array and handles tier downgrades.
+    /// Simply clearing the bit would leave the physical array unchanged, making remaining
+    /// children inaccessible at the wrong slots. This function shifts the array and handles
+    /// tier downgrades.
+    ///
+    /// # Safety
+    /// `parent_loc` must be a valid, live node location (same invariant as [`Self::child`]).
     #[inline(always)]
-    pub(crate) fn remove_child_at(&mut self, parent_loc: Loc, child_bit: u32) {
+    pub(crate) unsafe fn remove_child_at(&mut self, parent_loc: Loc, child_bit: u32) {
         self.nodes.remove_bit(parent_loc, child_bit);
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_data(&self, loc: Present) -> &T {
-        // SAFETY: `Present` may only be constructed when the bitmap bit at `loc.data.bit`
-        // is set and `loc.data.slot == compute_slot(bitmap, bit)`, guaranteeing the cell
-        // at `data.idx + data.slot` is initialized.
-        unsafe { self.cells.get(loc.data) }
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_data_mut(&mut self, loc: Present) -> &mut T {
-        // SAFETY: Same as `get_data`; `Present` invariant guarantees initialization and correct
-        // slot. Exclusive `&mut self` ensures no aliasing.
-        unsafe { self.cells.get_mut(loc.data) }
-    }
-
-    /// SAFETY: you must ensure that:
-    /// 1. The raw pointer must be the same as self.internal_nodes.
-    /// 2. There exists no reference to that location right now.
-    /// 3. During 'a, you will never ever again construct a reference to the internal_nodes table.
-    /// 4. During 'a, you will never again access this location again.
-    #[inline(always)]
-    #[allow(clippy::mut_from_ref)]
-    pub(crate) unsafe fn unsafe_get_mut(&self, ptr: &mut RawPtr<T>, loc: Present) -> &mut T {
-        // SAFETY: Caller upholds the invariants declared on this function (exclusive access,
-        // no other live references). `Present` invariant ensures `loc.data.slot` points to an
-        // initialized cell with the correct POPCNT-derived offset.
-        unsafe { self.cells.unsafe_get_mut(ptr, loc.data) }
-    }
-
-    #[inline(always)]
-    pub(crate) fn set_data(&mut self, loc: Empty, val: T) -> Present {
-        let data_loc = self
-            .cells
-            .insert_new_bit(&mut self.nodes[loc.node], loc.data_bit, val);
-        // SAFETY:
-        // - `set_data_bit(raw)` just set the bitmap bit, and the value was written above,
-        //   so the cell at `data_idx + phys_slot` is now initialized.
-        // - `phys_slot` = compute_slot(bitmap_before_insert, data_bit), which is the
-        //   correct physical slot for this raw offset after the insertion shift.
-        unsafe { Present::new(loc.node, data_loc, loc.depth) }
-    }
-
-    #[inline(always)]
-    pub(crate) fn replace_data(&mut self, loc: Present, val: T) -> T {
-        // SAFETY: `Present` invariant: bitmap bit at `loc.data.bit` is set and
-        // `loc.data.slot == compute_slot(bitmap, bit)`, so the cell is initialized.
-        unsafe { self.cells.replace(loc.data, val) }
-    }
-
-    #[inline(always)]
-    pub(crate) fn take_data(&mut self, loc: Present) -> T {
-        self.cells.remove_bit(&mut self.nodes[loc.node], loc.data)
     }
 
     pub(crate) fn mem_size(&self) -> usize {
@@ -189,289 +441,80 @@ impl<T> Table<T> {
             }
         }
     }
-}
 
-impl<T: Clone> Clone for Table<T> {
-    fn clone(&self) -> Self {
-        let mut x = Self {
-            nodes: self.nodes.clone(),
-            cells: Default::default(),
-        };
-
-        // The cloned node allocator initially contains data_idx values that point into `self`.
-        // Clear live data metadata first so `x` can be dropped safely if T::clone panics below.
-        let mut stack = vec![Loc::root()];
-        while let Some(loc) = stack.pop() {
-            let node = self.nodes[loc];
-            x.nodes[loc].data_bitmap = 0;
-            x.nodes[loc].data_idx = AllocIdx::empty();
-            if node.child_bitmap != 0 {
-                stack.extend(node.child_locs());
-            }
-        }
-
-        // Clone only live nodes reachable from root via DFS. Freed nodes in the flat
-        // array may have stale data_bitmap/data_idx from tier upgrades; visiting them
-        // would allocate cells that are never freed, causing a memory leak.
-        let mut stack = vec![Loc::root()];
-        while let Some(loc) = stack.pop() {
-            let node = self.nodes[loc];
-            if node.data_bitmap != 0 && !node.data_idx.is_empty() {
-                let count = node.data_bitmap.count_ones() as usize;
-                let data_idx = x.cells.alloc(count);
-                x.nodes[loc].data_idx = data_idx;
-                for data_loc in node.data_locs() {
-                    let val = unsafe { self.cells.get(data_loc) }.clone();
-                    unsafe { x.cells.write_at(data_idx, data_loc.slot, val) };
-                    x.nodes[loc].set_data_bit(data_loc.bit);
-                }
-            }
-            if node.child_bitmap != 0 {
-                stack.extend(node.child_locs());
-            }
-        }
-
-        x
-    }
-}
-
-/// Safety: This represents a present (initialized) data element in the trie.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Present {
-    node: Loc,
-    data: Loc, // includes bit (bitmap position) and slot (physical location)
-    depth: u32,
-}
-
-impl Present {
-    /// SAFETY:
-    /// - The data cell at `data.slot` (computed from `data.bit` and the node's data_bitmap) must be initialized.
-    /// - The node's data_bitmap bit at `data.bit` must be set, indicating the entry is present.
-    /// - `data.slot` must equal `compute_slot(node.data_bitmap, data.bit)`.
-    pub(crate) unsafe fn new(node: Loc, data: Loc, depth: u32) -> Self {
-        debug_assert!((data.bit as usize) < NUM_DATA);
-        Self { node, data, depth }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Empty {
-    node: Loc,
-    pub(crate) data_bit: u32, // bitmap bit where data will be inserted
-    depth: u32,
-}
-
-impl Empty {
-    /// SAFETY: The referenced cell at data_bit must be empty (uninitialized).
-    pub(crate) unsafe fn new(node: Loc, data_bit: u32, depth: u32) -> Self {
-        debug_assert!((data_bit as usize) < NUM_DATA);
-        Self {
-            node,
-            data_bit,
-            depth,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct NoNode {
-    last_node: Loc,
-    last_depth: u32,
-}
-
-impl NoNode {
-    /// SAFETY: The referenced cell at internal_idx must be empty (uninitialized).
-    pub(crate) fn new(last_node: Loc, last_depth: u32) -> Self {
-        Self {
-            last_node,
-            last_depth,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum Location {
-    Present(Present),
-    Empty(Empty),
-    NoNode(NoNode),
-}
-
-impl Location {
-    pub fn present(self) -> Option<Present> {
-        match self {
-            Location::Present(l) => Some(l),
-            _ => None,
-        }
-    }
-
-    pub fn into_node(self) -> Option<Result<Present, Empty>> {
-        match self {
-            Location::Present(l) => Some(Ok(l)),
-            Location::Empty(l) => Some(Err(l)),
-            _ => None,
-        }
-    }
-}
-
-#[rustfmt::skip]
-pub(crate) trait ElementLoc {
-    fn node(&self) -> Loc;
-    fn depth(&self) -> u32;
-}
-
-impl Present {
-    /// Compute the prefix of that element
-    pub(crate) fn prefix<P: Prefix>(&self, key: P::R) -> P {
-        prefix(key, self.depth, self.data.bit as usize)
-    }
-
-    /// Get the bitmap bit position of this data element
-    pub(crate) fn bit(&self) -> u32 {
-        self.data.bit
-    }
-
-    /// Refresh this location against the current node state.
-    ///
-    /// When multiple `take_data` calls are made on the same node in sequence (e.g. in
-    /// `remove_children`), tier downgrades inside `take_data` may update `node.data_idx` and
-    /// shift elements to a new allocation. The `Present` values produced by `data_descendants`
-    /// were computed from a snapshot and may hold a stale `data.idx`. This method re-reads
-    /// `data_idx` from the live node and recomputes `data.slot` from the live bitmap, returning
-    /// a fresh `Present` that is safe to pass to `take_data`.
-    pub(crate) fn refresh<T>(self, table: &Table<T>) -> Self {
-        let node = table.node(self.node);
-        let current_idx = node.data_idx;
-        let current_slot = compute_slot(node.data_bitmap, self.data.bit);
-        // The bit must still be set; if it isn't, the caller has a logic error.
-        debug_assert!(
-            (node.data_bitmap >> self.data.bit) & 1 == 1,
-            "refresh: bit {} is no longer set in data_bitmap",
-            self.data.bit
-        );
-        Self {
-            node: self.node,
-            data: Loc {
-                idx: current_idx,
-                bit: self.data.bit,
-                slot: current_slot,
-            },
-            depth: self.depth,
-        }
-    }
-}
-
-fn prefix<P: Prefix>(key: P::R, depth: u32, data_offset: usize) -> P {
-    let mask = mask_from_prefix_len(depth as u8);
-    let root = key & mask;
-
-    let (offset, offset_len) = DATA_BIT_TO_PREFIX[data_offset];
-    let offset = <P::R as num_traits::cast::NumCast>::from(offset).unwrap();
-    let offset_bits = K - 1;
-    let total_width = P::num_bits();
-    let shifted_offset = if total_width > depth + offset_bits {
-        offset << (total_width - (depth + offset_bits)) as usize
-    } else {
-        offset >> (depth + offset_bits - total_width) as usize
-    };
-
-    let repr = root | shifted_offset;
-    let prefix_len = depth + offset_len as u32;
-
-    P::from_repr_len(repr, prefix_len as u8)
-}
-
-#[rustfmt::skip]
-impl ElementLoc for Present {
-    fn node(&self) -> Loc { self.node }
-    fn depth(&self) -> u32 { self.depth }
-}
-#[rustfmt::skip]
-impl ElementLoc for Empty {
-    fn node(&self) -> Loc { self.node }
-    fn depth(&self) -> u32 { self.depth }
-}
-#[rustfmt::skip]
-impl ElementLoc for NoNode {
-    fn node(&self) -> Loc { self.last_node }
-    fn depth(&self) -> u32 { self.last_depth }
-}
-#[rustfmt::skip]
-impl<A: ElementLoc, B: ElementLoc> ElementLoc for Result<A, B> {
-    fn node(&self) -> Loc { match self {Ok(a) => a.node(), Err(b) => b.node(), } }
-    fn depth(&self) -> u32 { match self {Ok(a) => a.depth(), Err(b) => b.depth(), } }
-}
-impl ElementLoc for Location {
-    fn node(&self) -> Loc {
-        match self {
-            Location::Present(x) => x.node,
-            Location::Empty(x) => x.node,
-            Location::NoNode(x) => x.last_node,
-        }
-    }
-    fn depth(&self) -> u32 {
-        match self {
-            Location::Present(x) => x.depth,
-            Location::Empty(x) => x.depth,
-            Location::NoNode(x) => x.last_depth,
-        }
-    }
-}
-
-impl<T> Table<T> {
-    /// Find the node in which the given prefix is/should be stored. If the node does not exist,
-    /// the function returns Err(idx) with the index of the closest parent of that node.
+    /// Traverse child pointers to the `MultiBitNode` containing `prefix_len`.
+    /// Returns `(node_loc, depth)` on success, or `None` if any required child is absent.
+    /// This is the shared traversal primitive used by all `find_*` methods.
     #[inline(always)]
-    pub(crate) fn find_element<R: Key>(&self, key: R, prefix_len: u32) -> Location {
+    fn find_loc<R: Key>(&self, key: R, prefix_len: u32) -> Option<(Loc, u32)> {
         let mut loc = Loc::root();
-        let mut node = self.root();
-        let mut depth = 0;
+        let mut depth = 0u32;
         while prefix_len >= depth + K {
-            let child_bit = child_bit(depth, key);
-            let Some(next) = self.child(loc, child_bit) else {
-                return Location::NoNode(NoNode::new(loc, depth));
+            let cb = child_bit(depth, key);
+            // SAFETY: `loc` starts as `Loc::root()` (always valid) and is only updated
+            // to the result of a prior `child()` call, which always returns a valid `Loc`.
+            let Some(next) = (unsafe { self.child(loc, cb) }) else {
+                return None;
             };
             loc = next;
             depth += K;
-            node = self.node(loc);
         }
-        let data_bit = data_bit(key, prefix_len);
-        if node.has_data_bit(data_bit) {
-            let data_loc = Loc::new(node.data_idx, data_bit, node.data_bitmap);
-            Location::Present(
-                // SAFETY: `has_data_bit` confirmed the bitmap bit at `data_bit` is set,
-                // so the element is initialized. `slot` = compute_slot(node.data_bitmap, data_bit).
-                unsafe { Present::new(loc, data_loc, depth) },
-            )
+        Some((loc, depth))
+    }
+
+    /// Find the exact prefix and return an immutable reference.
+    /// Returns `None` if the prefix is absent.
+    #[inline(always)]
+    pub(crate) fn find<R: Key>(&self, key: R, prefix_len: u32) -> Option<Present<'_, T>> {
+        let mut loc = Loc::root();
+        let mut depth = 0;
+        while prefix_len >= depth + K {
+            let child_bit = child_bit(depth, key);
+            // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
+            // of a prior `child()` call, which always returns a valid `Loc`.
+            let Some(next) = (unsafe { self.child(loc, child_bit) }) else {
+                return None;
+            };
+            loc = next;
+            depth += K;
+        }
+        let node = self.node(loc);
+        let db = data_bit(key, prefix_len);
+        if node.has_data_bit(db) {
+            let data = Loc::new(node.data_idx, db, node.data_bitmap);
+            Some(Present {
+                table: self,
+                data,
+                depth,
+            })
         } else {
-            Location::Empty(
-                // SAFETY: `has_data_bit` returned false, so the bitmap bit at `data_bit`
-                // is clear, meaning no element is stored at this position.
-                unsafe { Empty::new(loc, data_bit, depth) },
-            )
+            None
         }
     }
 
-    /// Find the location of the longest prefix match.
+    /// Find the longest-prefix match and return an immutable reference.
     #[inline(always)]
-    pub(crate) fn find_lpm<R: Key>(&self, key: R, prefix_len: u32) -> Option<Present> {
+    pub(crate) fn find_lpm<R: Key>(&self, key: R, prefix_len: u32) -> Option<Present<'_, T>> {
         let mut loc = Loc::root();
         let mut depth = 0;
-        let mut lpm = None;
+        let mut lpm: Option<Present<'_, T>> = None;
 
         loop {
             let node = self.node(loc);
-            // update the LPM
             if let Some(data_loc) = node.data_lpm_loc(depth, key, prefix_len) {
-                // SAFETY: `data_lpm_loc` only returns `Some(loc)` when the bitmap bit at
-                // `loc.bit` is set, and `loc.slot == compute_slot(data_bitmap, bit)`.
-                lpm = Some(unsafe { Present::new(loc, data_loc, depth) });
+                lpm = Some(Present {
+                    table: self,
+                    data: data_loc,
+                    depth,
+                });
             }
-            // if the prefix is in this node
             if prefix_len < depth + K {
                 return lpm;
             }
             let child_bit = child_bit(depth, key);
-            let Some(next) = self.child(loc, child_bit) else {
+            // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
+            // of a prior `child()` call, which always returns a valid `Loc`.
+            let Some(next) = (unsafe { self.child(loc, child_bit) }) else {
                 return lpm;
             };
             loc = next;
@@ -479,175 +522,281 @@ impl<T> Table<T> {
         }
     }
 
-    /// Find the location of the shortest prefix match.
+    /// Find the longest-prefix match and return a mutable reference.
     #[inline(always)]
-    pub(crate) fn find_spm<R: Key>(&self, key: R, prefix_len: u32) -> Option<Present> {
+    pub(crate) fn find_lpm_mut<R: Key>(
+        &mut self,
+        key: R,
+        prefix_len: u32,
+    ) -> Option<PresentMut<'_, T>> {
+        let mut loc = Loc::root();
+        let mut depth = 0;
+        let mut lpm: Option<(Loc, Loc, u32)> = None; // (node, data, depth)
+
+        loop {
+            let node = self.node(loc);
+            if let Some(data_loc) = node.data_lpm_loc(depth, key, prefix_len) {
+                lpm = Some((loc, data_loc, depth));
+            }
+            if prefix_len < depth + K {
+                break;
+            }
+            let child_bit = child_bit(depth, key);
+            // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
+            // of a prior `child()` call, which always returns a valid `Loc`.
+            let Some(next) = (unsafe { self.child(loc, child_bit) }) else {
+                break;
+            };
+            loc = next;
+            depth += K;
+        }
+
+        let (node, data, depth) = lpm?;
+        // Re-read node to get fresh data_idx after any mutations; here there are none,
+        // but we re-read for consistency and to satisfy the borrow checker.
+        let node_snap = self.node(node);
+        let data = Loc::new(node_snap.data_idx, data.bit, node_snap.data_bitmap);
+        Some(PresentMut {
+            table: self,
+            node,
+            data,
+            depth,
+        })
+    }
+
+    /// Find the shortest-prefix match and return an immutable reference.
+    #[inline(always)]
+    pub(crate) fn find_spm<R: Key>(&self, key: R, prefix_len: u32) -> Option<Present<'_, T>> {
         let mut loc = Loc::root();
         let mut depth = 0;
 
         loop {
             let node = self.node(loc);
-            // update the SPM
-            if let Some(spm_loc) = node.data_spm_loc(depth, key, prefix_len) {
-                // SAFETY: `data_spm_loc` only returns `Some(loc)` when the bitmap bit at
-                // `loc.bit` is set, and `loc.slot == compute_slot(data_bitmap, bit)`.
-                return Some(unsafe { Present::new(loc, spm_loc, depth) });
+            if let Some(data_loc) = node.data_spm_loc(depth, key, prefix_len) {
+                return Some(Present {
+                    table: self,
+                    data: data_loc,
+                    depth,
+                });
             }
-            // if the prefix is in this node
             if prefix_len < depth + K {
                 return None;
             }
             let child_bit = child_bit(depth, key);
-            loc = self.child(loc, child_bit)?;
+            // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
+            // of a prior `child()` call, which always returns a valid `Loc`.
+            loc = unsafe { self.child(loc, child_bit) }?;
             depth += K;
         }
     }
 
-    /// Find the node in which the given prefix is/should be stored. If the node does not exist,
-    /// the function returns Err(idx) with the index of the closest parent of that node. If it does
-    /// exist, the function returns also a path, that is, the index of each node along with the
-    /// external index taken to reach the node. The returned node is not part of that path. The root
-    /// is the first element in the path.
+    /// Find the exact prefix and return a mutable location (present / empty /
+    /// no-node).
     #[inline(always)]
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn find_element_with_path<R: Key>(
-        &self,
+    pub(crate) fn find_mut<R: Key>(&mut self, key: R, prefix_len: u32) -> Location<'_, T> {
+        let mut loc = Loc::root();
+        let mut depth = 0;
+        while prefix_len >= depth + K {
+            let child_bit = child_bit(depth, key);
+            // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
+            // of a prior `child()` call, which always returns a valid `Loc`.
+            let Some(next) = (unsafe { self.child(loc, child_bit) }) else {
+                return Location::NoNode(NoNodeMut {
+                    table: self,
+                    last_node: loc,
+                    last_depth: depth,
+                });
+            };
+            loc = next;
+            depth += K;
+        }
+        let db = data_bit(key, prefix_len);
+        let node = self.node(loc);
+        if node.has_data_bit(db) {
+            let data = Loc::new(node.data_idx, db, node.data_bitmap);
+            Location::Present(PresentMut {
+                table: self,
+                node: loc,
+                data,
+                depth,
+            })
+        } else {
+            Location::Empty(EmptyMut {
+                table: self,
+                node: loc,
+                data_bit: db,
+                depth,
+            })
+        }
+    }
+
+    /// Find the exact prefix, creating intermediate nodes if necessary.
+    /// Returns `Ok(PresentMut)` if the element already exists, or `Err(EmptyMut)`
+    /// if the slot is available for insertion.
+    #[inline(always)]
+    pub(crate) fn find_or_insert_mut<R: Key>(
+        &mut self,
         key: R,
         prefix_len: u32,
-    ) -> Option<(Result<Present, Empty>, Vec<(Loc, u32)>)> {
+    ) -> Result<PresentMut<'_, T>, EmptyMut<'_, T>> {
+        let mut loc = Loc::root();
+        let mut depth = 0;
+        while prefix_len >= depth + K {
+            let cb = child_bit(depth, key);
+            // SAFETY: `loc` starts as `Loc::root()` (always valid) and is only updated to
+            // the result of a previous `child()` call or `insert_new_bit()`, both of which
+            // return a valid `Loc`.
+            loc = match unsafe { self.child(loc, cb) } {
+                Some(next) => next,
+                None => self.nodes.insert_new_bit(loc, cb),
+            };
+            depth += K;
+        }
+        let db = data_bit(key, prefix_len);
+        let node = self.node(loc);
+        if node.has_data_bit(db) {
+            let data = Loc::new(node.data_idx, db, node.data_bitmap);
+            Ok(PresentMut {
+                table: self,
+                node: loc,
+                data,
+                depth,
+            })
+        } else {
+            Err(EmptyMut {
+                table: self,
+                node: loc,
+                data_bit: db,
+                depth,
+            })
+        }
+    }
+
+    /// Find the exact prefix with path, returning a mutable location.
+    /// The path is a vector of `(parent_loc, child_bit)` from root to the node.
+    #[inline(always)]
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn find_mut_with_path<R: Key>(
+        &mut self,
+        key: R,
+        prefix_len: u32,
+    ) -> Option<(Location<'_, T>, Vec<(Loc, u32)>)> {
         let mut path: Vec<(Loc, u32)> = Vec::new();
         let mut loc = Loc::root();
         let mut depth = 0;
         while prefix_len >= depth + K {
             let child_bit = child_bit(depth, key);
-            let next_loc = self.child(loc, child_bit)?;
+            // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
+            // of a prior `child()` call, which always returns a valid `Loc`.
+            let next_loc = unsafe { self.child(loc, child_bit) }?;
             path.push((loc, child_bit));
             loc = next_loc;
             depth += K;
         }
-
+        let db = data_bit(key, prefix_len);
         let node = self.node(loc);
-        let data_bit = data_bit(key, prefix_len);
-        let result = if node.has_data_bit(data_bit) {
-            let data_loc = Loc::new(node.data_idx, data_bit, node.data_bitmap);
-            // SAFETY: `has_data_bit` confirmed the bitmap bit at `data_bit` is set, so the
-            // element is initialized. `slot` = compute_slot(node.data_bitmap, data_bit).
-            Ok(unsafe { Present::new(loc, data_loc, depth) })
+        let loc_mut = if node.has_data_bit(db) {
+            let data = Loc::new(node.data_idx, db, node.data_bitmap);
+            Location::Present(PresentMut {
+                table: self,
+                node: loc,
+                data,
+                depth,
+            })
         } else {
-            // SAFETY: `has_data_bit` returned false, so the bitmap bit at `data_bit` is clear
-            // and no element is stored at this position.
-            Err(unsafe { Empty::new(loc, data_bit, depth) })
+            Location::Empty(EmptyMut {
+                table: self,
+                node: loc,
+                data_bit: db,
+                depth,
+            })
         };
-        Some((result, path))
+        Some((loc_mut, path))
     }
 
-    #[inline(always)]
-    pub(crate) fn find_node_or_insert<R: Key>(
-        &mut self,
-        key: R,
-        prefix_len: u32,
-    ) -> Result<Present, Empty> {
-        self.find_node_or_insert_from(Loc::root(), 0, key, prefix_len)
-    }
-
-    #[inline(always)]
-    pub(crate) fn find_node_or_insert_from<R: Key>(
-        &mut self,
-        mut loc: Loc,
-        mut depth: u32,
-        key: R,
-        prefix_len: u32,
-    ) -> Result<Present, Empty> {
-        while prefix_len >= depth + K {
-            loc = self.get_next_node_idx_or_insert(loc, depth, key);
-            depth += K;
-        }
-        let node = self.node(loc);
-        let data_bit = data_bit(key, prefix_len);
-        if node.has_data_bit(data_bit) {
-            let data_loc = Loc::new(node.data_idx, data_bit, node.data_bitmap);
-            // SAFETY: `has_data_bit` confirmed the bitmap bit at `data_bit` is set, so the
-            // element is initialized. `slot` = compute_slot(node.data_bitmap, data_bit).
-            Ok(unsafe { Present::new(loc, data_loc, depth) })
-        } else {
-            // SAFETY: `has_data_bit` returned false, so the bitmap bit at `data_bit` is clear
-            // and no element is stored at this position.
-            Err(unsafe { Empty::new(loc, data_bit, depth) })
-        }
-    }
-
-    fn get_next_node_idx_or_insert<R: Key>(&mut self, loc: Loc, depth: u32, key: R) -> Loc {
-        let child_bit = child_bit(depth, key);
-        if let Some(next) = self.child(loc, child_bit) {
-            return next;
-        }
-
-        self.nodes.insert_new_bit(loc, child_bit)
-    }
-
-    // get an iterator over all data locations in the current node that are descendants of the given prefix.
-    pub(crate) fn data_descendants<R: Key>(
+    /// Iterate over all data slots in `loc` that are descendants of `(key, prefix_len)`.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location: the `AllocIdx` inside `loc` must still point
+    /// into the active node allocation (i.e. no tier upgrade/downgrade of `loc`'s parent has
+    /// occurred since `loc` was obtained).
+    pub(crate) unsafe fn data_descendants<R: Key>(
         &self,
         loc: Loc,
         depth: u32,
         key: R,
         prefix_len: u32,
-    ) -> impl DoubleEndedIterator<Item = Present> + 'static {
+    ) -> impl DoubleEndedIterator<Item = DataIdx> + 'static {
         self.node(loc)
             .data_cover_locs(depth, key, prefix_len)
-            // SAFETY: `data_cover_locs` only yields Loc values whose bitmap bit is set, and
-            // each Loc has `slot == compute_slot(data_bitmap, bit)`, so the referenced
-            // cell is initialized.
-            .map(move |data_loc| unsafe { Present::new(loc, data_loc, depth) })
+            .map(move |data_loc| DataIdx {
+                node: loc,
+                bit: data_loc.bit,
+                depth,
+            })
     }
 
-    // get an iterator over all data locations in the current node that are ancestors of (cover) the given prefix.
-    pub(crate) fn data_ancestors<R: Key>(
+    /// Iterate over all data slots in `loc` that are ancestors of (cover) `(key, prefix_len)`.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location: the `AllocIdx` inside `loc` must still point
+    /// into the active node allocation (i.e. no tier upgrade/downgrade of `loc`'s parent has
+    /// occurred since `loc` was obtained).
+    pub(crate) unsafe fn data_ancestors<R: Key>(
         &self,
         loc: Loc,
         depth: u32,
         key: R,
         prefix_len: u32,
-    ) -> impl Iterator<Item = Present> + 'static {
+    ) -> impl Iterator<Item = DataIdx> + 'static {
         self.node(loc)
             .data_lpm_locs(depth, key, prefix_len)
-            // SAFETY: `data_lpm_locs` only yields Loc values whose bitmap bit is set, and
-            // each Loc has `slot == compute_slot(data_bitmap, bit)`, so the referenced
-            // cell is initialized.
-            .map(move |data_loc| unsafe { Present::new(loc, data_loc, depth) })
+            .map(move |data_loc| DataIdx {
+                node: loc,
+                bit: data_loc.bit,
+                depth,
+            })
     }
 
     // Create a lex iterator at a specific location
     pub(crate) fn lex_iter_at<R: Key>(&self, key: R, prefix_len: u32) -> MaskedLexIter<R> {
-        let Some(element) = self.find_element(key, prefix_len).into_node() else {
+        let Some((loc, depth)) = self.find_loc(key, prefix_len) else {
             return MaskedLexIter::default();
         };
-        let loc = element.node();
-        let depth = element.depth();
-        let mut lex = self.lex_iter(loc, depth, key);
-
+        // SAFETY: `find_loc` traversed from `Loc::root()` to `loc`; since the traversal
+        // completed without structural mutations, `loc` is a valid, live node location.
+        let mut lex = unsafe { self.lex_iter(loc, depth, key) };
         // Only take those that are children of the prefix
         lex.apply_data_mask(data_cover_mask(depth, key, prefix_len));
         lex.apply_child_mask(child_cover_mask(depth, key, prefix_len));
-
         lex
     }
 
-    /// Get all elements in the given node.
-    pub(crate) fn data_iter(
+    /// Iterate over all data slots in `loc`.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location: the `AllocIdx` inside `loc` must still point
+    /// into the active node allocation (i.e. no tier upgrade/downgrade of `loc`'s parent has
+    /// occurred since `loc` was obtained).
+    pub(crate) unsafe fn data_iter(
         &self,
         loc: Loc,
         depth: u32,
-    ) -> impl DoubleEndedIterator<Item = Present> + 'static {
-        self.node(loc)
-            .data_locs()
-            // SAFETY: `data_locs` only yields Loc values whose bitmap bit is set, and each Loc
-            // has `slot == compute_slot(data_bitmap, bit)`, so the referenced cell is
-            // initialized.
-            .map(move |data_loc| unsafe { Present::new(loc, data_loc, depth) })
+    ) -> impl DoubleEndedIterator<Item = DataIdx> + 'static {
+        self.node(loc).data_locs().map(move |data_loc| DataIdx {
+            node: loc,
+            bit: data_loc.bit,
+            depth,
+        })
     }
 
-    pub(crate) fn lex_iter<R: Key>(&self, loc: Loc, depth: u32, key: R) -> MaskedLexIter<R> {
+    /// Build a lexicographic iterator rooted at `loc`.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location: the `AllocIdx` inside `loc` must still point
+    /// into the active node allocation (i.e. no tier upgrade/downgrade of `loc`'s parent has
+    /// occurred since `loc` was obtained).
+    pub(crate) unsafe fn lex_iter<R: Key>(&self, loc: Loc, depth: u32, key: R) -> MaskedLexIter<R> {
         MaskedLexIter::new(loc, depth, key, *self.node(loc))
     }
 
@@ -680,7 +829,9 @@ impl<T> Table<T> {
             let mut loc = Loc::root();
             let mut path: Vec<(Loc, u32)> = Vec::with_capacity(offsets.len());
             for &offset in &offsets {
-                let Some(child_loc) = self.child(loc, offset) else {
+                // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
+                // of a prior `child()` call, which always returns a valid `Loc`.
+                let Some(child_loc) = (unsafe { self.child(loc, offset) }) else {
                     continue 'main; // node was removed by a prior cleanup_tree
                 };
                 path.push((loc, offset));
@@ -688,38 +839,43 @@ impl<T> Table<T> {
             }
 
             // Collect bitmap bits of elements that fail the predicate.
-            let mut to_remove: Vec<u32> = self
-                .data_iter(loc, depth)
+            // SAFETY: `loc` was obtained by re-traversing from root above; no structural
+            // mutations have occurred since, so `loc` is a valid, live node location.
+            let to_remove: Vec<u32> = unsafe { self.data_iter(loc, depth) }
                 .filter(|&dl| {
-                    let t = self.get_data(dl);
-                    let p = dl.prefix::<P>(key);
-                    !f(&p, t)
+                    // SAFETY: data_iter yields bits set in the current bitmap; retain_all does
+                    // not mutate node structure during this read-only scan.
+                    let r = unsafe { dl.resolve(self) }.expect("data_iter: bit not in bitmap");
+                    !f(&r.prefix::<P>(key), r.get())
                 })
-                .map(|dl| dl.bit())
+                .map(|dl| dl.bit)
                 .collect();
 
-            // Remove in reverse bit order so that take_data's left-shift does not
-            // corrupt the physical slots of elements with lower bits still to be removed.
-            // We re-read the node state before each removal to get the current data_idx (which
-            // may change due to tier downgrades inside take_data).
-            to_remove.sort_by_key(|&r| std::cmp::Reverse(r));
             removed_total += to_remove.len();
             for bit in to_remove {
-                let node = self.node(loc);
-                let data_loc = Loc::new(node.data_idx, bit, node.data_bitmap);
-                // SAFETY: bit came from data_iter (bitmap bit is set) and slot is the
-                // correct compute_slot result for the current bitmap.
-                let present = unsafe { Present::new(loc, data_loc, depth) };
-                self.take_data(present);
+                let idx = DataIdx {
+                    node: loc,
+                    bit,
+                    depth,
+                };
+                // SAFETY: bit came from data_iter (set in bitmap). `resolve_mut` re-reads the
+                // current node state, so stale data-AllocIdx from tier downgrades are handled.
+                // `loc` itself remains valid: data removals only touch the node's data allocation,
+                // not the parent's children allocation where `loc` resides.
+                let r = unsafe { idx.resolve_mut(self) }.expect("retain_all: bit not in bitmap");
+                r.take();
             }
 
             // Clean up this (now potentially empty) node and any empty ancestors.
-            self.cleanup_tree(loc, &mut path);
+            // SAFETY: `loc` was re-traversed fresh above; data removals do not alter node
+            // structure, so all `Loc`s in `path` (and `loc` itself) are still valid.
+            unsafe { self.cleanup_tree(loc, &mut path) };
 
             // Re-resolve to check whether cleanup_tree left this node in the tree.
             let mut cur = Loc::root();
             for &offset in &offsets {
-                let Some(child_loc) = self.child(cur, offset) else {
+                // SAFETY: same re-traversal-from-root invariant as the first loop above.
+                let Some(child_loc) = (unsafe { self.child(cur, offset) }) else {
                     continue 'main;
                 };
                 cur = child_loc;
@@ -743,18 +899,16 @@ impl<T> Table<T> {
         removed_total
     }
 
-    /// Cleanup the tree by removing empty multi-bit nodes.
+    /// Walk up from `start_loc` toward the root, removing empty nodes.
     ///
-    /// The `start_node` is the first one that needs to be removed. It cannot be the root (therefore
-    /// is of type `NonZeroU32`, and it is only removed if it is actually empty.)
+    /// `path` is a vector of `(parent_loc, child_bit)` pairs from the root down to `start_loc`.
+    /// Returns `(first_non_empty_loc, num_removed)`.
     ///
-    /// The `path` is a vector from the root to the node. Each element contains the index of the
-    /// previous node's parent, and the external idx of where the previous node can be found in the
-    /// parent's external index vector.
-    ///
-    /// The function returns the first non-empty node on the path, as well as the number of nodes
-    /// that were removed due to being empty.
-    pub(crate) fn cleanup_tree(
+    /// # Safety
+    /// `start_loc` and every `Loc` in `path` must be valid, live node locations: their
+    /// `AllocIdx` values must still point into the active node allocation (i.e. no tier
+    /// upgrade/downgrade has occurred on any node in the path since those `Loc`s were obtained).
+    pub(crate) unsafe fn cleanup_tree(
         &mut self,
         start_loc: Loc,
         path: &mut Vec<(Loc, u32)>,
@@ -786,8 +940,11 @@ impl<T> Table<T> {
             let Some((parent_loc, child_offset)) = path.pop() else {
                 unreachable!("Path must go back all the way to the root");
             };
-            // on that parent, remove the child pointer and compact the children allocation
-            self.remove_child_at(parent_loc, child_offset);
+            // on that parent, remove the child pointer and compact the children allocation.
+            // SAFETY: caller guarantees all `Loc`s in `path` are valid (see # Safety above).
+            // `remove_child_at` may reallocate the parent's *children* block, but `parent_loc`
+            // itself lives in the *grandparent's* children block, which is unaffected.
+            unsafe { self.remove_child_at(parent_loc, child_offset) };
 
             // continue with the parent as the idx, but only if it is not the root.
             if parent_loc.is_root() {
@@ -800,24 +957,27 @@ impl<T> Table<T> {
         (loc, num_removed)
     }
 
-    /// Clear the entire branch, starting from the given node. This function returns the number of
-    /// elements that were dropped.
-    pub(crate) fn clear_node_and_children(&mut self, loc: Loc) -> usize {
+    /// Clear the entire branch rooted at `loc`, dropping all values. Returns the count dropped.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location: the `AllocIdx` inside `loc` must still point
+    /// into the active node allocation (i.e. no tier upgrade/downgrade of `loc`'s parent has
+    /// occurred since `loc` was obtained).
+    pub(crate) unsafe fn clear_node_and_children(&mut self, loc: Loc) -> usize {
         let is_all = loc.is_root();
         let mut stack = vec![loc];
         let mut count = 0;
         let mut children_to_free: Vec<(AllocIdx, usize)> = Vec::new();
         while let Some(loc) = stack.pop() {
-            let node = self.node(loc);
+            let node_snap = *self.node(loc);
             // push all children to the stack to be deleted as well
-            stack.extend(node.child_locs());
+            stack.extend(node_snap.child_locs());
             // remember that we need to free up all that memory (with count for tier computation).
-            let child_count = node.child_bitmap.count_ones() as usize;
-            children_to_free.push((node.children_idx, child_count));
+            let child_count = node_snap.child_bitmap.count_ones() as usize;
+            children_to_free.push((node_snap.children_idx, child_count));
 
             // Drop all data values and free the allocation in one shot, avoiding the slot
             // corruption that arises when take_data shifts elements during iteration.
-            let node_snap = *self.node(loc);
             let data_count = node_snap.data_bitmap.count_ones() as usize;
             count += data_count;
             if data_count > 0 {
@@ -985,4 +1145,69 @@ impl<T> Table<T> {
 
         correct
     }
+}
+
+impl<T: Clone> Clone for Table<T> {
+    fn clone(&self) -> Self {
+        let mut x = Self {
+            nodes: self.nodes.clone(),
+            cells: Default::default(),
+        };
+
+        // The cloned node allocator initially contains data_idx values that point into `self`.
+        // Clear live data metadata first so `x` can be dropped safely if T::clone panics below.
+        let mut stack = vec![Loc::root()];
+        while let Some(loc) = stack.pop() {
+            let node = self.nodes[loc];
+            x.nodes[loc].data_bitmap = 0;
+            x.nodes[loc].data_idx = AllocIdx::empty();
+            if node.child_bitmap != 0 {
+                stack.extend(node.child_locs());
+            }
+        }
+
+        // Clone only live nodes reachable from root via DFS. Freed nodes in the flat
+        // array may have stale data_bitmap/data_idx from tier upgrades; visiting them
+        // would allocate cells that are never freed, causing a memory leak.
+        let mut stack = vec![Loc::root()];
+        while let Some(loc) = stack.pop() {
+            let node = self.nodes[loc];
+            if node.data_bitmap != 0 && !node.data_idx.is_empty() {
+                let count = node.data_bitmap.count_ones() as usize;
+                let data_idx = x.cells.alloc(count);
+                x.nodes[loc].data_idx = data_idx;
+                for data_loc in node.data_locs() {
+                    // SAFETY: `data_loc` from source's live bitmap; entry is initialized.
+                    let val = unsafe { self.cells.get(data_loc) }.clone();
+                    unsafe { x.cells.write_at(data_idx, data_loc.slot, val) };
+                    x.nodes[loc].set_data_bit(data_loc.bit);
+                }
+            }
+            if node.child_bitmap != 0 {
+                stack.extend(node.child_locs());
+            }
+        }
+
+        x
+    }
+}
+
+fn prefix<P: Prefix>(key: P::R, depth: u32, data_offset: usize) -> P {
+    let mask = mask_from_prefix_len(depth as u8);
+    let root = key & mask;
+
+    let (offset, offset_len) = DATA_BIT_TO_PREFIX[data_offset];
+    let offset = <P::R as num_traits::cast::NumCast>::from(offset).unwrap();
+    let offset_bits = K - 1;
+    let total_width = P::num_bits();
+    let shifted_offset = if total_width > depth + offset_bits {
+        offset << (total_width - (depth + offset_bits)) as usize
+    } else {
+        offset >> (depth + offset_bits - total_width) as usize
+    };
+
+    let repr = root | shifted_offset;
+    let prefix_len = depth + offset_len as u32;
+
+    P::from_repr_len(repr, prefix_len as u8)
 }

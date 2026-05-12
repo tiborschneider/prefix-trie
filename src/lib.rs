@@ -24,10 +24,10 @@
 //!
 //! | Operation       | Experiment      | `PrefixMap` | `TreeBitMap` | ratio |
 //! |-----------------|-----------------|-------------|--------------|-------|
-//! | Insert & Remove | random prefixes | **7.548ms** | 16.13ms      | ~2.14x |
-//! | Lookup          | random prefixes | **3.761ms** | 6.367ms      | ~1.69x |
-//! | Insert & Remove | AMS-IX prefixes | **9.117ms** | 11.14ms      | ~1.22x |
-//! | Lookup          | AMS-IX prefixes | **7.013ms** | 10.69ms      | ~1.52x |
+//! | Lookup          | random prefixes | **3.872ms** | 6.504ms      | ~1.68x |
+//! | Insert & Remove | random prefixes | **9.732ms** | 16.37ms      | ~1.68x |
+//! | Lookup          | AMS-IX prefixes | **8.075ms** | 13.09ms      | ~1.62x |
+//! | Insert & Remove | AMS-IX prefixes | **14.58ms** | 16.73ms      | ~1.15x |
 //!
 //! The ratio is `TreeBitMap` divided by `PrefixMap`, so values above 1 mean `PrefixMap` was faster
 //! in that run.

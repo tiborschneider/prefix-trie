@@ -3,7 +3,7 @@
 use array_const_fn_init::array_const_fn_init;
 use num_traits::{CheckedShr, One, PrimInt, Unsigned, Zero};
 
-use super::table::{Present, K, NUM_CHILDREN, NUM_DATA};
+use super::table::{DataIdx, K, NUM_CHILDREN, NUM_DATA};
 use crate::{
     allocator::{AllocIdx, Loc},
     prefix::mask_from_prefix_len,
@@ -45,23 +45,6 @@ impl MultiBitNode {
     #[inline(always)]
     pub(crate) fn has_data_bit(&self, bit: u32) -> bool {
         self.data_bitmap & (1 << bit) != 0
-    }
-
-    /// If the data bit is set, return the `Present` for that data slot; otherwise `None`.
-    #[inline(always)]
-    pub(crate) fn data_loc_if_present(
-        &self,
-        node_loc: Loc,
-        depth: u32,
-        bit: u32,
-    ) -> Option<Present> {
-        if self.has_data_bit(bit) {
-            let data_loc = Loc::new(self.data_idx, bit, self.data_bitmap);
-            // SAFETY: has_data_bit confirmed the bit is set; slot = compute_slot(data_bitmap, bit).
-            Some(unsafe { Present::new(node_loc, data_loc, depth) })
-        } else {
-            None
-        }
     }
 
     #[inline(always)]
@@ -355,7 +338,7 @@ pub(crate) fn child_bit<R: Key>(depth: u32, key: R) -> u32 {
 
 #[derive(Clone, Copy)]
 pub(crate) enum LexIterElem<R> {
-    Data(Present),
+    Data(DataIdx),
     Child(Loc, u32, R),
 }
 
@@ -483,18 +466,11 @@ impl<R: Key> Iterator for MaskedLexIter<R> {
                     // Check original bitmap (for existence) AND filter (for masking).
                     if self.node.has_data_bit(data_bit) && (self.data_filter & (1 << data_bit)) != 0
                     {
-                        let data_loc =
-                            Loc::new(self.node.data_idx, data_bit, self.node.data_bitmap);
-                        return Some(LexIterElem::Data(
-                            // SAFETY:
-                            // - `has_data_bit` confirmed the bitmap bit at `data_bit` is set,
-                            //   so the element at that position is initialized.
-                            // - `slot` = compute_slot(self.node.data_bitmap, data_bit), which is
-                            //   the correct physical index of the initialized entry.
-                            // - `self.node` is a snapshot taken when MaskedLexIter was constructed,
-                            //   and the bitmap has not been modified since.
-                            unsafe { Present::new(self.loc, data_loc, self.depth) },
-                        ));
+                        return Some(LexIterElem::Data(DataIdx {
+                            node: self.loc,
+                            bit: data_bit,
+                            depth: self.depth,
+                        }));
                     }
                 }
                 Err(child_bit) => {

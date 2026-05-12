@@ -83,10 +83,13 @@ impl Loc {
         }
     }
 
+    /// Flat index 0 is reserved for the root by `NodeAllocator::default`.
     pub(crate) fn is_root(&self) -> bool {
         self.idx == Self::root().idx && self.slot == 0
     }
 
+    /// Returns `true` if this Loc has an empty (sentinel) AllocIdx.
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.idx.is_empty()
     }
@@ -170,6 +173,7 @@ impl<T> CellAllocator<T> {
     /// - The entry at `idx` + `slot` must have been initialized.
     /// - `slot` must equal `compute_slot(bitmap, bit)` for the bitmap from the corresponding node,
     ///   where the bitmap bit at `bit` is set (indicating the entry is present).
+    /// - No live `&mut T` to this slot may exist (UnsafeCell aliasing rule).
     #[inline(always)]
     pub(crate) unsafe fn get(&self, loc: Loc) -> &T {
         debug_assert!(!loc.idx.is_empty());
@@ -192,7 +196,9 @@ impl<T> CellAllocator<T> {
     /// SAFETY:
     /// - The entry at `idx` + `slot` must have been initialized.
     /// - `slot` must equal `compute_slot(bitmap, bit)` where the bitmap bit at `bit` is set.
-    /// - Standard mutable reference invariants: no other references to this location exist during 'a.
+    /// - No other live `&T` or `&mut T` to this slot may exist.
+    /// - `ptr` must still point into the Vec's active buffer (no reallocation since it was obtained).
+    ///   Guaranteed by `&'a Table<T>` preventing structural mutations.
     #[inline(always)]
     #[allow(clippy::mut_from_ref)]
     pub(crate) unsafe fn unsafe_get_mut(&self, ptr: &mut RawPtr<T>, loc: Loc) -> &mut T {
@@ -484,8 +490,9 @@ impl NodeAllocator {
 
     /// Allocate a new group of nodes with given capacity tier.
     ///
-    /// Safety: The data is not yet initialized. The caller must ensure that each element will
-    /// correctly be created.
+    /// Safety: For the free-list path, returned slots may contain stale node metadata
+    /// (e.g. old `data_idx`/`data_bitmap`). Callers must overwrite all used slots before
+    /// they become reachable through normal tree traversal.
     pub(crate) unsafe fn alloc(&mut self, count: usize) -> AllocIdx {
         debug_assert!(count > 0);
         let tier = CHILD_COUNT_TO_TIER[count.min(32)] as usize;

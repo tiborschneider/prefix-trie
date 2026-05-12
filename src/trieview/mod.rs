@@ -62,6 +62,27 @@
 //! methods such as [`find_lpm`][TrieView::find_lpm] are unavailable on composed mutable views,
 //! while consuming methods such as [`find_lpm_value`][TrieView::find_lpm_value] remain usable.
 
+// Structural immutability invariant (for maintainers)
+//
+// The node structure of the underlying trie (node allocations, bitmaps, child pointers) must
+// not change for the entire lifetime of any `TrieView` or `TrieRefMut` borrow.
+//
+// Concretely:
+// - No insertions or deletions that would trigger a tier upgrade/downgrade in the node or cell
+//   allocators are permitted while a view is alive.
+// - No structural operations (e.g. `insert`, `remove`, `remove_children`, `retain`) may be
+//   called on the underlying `PrefixMap` while a view borrows it.
+//
+// For immutable views (TrieRef) this is automatically enforced by Rust's borrow checker:
+// the view holds `&'a Table<T>`, which prevents any `&mut` access to the map.
+//
+// For mutable views (TrieRefMut) the invariant is maintained by holding `&'a Table<T>` for
+// structural reads while using a raw pointer (`RawPtr<T>`) only for data-value mutations.
+// The raw pointer path accesses only the value slots (the flat `cells` array), never any
+// allocation metadata or bitmaps. As long as no two live `&mut T` references alias the same
+// slot — guaranteed by the acyclic tree structure — these raw-pointer value mutations are sound
+// without requiring `&mut Table<T>`.
+
 pub mod covering_difference;
 pub mod covering_union;
 pub mod difference;

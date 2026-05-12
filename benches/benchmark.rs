@@ -61,20 +61,31 @@ pub fn bgp_mods(c: &mut Criterion) {
     let setup = fill_table(9, &addrs);
     let insn = generate_random_mods_sparse(8, ITERS, &addrs);
 
-    let mut prefix_map = PrefixMap::new();
-    let mut treebitmap = IpLookupTable::new();
-    execute_prefix_map(&mut prefix_map, &setup);
-    execute_treebitmap(&mut treebitmap, &setup);
-
     group.bench_function("PrefixMap", |b| {
-        b.iter(|| {
-            execute_prefix_map(&mut prefix_map, &insn);
-        })
+        b.iter_with_setup(
+            || {
+                let mut map = PrefixMap::new();
+                execute_prefix_map(&mut map, &setup);
+                map
+            },
+            |mut map| {
+                execute_prefix_map(&mut map, &insn);
+                map
+            },
+        )
     });
     group.bench_function("TreeBitMap", |b| {
-        b.iter(|| {
-            execute_treebitmap(&mut treebitmap, &insn);
-        })
+        b.iter_with_setup(
+            || {
+                let mut map = IpLookupTable::new();
+                execute_treebitmap(&mut map, &setup);
+                map
+            },
+            |mut map| {
+                execute_treebitmap(&mut map, &insn);
+                map
+            },
+        )
     });
 
     group.finish();
@@ -107,6 +118,7 @@ pub fn bgp_lookup(c: &mut Criterion) {
 }
 
 #[derive(Default)]
+#[allow(dead_code)]
 struct MyProfiler {
     active_profiler: Option<pprof::ProfilerGuard<'static>>,
     already_profiled: HashSet<(String, std::path::PathBuf)>,
@@ -145,8 +157,8 @@ criterion_group!(
     name = benches;
     config = Criterion::default()
         //.sample_size(50)
-        .measurement_time(std::time::Duration::from_secs(10))
-        .with_profiler(MyProfiler::default());
+        // .with_profiler(MyProfiler::default())
+        .measurement_time(std::time::Duration::from_secs(10));
     targets = bgp_lookup, bgp_mods, random_lookup, random_mods,
 );
 criterion_main!(benches);

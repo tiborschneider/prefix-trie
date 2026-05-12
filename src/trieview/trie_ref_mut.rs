@@ -9,7 +9,7 @@ use crate::{
     {
         allocator::{Loc, RawPtr},
         node::{child_cover_mask, data_cover_mask, extend_repr},
-        table::{Table, K},
+        table::{DataIdx, Table, K},
         AsView, PrefixMap,
     },
 };
@@ -86,19 +86,30 @@ impl<'a, P: Prefix, T> TrieView<'a> for TrieRefMut<'a, P, T> {
 
     #[inline]
     unsafe fn get_data(&mut self, data_bit: u32) -> &'a mut T {
-        let node = self.table.node(self.node_loc);
+        let idx = DataIdx {
+            node: self.node_loc,
+            bit: data_bit,
+            depth: self.depth,
+        };
+        // Note: `resolve` re-reads the node's current AllocIdx and bitmap, which is strictly
+        // unnecessary here: TrieView iterators never mutate node structure, so `idx.node` is
+        // always a valid, stable location for the lifetime of this view. We use `resolve` for
+        // uniformity with the rest of the codebase; the compiler should inline/optimize it away.
+        //
         // SAFETY: caller guarantees data_bit is set in data_bitmap().
-        let present = node
-            .data_loc_if_present(self.node_loc, self.depth, data_bit)
-            .expect("get_data: data_bit not set in bitmap");
-        self.table.unsafe_get_mut(&mut self.raw, present)
+        let r = unsafe { idx.resolve(self.table) }.expect("get_data: data_bit not set in bitmap");
+        // SAFETY: TrieRefMut was created from `&'a mut PrefixMap`, and `raw` was obtained from
+        // that same map's table. The tree is acyclic so each data slot is visited at most once
+        // per iteration, guaranteeing no two live `&mut T` references to the same slot.
+        unsafe { r.unsafe_get_mut(&mut self.raw) }
     }
 
     #[inline]
     unsafe fn get_child(&mut self, child_bit: u32) -> Self {
-        let child_loc = self
-            .table
-            .child(self.node_loc, child_bit)
+        // SAFETY: `self.node_loc` is valid (no structural mutations during view lifetime).
+        // The returned child shares `self.raw`; disjoint access is guaranteed by the TrieView
+        // contract (different child bits → disjoint subtrees in the acyclic tree).
+        let child_loc = unsafe { self.table.child(self.node_loc, child_bit) }
             .expect("get_child: child_bit not set in bitmap");
         let new_key = extend_repr(self.key, self.depth, child_bit);
         Self {

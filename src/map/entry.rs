@@ -1,11 +1,9 @@
 //! Code for inserting elements and the entry pattern.
 
 use crate::{
-    table::{Empty, NoNode, Present},
+    table::{EmptyMut, NoNodeMut, PresentMut},
     Prefix,
 };
-
-use super::*;
 
 /// A mutable view into a single entry in a map, which may either be vacant or occupied.
 pub enum Entry<'a, P, T> {
@@ -18,23 +16,23 @@ pub enum Entry<'a, P, T> {
 /// A mutable view into a missing entry. The information within this structure describes a path
 /// towards that missing node, and how to insert it.
 pub struct VacantEntry<'a, P, T> {
-    map: &'a mut PrefixMap<P, T>,
-    loc: Result<Empty, NoNode>,
+    loc: Result<EmptyMut<'a, T>, NoNodeMut<'a, T>>,
+    count: &'a mut usize,
     prefix: P,
 }
 
 impl<'a, P, T> VacantEntry<'a, P, T> {
-    pub(super) fn empty(map: &'a mut PrefixMap<P, T>, loc: Empty, prefix: P) -> Self {
+    pub(super) fn empty(loc: EmptyMut<'a, T>, count: &'a mut usize, prefix: P) -> Self {
         Self {
-            map,
             loc: Ok(loc),
+            count,
             prefix,
         }
     }
-    pub(super) fn no_node(map: &'a mut PrefixMap<P, T>, loc: NoNode, prefix: P) -> Self {
+    pub(super) fn no_node(loc: NoNodeMut<'a, T>, count: &'a mut usize, prefix: P) -> Self {
         Self {
-            map,
             loc: Err(loc),
+            count,
             prefix,
         }
     }
@@ -43,8 +41,8 @@ impl<'a, P, T> VacantEntry<'a, P, T> {
 /// A mutable view into an occupied entry. An occupied entry represents a node that is already
 /// present on the tree.
 pub struct OccupiedEntry<'a, P, T> {
-    map: &'a mut PrefixMap<P, T>,
-    loc: Present,
+    loc: PresentMut<'a, T>,
+    count: &'a mut usize,
     prefix: P,
 }
 
@@ -52,9 +50,9 @@ impl<'a, P, T> OccupiedEntry<'a, P, T>
 where
     P: Prefix,
 {
-    pub(super) fn new(map: &'a mut PrefixMap<P, T>, loc: Present, prefix: P) -> Self {
+    pub(super) fn new(loc: PresentMut<'a, T>, count: &'a mut usize, prefix: P) -> Self {
         let prefix = P::from_repr_len(prefix.mask(), prefix.prefix_len());
-        Self { map, loc, prefix }
+        Self { loc, count, prefix }
     }
 }
 
@@ -384,31 +382,17 @@ where
     P: Prefix,
 {
     fn _insert(self, v: T) -> (P, &'a mut T) {
-        let Self { map, loc, prefix } = self;
-
-        map.count += 1;
-
-        let empty = match loc {
-            Ok(empty) => empty,
-            Err(no_node) => {
-                // first, we must insert up to that node.
-                let Err(loc) = map.table.find_node_or_insert_from(
-                    no_node.node(),
-                    no_node.depth(),
-                    prefix.repr(),
-                    prefix.prefix_len() as u32,
-                ) else {
-                    unreachable!("node was missing")
-                };
-                loc
+        let Self { loc, count, prefix } = self;
+        *count += 1;
+        let r = match loc {
+            Ok(empty_mut) => empty_mut.insert(v),
+            Err(no_node_mut) => {
+                no_node_mut.insert_path_and_data(prefix.repr(), prefix.prefix_len() as u32, v)
             }
         };
-
-        let present = map.table.set_data(empty, v);
-        (
-            present.prefix(prefix.repr()),
-            map.table.get_data_mut(present),
-        )
+        let computed_prefix = r.prefix(prefix.repr());
+        let val_ref = r.get_mut();
+        (computed_prefix, val_ref)
     }
 }
 
@@ -456,7 +440,7 @@ impl<P: Prefix, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn get(&self) -> &T {
-        self.map.table.get_data(self.loc)
+        self.loc.get()
     }
 
     /// Gets a mutable reference to the value in the entry.
@@ -483,7 +467,7 @@ impl<P: Prefix, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn get_mut(&mut self) -> &mut T {
-        self.map.table.get_data_mut(self.loc)
+        self.loc.as_mut()
     }
 
     /// Insert a new value into the entry, returning the old value.
@@ -507,7 +491,7 @@ impl<P: Prefix, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn insert(self, v: T) -> T {
-        self.map.table.replace_data(self.loc, v)
+        self.loc.replace(v)
     }
 
     /// Remove the current value and return it. Empty trie nodes may be left in place (the same
@@ -532,15 +516,15 @@ impl<P: Prefix, T> OccupiedEntry<'_, P, T> {
     /// # fn main() {}
     /// ```
     pub fn remove(self) -> T {
-        self.map.count -= 1;
-        self.map.table.take_data(self.loc)
+        *self.count -= 1;
+        self.loc.take()
     }
 }
 
 impl<'a, P, T> OccupiedEntry<'a, P, T> {
     /// Converts this occupied entry into a mutable reference to the stored value.
     pub fn into_mut(self) -> &'a mut T {
-        self.map.table.get_data_mut(self.loc)
+        self.loc.get_mut()
     }
 }
 
