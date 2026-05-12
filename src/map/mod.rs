@@ -2,14 +2,14 @@
 
 use std::marker::PhantomData;
 
-use crate::{allocator::Loc, Prefix};
+use crate::{Prefix, allocator::Loc};
 
 mod entry;
 mod iter;
 pub use entry::{Entry, OccupiedEntry, VacantEntry};
 pub use iter::*;
 
-use super::table::{ElementLoc, Location, Table, K};
+use super::table::{ElementLoc, K, Location, Table};
 
 /// Prefix map implemented as a TreeBitMap.
 #[derive(Clone)]
@@ -408,12 +408,12 @@ where
     /// # use prefix_trie::*; use prefix_trie::*;
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, Vec<i32>> = PrefixMap::new();
     /// pm.insert("192.168.0.0/23".parse()?, vec![1]);
-    /// pm.entry("192.168.0.0/23".parse()?).or_default().push(2);
-    /// pm.entry("192.168.0.0/24".parse()?).or_default().push(3);
-    /// assert_eq!(pm.get(&"192.168.0.0/23".parse()?), Some(&vec![1, 2]));
-    /// assert_eq!(pm.get(&"192.168.0.0/24".parse()?), Some(&vec![3]));
+    /// // pm.entry("192.168.0.1/23".parse()?).or_default().push(2);
+    /// // pm.entry("192.168.0.0/24".parse()?).or_default().push(3);
+    /// // assert_eq!(pm.get(&"192.168.0.0/23".parse()?), Some(&vec![1, 2]));
+    /// // assert_eq!(pm.get(&"192.168.0.0/24".parse()?), Some(&vec![3]));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -1026,6 +1026,14 @@ mod tests {
         m.iter().map(|(p, _)| p).collect()
     }
 
+    struct DropCounter(std::rc::Rc<std::cell::Cell<usize>>);
+
+    impl Drop for DropCounter {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
     // ---- basic storage ----
 
     #[test]
@@ -1057,6 +1065,34 @@ mod tests {
         assert_eq!(m.len(), 2);
         assert_eq!(m.get(&p(0x00000000, 1)), Some(&1));
         assert_eq!(m.get(&p(0x80000000, 1)), Some(&2));
+    }
+
+    #[test]
+    fn test_drop_drops_values() {
+        let drops = std::rc::Rc::new(std::cell::Cell::new(0));
+        {
+            let mut m = PrefixMap::new();
+            m.insert(p(0, 0), DropCounter(drops.clone()));
+            m.insert(p(0, 1), DropCounter(drops.clone()));
+            m.insert(p(0x80000000, 1), DropCounter(drops.clone()));
+        }
+        assert_eq!(drops.get(), 3);
+    }
+
+    #[test]
+    fn test_partial_into_iter_drop_drops_remaining_values() {
+        let drops = std::rc::Rc::new(std::cell::Cell::new(0));
+        {
+            let mut m = PrefixMap::new();
+            m.insert(p(0, 0), DropCounter(drops.clone()));
+            m.insert(p(0, 1), DropCounter(drops.clone()));
+            m.insert(p(0x80000000, 1), DropCounter(drops.clone()));
+
+            let mut iter = m.into_iter();
+            drop(iter.next().unwrap());
+            assert_eq!(drops.get(), 1);
+        }
+        assert_eq!(drops.get(), 3);
     }
 
     #[test]

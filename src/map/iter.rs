@@ -216,18 +216,8 @@ impl<P: Prefix, T> Iterator for IntoIter<P, T> {
 
             match next {
                 LexIterElem::Data(loc) => {
-                    // SAFETY:
-                    // 1. `loc` comes from `MaskedLexIter`, which was constructed from a
-                    //    snapshot of the node's bitmap before any elements were removed, so
-                    //    `loc.data.slot == compute_slot(snapshot_bitmap, loc.data.bit)` is valid.
-                    // 2. `MaskedLexIter` yields each bitmap bit exactly once, so no
-                    //    `bit` is passed twice (no double-free).
-                    // 3. `IntoIter` owns the `Table` exclusively and drops it after the
-                    //    iterator is exhausted, so no subsequent structured access (via a
-                    //    freshly-computed `compute_slot`) can occur on the affected nodes.
-                    return Some((loc.prefix(key), unsafe {
-                        self.table.take_data_for_iter(loc)
-                    }));
+                    let loc = loc.refresh(&self.table);
+                    return Some((loc.prefix(key), self.table.take_data(loc)));
                 }
                 LexIterElem::Child(next_loc, depth, next_key) => self
                     .stack

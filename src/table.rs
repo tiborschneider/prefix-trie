@@ -61,6 +61,12 @@ impl<T> Default for Table<T> {
     }
 }
 
+impl<T> Drop for Table<T> {
+    fn drop(&mut self) {
+        self.drop_values();
+    }
+}
+
 // Safety:
 // - Sending a Table over thread boundary is fine. No-one besides us can have the raw pointer,
 //   otherwise, the map would be borrowed.
@@ -162,42 +168,6 @@ impl<T> Table<T> {
         unsafe { self.cells.replace(loc.data, val) }
     }
 
-    /// Take data for consuming iteration without shifting remaining elements.
-    ///
-    /// Unlike `take_data`, this does NOT call `shift_left` after removal, intentionally
-    /// leaving the cell array non-compact.  This is only correct when the following
-    /// invariants are upheld by the caller (see `# Safety` below).
-    ///
-    /// # Safety
-    ///
-    /// The caller must guarantee all of the following:
-    ///
-    /// 1. **Snapshot consistency**: `loc` was produced by a `MaskedLexIter` whose internal
-    ///    node snapshot was taken *before* any elements in this node were removed.  The slot
-    ///    `loc.data.slot == compute_slot(snapshot_bitmap, bit)` is only valid relative
-    ///    to that snapshot; after a `shift_left` it would point to the wrong cell.  Because
-    ///    we skip `shift_left`, every slot derived from the same snapshot remains valid until
-    ///    its own turn is reached.
-    ///
-    /// 2. **Single consumption**: each `bit` is passed at most once; `MaskedLexIter`
-    ///    yields every set bit in the snapshot exactly once, so no double-free can occur.
-    ///
-    /// 3. **No subsequent structured access**: after this call the node's bitmap still has
-    ///    the bit at `loc.data.bit` set, and the cell array has a hole where the
-    ///    element was.  Any code that recomputes `compute_slot` from the live bitmap would
-    ///    derive wrong slot values.  The caller must ensure that no such access happens,
-    ///    i.e., the consuming iterator owns the table exclusively and will drop it once all
-    ///    elements are consumed.
-    #[inline(always)]
-    pub(crate) unsafe fn take_data_for_iter(&mut self, loc: Present) -> T {
-        // SAFETY: `Present` invariant guarantees the bitmap bit at `loc.data.bit`
-        // is set and `loc.data.slot == compute_slot(snapshot_bitmap, bit)`, so the
-        // cell is initialized and the slot is correct relative to the snapshot.
-        unsafe { self.cells.remove_raw(loc.data) }
-        // No shift_left: remaining elements stay at their snapshot-derived physical slots
-        // so that subsequent MaskedLexIter items can still find them (safety invariant 1).
-    }
-
     #[inline(always)]
     pub(crate) fn take_data(&mut self, loc: Present) -> T {
         self.cells.remove_bit(&mut self.nodes[loc.node], loc.data)
@@ -205,6 +175,19 @@ impl<T> Table<T> {
 
     pub(crate) fn mem_size(&self) -> usize {
         self.nodes.mem_size() + self.cells.mem_size()
+    }
+
+    fn drop_values(&mut self) {
+        let mut stack = vec![Loc::root()];
+        while let Some(loc) = stack.pop() {
+            let node = *self.node(loc);
+            stack.extend(node.child_locs());
+
+            for data_loc in node.data_locs() {
+                // SAFETY: data_locs yields only initialized slots from the live node snapshot.
+                let _ = unsafe { self.cells.remove_raw(data_loc) };
+            }
+        }
     }
 }
 
@@ -215,6 +198,18 @@ impl<T: Clone> Clone for Table<T> {
             cells: Default::default(),
         };
 
+        // The cloned node allocator initially contains data_idx values that point into `self`.
+        // Clear live data metadata first so `x` can be dropped safely if T::clone panics below.
+        let mut stack = vec![Loc::root()];
+        while let Some(loc) = stack.pop() {
+            let node = self.nodes[loc];
+            x.nodes[loc].data_bitmap = 0;
+            x.nodes[loc].data_idx = AllocIdx::empty();
+            if node.child_bitmap != 0 {
+                stack.extend(node.child_locs());
+            }
+        }
+
         // Clone only live nodes reachable from root via DFS. Freed nodes in the flat
         // array may have stale data_bitmap/data_idx from tier upgrades; visiting them
         // would allocate cells that are never freed, causing a memory leak.
@@ -224,13 +219,12 @@ impl<T: Clone> Clone for Table<T> {
             if node.data_bitmap != 0 && !node.data_idx.is_empty() {
                 let count = node.data_bitmap.count_ones() as usize;
                 let data_idx = x.cells.alloc(count);
-                for (slot, data_loc) in node.data_locs().enumerate() {
-                    let val = unsafe { self.cells.get(data_loc) }.clone();
-                    unsafe { x.cells.write_at(data_idx, slot as u32, val) };
-                }
                 x.nodes[loc].data_idx = data_idx;
-            } else {
-                x.nodes[loc].data_idx = AllocIdx::empty();
+                for data_loc in node.data_locs() {
+                    let val = unsafe { self.cells.get(data_loc) }.clone();
+                    unsafe { x.cells.write_at(data_idx, data_loc.slot, val) };
+                    x.nodes[loc].set_data_bit(data_loc.bit);
+                }
             }
             if node.child_bitmap != 0 {
                 stack.extend(node.child_locs());

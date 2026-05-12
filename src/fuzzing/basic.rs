@@ -355,3 +355,37 @@ fn _dense_retain((mut pmap, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> 
     }
     pmap.into_iter().eq(want)
 }
+
+qc!(drop_check, _drop_check);
+fn _drop_check((pmap, root): (PrefixMap<TestPrefix, ()>, TestPrefix)) -> bool {
+    struct DropCounter(std::sync::Arc<std::cell::Cell<usize>>, Vec<i32>);
+
+    impl Drop for DropCounter {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    let count = std::sync::Arc::new(std::cell::Cell::new(0));
+    let exp = pmap.len();
+
+    {
+        let mut map: PrefixMap<TestPrefix, DropCounter> = PrefixMap::new();
+
+        for p in pmap.keys() {
+            map.insert(p, DropCounter(count.clone(), vec![0]));
+        }
+
+        let mut into_iter = map.into_iter();
+        while let Some((p, v)) = into_iter.next() {
+            if root.contains(&p) {
+                break;
+            }
+            let _ = v.1;
+        }
+
+        let _ = into_iter;
+    }
+
+    count.get() == exp
+}
