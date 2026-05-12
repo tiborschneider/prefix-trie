@@ -547,6 +547,13 @@ pub(crate) const DATA_BIT_TO_PREFIX: [(u8, u8); NUM_DATA] = [
 
 #[cfg(test)]
 mod test {
+    // all these are to visually align the content.
+    #![allow(
+        clippy::zero_prefixed_literal,
+        clippy::unusual_byte_groupings,
+        clippy::identity_op
+    )]
+
     use super::*;
     #[test]
     fn internal_idx_test() {

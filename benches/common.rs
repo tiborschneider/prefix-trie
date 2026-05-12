@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(clippy::incompatible_msrv)]
 
 use ip_network_table_deps_treebitmap::IpLookupTable;
 use ipnet::Ipv4Net;

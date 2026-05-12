@@ -211,7 +211,7 @@ fn _remove_children((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -
 qc!(retain, _retain);
 fn _retain((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
     let want = select(&map, |p, _| !(root.contains(p) && p.1 >= root.1 + 2));
-    map.retain(|p, _| !(root.contains(&p) && p.1 >= root.1 + 2));
+    map.retain(|p, _| !(root.contains(p) && p.1 >= root.1 + 2));
     map.check_memory_alloc() && map.into_iter().eq(want)
 }
 
@@ -287,7 +287,7 @@ fn _cover_after_keep_tree_mods(
 
 qc!(drop_check, _drop_check);
 fn _drop_check((pmap, root): (PrefixMap<TestPrefix, ()>, TestPrefix)) -> bool {
-    struct DropCounter(std::sync::Arc<std::cell::Cell<usize>>, Vec<i32>);
+    struct DropCounter(std::rc::Rc<std::cell::Cell<usize>>, Vec<i32>);
 
     impl Drop for DropCounter {
         fn drop(&mut self) {
@@ -295,7 +295,7 @@ fn _drop_check((pmap, root): (PrefixMap<TestPrefix, ()>, TestPrefix)) -> bool {
         }
     }
 
-    let count = std::sync::Arc::new(std::cell::Cell::new(0));
+    let count = std::rc::Rc::new(std::cell::Cell::new(0));
     let exp = pmap.len();
 
     {
@@ -306,7 +306,7 @@ fn _drop_check((pmap, root): (PrefixMap<TestPrefix, ()>, TestPrefix)) -> bool {
         }
 
         let mut into_iter = map.into_iter();
-        while let Some((p, v)) = into_iter.next() {
+        for (p, v) in into_iter.by_ref() {
             if root.contains(&p) {
                 break;
             }

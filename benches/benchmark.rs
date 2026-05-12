@@ -133,7 +133,7 @@ impl criterion::profiler::Profiler for MyProfiler {
         if let Some(profile) = self.active_profiler.take() {
             let report = profile.report().build().unwrap();
             std::fs::create_dir_all(benchmark_dir).unwrap();
-            let benchmark_file = benchmark_dir.join(format!("flamegraph.svg"));
+            let benchmark_file = benchmark_dir.join("flamegraph.svg");
             let writer = std::fs::File::create(&benchmark_file)
                 .unwrap_or_else(|_| panic!("Failed to create file {benchmark_file:?}"));
             report.flamegraph(writer).unwrap();

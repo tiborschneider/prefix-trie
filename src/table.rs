@@ -896,19 +896,19 @@ impl<T> Table<T> {
                 let count = node.data_bitmap.count_ones() as usize;
                 let cap = DATA_SPACING[DATA_COUNT_TO_TIER[count.min(31)] as usize];
                 let start = node.data_idx.as_usize();
-                for i in start..start + cap {
+                for (i, item) in cell_acc.iter_mut().enumerate().skip(start).take(cap) {
                     assert_soft!(
                         correct,
-                        !cell_acc[i],
+                        !*item,
                         "cell slot {i} is referenced by more than one live node"
                     );
-                    cell_acc[i] = true;
+                    *item = true;
                 }
             } else {
                 assert_soft!(
                     correct,
                     node.data_idx.is_empty(),
-                    "node at slot {} has zero data_bitmap but non-empty data_idx",
+                    "cell at slot {} has zero data_bitmap but non-empty data_idx",
                     loc.idx.as_usize() + loc.slot as usize
                 );
             }
@@ -924,13 +924,13 @@ impl<T> Table<T> {
                 let count = node.child_bitmap.count_ones() as usize;
                 let cap = CHILD_SPACING[CHILD_COUNT_TO_TIER[count.min(32)] as usize];
                 let start = node.children_idx.as_usize();
-                for i in start..start + cap {
+                for (i, item) in node_acc.iter_mut().enumerate().skip(start).take(cap) {
                     assert_soft!(
                         correct,
-                        !node_acc[i],
+                        !*item,
                         "node slot {i} is referenced by more than one live node"
                     );
-                    node_acc[i] = true;
+                    *item = true;
                 }
                 stack.extend(node.child_locs());
             } else {
@@ -945,25 +945,25 @@ impl<T> Table<T> {
 
         // -- free list entries (cells) --
         for (start, cap) in self.cells.free_list_slots() {
-            for i in start..start + cap {
+            for (i, item) in cell_acc.iter_mut().enumerate().skip(start).take(cap) {
                 assert_soft!(
                     correct,
-                    !cell_acc[i],
+                    !*item,
                     "cell slot {i} appears in both the live tree and a free list"
                 );
-                cell_acc[i] = true;
+                *item = true;
             }
         }
 
         // -- free list entries (nodes) --
         for (start, cap) in self.nodes.free_list_slots() {
-            for i in start..start + cap {
+            for (i, item) in node_acc.iter_mut().enumerate().skip(start).take(cap) {
                 assert_soft!(
                     correct,
-                    !node_acc[i],
+                    !*item,
                     "node slot {i} appears in both the live tree and a free list"
                 );
-                node_acc[i] = true;
+                *item = true;
             }
         }
 
