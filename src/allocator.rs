@@ -1,6 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    mem::{replace, MaybeUninit},
+    mem::{MaybeUninit, replace},
     ops::{Index, IndexMut},
 };
 
@@ -57,25 +57,25 @@ pub(crate) fn compute_slot(bitmap: u32, bit: u32) -> u32 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Loc {
-    pub idx: AllocIdx,
-    pub bit: u32, // bitmap bit position (0..32); meaningless for plain node-array indices
-    pub slot: u32, // physical (compact) slot, computed from bitmap
+    pub(crate) idx: AllocIdx,
+    pub(crate) bit: u32, // bitmap bit position (0..32); meaningless for plain node-array indices
+    pub(crate) slot: u32, // physical (compact) slot, computed from bitmap
 }
 
 impl Loc {
     /// Create a new Loc by computing the physical slot from a bitmap bit position and bitmap.
-    pub fn new(idx: AllocIdx, bit: u32, bitmap: u32) -> Self {
+    pub(crate) fn new(idx: AllocIdx, bit: u32, bitmap: u32) -> Self {
         let slot = compute_slot(bitmap, bit);
         Self { idx, bit, slot }
     }
 
     /// Create a Loc that indexes directly by slot (no associated bitmap bit).
     /// Use this when navigating the node allocator by physical slot alone.
-    pub fn at_slot(idx: AllocIdx, slot: u32) -> Self {
+    pub(crate) fn at_slot(idx: AllocIdx, slot: u32) -> Self {
         Self { idx, bit: 0, slot }
     }
 
-    pub fn root() -> Self {
+    pub(crate) fn root() -> Self {
         Self {
             idx: AllocIdx::from_usize(0),
             bit: 0,
@@ -83,11 +83,11 @@ impl Loc {
         }
     }
 
-    pub fn is_root(&self) -> bool {
+    pub(crate) fn is_root(&self) -> bool {
         self.idx == Self::root().idx && self.slot == 0
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.idx.is_empty()
     }
 }
