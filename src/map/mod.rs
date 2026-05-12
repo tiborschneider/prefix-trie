@@ -410,10 +410,10 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut pm: PrefixMap<ipnet::Ipv4Net, Vec<i32>> = PrefixMap::new();
     /// pm.insert("192.168.0.0/23".parse()?, vec![1]);
-    /// // pm.entry("192.168.0.1/23".parse()?).or_default().push(2);
-    /// // pm.entry("192.168.0.0/24".parse()?).or_default().push(3);
-    /// // assert_eq!(pm.get(&"192.168.0.0/23".parse()?), Some(&vec![1, 2]));
-    /// // assert_eq!(pm.get(&"192.168.0.0/24".parse()?), Some(&vec![3]));
+    /// pm.entry("192.168.0.1/23".parse()?).or_default().push(2);
+    /// pm.entry("192.168.0.0/24".parse()?).or_default().push(3);
+    /// assert_eq!(pm.get(&"192.168.0.0/23".parse()?), Some(&vec![1, 2]));
+    /// assert_eq!(pm.get(&"192.168.0.0/24".parse()?), Some(&vec![3]));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -1168,7 +1168,7 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_children_leak_debug() {
+    fn test_remove_children_leak() {
         // Reproduce the quickcheck minimal failing case exactly
         use crate::fuzzing::TestPrefix;
         let tp = |repr: u32, len: u8| -> TestPrefix { crate::Prefix::from_repr_len(repr, len) };
@@ -1178,12 +1178,11 @@ mod tests {
         pmap.insert(tp(0x00000000, 7), 0);
         assert!(pmap.check_memory_alloc(), "leak before remove_children");
         pmap.remove_children(&tp(0x00000000, 6));
-        eprintln!("count={}", pmap.len());
         assert!(pmap.check_memory_alloc(), "leak after remove_children");
     }
 
     #[test]
-    fn test_retain_leak_debug() {
+    fn test_retain_leak() {
         use crate::fuzzing::TestPrefix;
         let tp = |repr: u32, len: u8| -> TestPrefix { crate::Prefix::from_repr_len(repr, len) };
         let mut pmap: PrefixMap<TestPrefix, i32> = PrefixMap::new();
@@ -1191,7 +1190,6 @@ mod tests {
         pmap.insert(tp(0xf8000000, 5), 0);
         assert!(pmap.check_memory_alloc(), "leak before retain");
         pmap.retain(|pp, _| pp.prefix_len() < 2);
-        eprintln!("count={}", pmap.len());
         assert!(pmap.check_memory_alloc(), "leak after retain");
     }
 
@@ -1231,9 +1229,6 @@ mod tests {
         pmap.insert(p2, 1);
         pmap.insert(p3, 1);
 
-        println!("\nBefore retain (new):");
-        println!("{:#?}", pmap);
-
         // Retain: keep elements where !(root.contains(p) && p.1 >= root.1 + 2)
         let predicate = |_: &(u32, u8), v: &i32| *v == 0;
 
@@ -1243,22 +1238,9 @@ mod tests {
             .map(|(p, v)| (p, *v))
             .collect();
 
-        println!("\nExpected to keep:");
-        for (p, v) in &want {
-            println!("  {:?}: {}", p, v);
-        }
-
         pmap.retain(predicate);
 
-        println!("\nAfter retain (new):");
-        println!("{:#?}", pmap);
-
         let actual: Vec<_> = pmap.into_iter().collect();
-
-        println!("\nActual result:");
-        for (p, v) in &actual {
-            println!("  {:?}: {}", p, v);
-        }
 
         assert_eq!(want, actual, "mismatch in retain result");
     }
