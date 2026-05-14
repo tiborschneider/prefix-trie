@@ -39,6 +39,23 @@ impl std::fmt::Debug for MultiBitNode {
     }
 }
 
+/// Iterate over set bits in `filter`, yielding `Loc`s with slots computed from `bitmap`.
+///
+/// `bitmap` is the full bitmap (used for POPCNT slot computation).
+/// `filter` is the subset of bits to yield (must be a subset of `bitmap`).
+/// `len` is the number of bit positions to scan (NUM_DATA or NUM_CHILDREN).
+#[inline(always)]
+fn bitmap_locs(
+    idx: AllocIdx,
+    bitmap: u32,
+    filter: u32,
+    len: u32,
+) -> impl DoubleEndedIterator<Item = Loc> + 'static {
+    (0..len)
+        .filter(move |&raw| filter & (1 << raw) != 0)
+        .map(move |raw| Loc::new(idx, raw, bitmap))
+}
+
 impl MultiBitNode {
     /****** DATA HANDLING *******/
 
@@ -71,11 +88,12 @@ impl MultiBitNode {
     /// Yields Loc structs with bit (bitmap position) and computed slot for data access.
     #[inline(always)]
     pub(crate) fn data_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
-        let data_idx = self.data_idx;
-        let data_bitmap = self.data_bitmap;
-        (0..NUM_DATA as u32)
-            .filter(move |&raw| data_bitmap & (1 << raw) != 0)
-            .map(move |raw| Loc::new(data_idx, raw, data_bitmap))
+        bitmap_locs(
+            self.data_idx,
+            self.data_bitmap,
+            self.data_bitmap,
+            NUM_DATA as u32,
+        )
     }
 
     /****** CHILD HANDLING *******/
@@ -98,12 +116,13 @@ impl MultiBitNode {
     /// Get an iterator over all children.
     /// Yields Loc with bit set to the child bitmap position (for operations like unset_child_bit).
     #[inline(always)]
-    pub(crate) fn child_locs(&self) -> impl Iterator<Item = Loc> + 'static {
-        let idx = self.children_idx;
-        let child_bitmap = self.child_bitmap;
-        (0..NUM_CHILDREN as u32)
-            .filter(move |&raw| child_bitmap & (1 << raw) != 0)
-            .map(move |raw| Loc::new(idx, raw, child_bitmap))
+    pub(crate) fn child_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
+        bitmap_locs(
+            self.children_idx,
+            self.child_bitmap,
+            self.child_bitmap,
+            NUM_CHILDREN as u32,
+        )
     }
 
     /****** COVER STUFF *******/
@@ -119,12 +138,8 @@ impl MultiBitNode {
         key: R,
         prefix_len: u32,
     ) -> impl DoubleEndedIterator<Item = Loc> + 'static {
-        let filtered = data_cover_mask(depth, key, prefix_len) & self.data_bitmap;
-        let data_idx = self.data_idx;
-        let data_bitmap = self.data_bitmap;
-        (0..NUM_DATA as u32)
-            .filter(move |&raw| filtered & (1 << raw) != 0)
-            .map(move |raw| Loc::new(data_idx, raw, data_bitmap))
+        let filter = data_cover_mask(depth, key, prefix_len) & self.data_bitmap;
+        bitmap_locs(self.data_idx, self.data_bitmap, filter, NUM_DATA as u32)
     }
 
     /// Iterator over the indices of all children that of that node that are covered within the
@@ -138,13 +153,14 @@ impl MultiBitNode {
         depth: u32,
         key: R,
         prefix_len: u32,
-    ) -> impl Iterator<Item = Loc> + 'static {
-        let filtered = child_cover_mask(depth, key, prefix_len) & self.child_bitmap;
-        let children_idx = self.children_idx;
-        let child_bitmap = self.child_bitmap;
-        (0..NUM_CHILDREN as u32)
-            .filter(move |&raw| filtered & (1 << raw) != 0)
-            .map(move |raw| Loc::new(children_idx, raw, child_bitmap))
+    ) -> impl DoubleEndedIterator<Item = Loc> + 'static {
+        let filter = child_cover_mask(depth, key, prefix_len) & self.child_bitmap;
+        bitmap_locs(
+            self.children_idx,
+            self.child_bitmap,
+            filter,
+            NUM_CHILDREN as u32,
+        )
     }
 
     /****** DATA LPM *******/
@@ -158,13 +174,9 @@ impl MultiBitNode {
         depth: u32,
         key: R,
         prefix_len: u32,
-    ) -> impl Iterator<Item = Loc> + 'static {
-        let filtered = data_lpm_mask(depth, key, prefix_len) & self.data_bitmap;
-        let data_idx = self.data_idx;
-        let data_bitmap = self.data_bitmap;
-        (0..NUM_DATA as u32)
-            .filter(move |&raw| filtered & (1 << raw) != 0)
-            .map(move |raw| Loc::new(data_idx, raw, data_bitmap))
+    ) -> impl DoubleEndedIterator<Item = Loc> + 'static {
+        let filter = data_lpm_mask(depth, key, prefix_len) & self.data_bitmap;
+        bitmap_locs(self.data_idx, self.data_bitmap, filter, NUM_DATA as u32)
     }
 
     /// Get the data loc of the longest prefix match in this node (if it exists).

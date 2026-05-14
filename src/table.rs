@@ -466,18 +466,7 @@ impl<T> Table<T> {
     /// Returns `None` if the prefix is absent.
     #[inline(always)]
     pub(crate) fn find<R: Key>(&self, key: R, prefix_len: u32) -> Option<Present<'_, T>> {
-        let mut loc = Loc::root();
-        let mut depth = 0;
-        while prefix_len >= depth + K {
-            let child_bit = child_bit(depth, key);
-            // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
-            // of a prior `child()` call, which always returns a valid `Loc`.
-            let Some(next) = (unsafe { self.child(loc, child_bit) }) else {
-                return None;
-            };
-            loc = next;
-            depth += K;
-        }
+        let (loc, depth) = self.find_loc(key, prefix_len)?;
         let node = self.node(loc);
         let db = data_bit(key, prefix_len);
         if node.has_data_bit(db) {
