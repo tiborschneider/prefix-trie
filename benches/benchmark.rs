@@ -117,7 +117,8 @@ pub fn bgp_lookup(c: &mut Criterion) {
     group.finish();
 }
 
-pub fn bgp_peer_mutation_replay(c: &mut Criterion) {
+pub fn real_world_bgp_peer(c: &mut Criterion) {
+    let initial_state = bgp_peer_initial_state();
     let mutations = bgp_peer_mutations();
 
     let mut group = c.benchmark_group("ris-announce-withdraws");
@@ -130,12 +131,38 @@ pub fn bgp_peer_mutation_replay(c: &mut Criterion) {
             map
         })
     });
+    group.bench_function("PrefixMap/preloaded", |b| {
+        b.iter_with_setup(
+            || {
+                let mut map = PrefixMap::new();
+                execute_dense_prefix_map(&mut map, &initial_state);
+                map
+            },
+            |mut map| {
+                execute_dense_prefix_map(&mut map, &mutations);
+                map
+            },
+        )
+    });
     group.bench_function("TreeBitMap", |b| {
         b.iter(|| {
             let mut map = IpLookupTable::new();
             execute_treebitmap(&mut map, &mutations);
             map
         })
+    });
+    group.bench_function("TreeBitMap/preloaded", |b| {
+        b.iter_with_setup(
+            || {
+                let mut map = IpLookupTable::new();
+                execute_treebitmap(&mut map, &initial_state);
+                map
+            },
+            |mut map| {
+                execute_treebitmap(&mut map, &mutations);
+                map
+            },
+        )
     });
 
     group.finish();
@@ -183,6 +210,6 @@ criterion_group!(
         //.sample_size(50)
         // .with_profiler(MyProfiler::default())
         .measurement_time(std::time::Duration::from_secs(10));
-    targets = bgp_lookup, bgp_mods, random_lookup, random_mods, bgp_peer_mutation_replay,
+    targets = bgp_lookup, bgp_mods, random_lookup, random_mods, real_world_bgp_peer,
 );
 criterion_main!(benches);

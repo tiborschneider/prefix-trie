@@ -12,7 +12,9 @@ use std::fs::File;
 use std::io::Read;
 use std::net::Ipv4Addr;
 
-const PEER_193_MUTATIONS_PARQUET: &str = "benches/20260511-mutations-peer-193.0.0.56AS3333.parquet";
+const PEER_MUTATIONS_PARQUET: &str = "benches/20260511-mutations-peer-193.0.0.56AS3333.parquet";
+const PEER_INITIAL_STATE_PARQUET: &str =
+    "benches/20260511-initial-state-peer-193.0.0.56AS3333.parquet";
 
 pub enum Insn {
     Insert(Ipv4Addr, u8, u32),
@@ -44,7 +46,7 @@ pub fn bgp_ipv4_prefixes() -> Vec<(Ipv4Addr, u8)> {
 }
 
 pub fn bgp_peer_mutations() -> Vec<Insn> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_193_MUTATIONS_PARQUET);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_MUTATIONS_PARQUET);
     let file = File::open(&path).unwrap_or_else(|err| {
         panic!("failed to open {}: {err}", path.display());
     });
@@ -70,6 +72,35 @@ pub fn bgp_peer_mutations() -> Vec<Insn> {
     }
 
     mutations
+}
+
+pub fn bgp_peer_initial_state() -> Vec<Insn> {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_INITIAL_STATE_PARQUET);
+    let file = File::open(&path).unwrap_or_else(|err| {
+        panic!("failed to open {}: {err}", path.display());
+    });
+    let reader = SerializedFileReader::new(file).unwrap_or_else(|err| {
+        panic!("failed to read {}: {err}", path.display());
+    });
+    let mut initial_state =
+        Vec::with_capacity(reader.metadata().file_metadata().num_rows() as usize);
+    let mut rng = StdRng::seed_from_u64(12);
+
+    for row in reader.get_row_iter(None).unwrap() {
+        let row = row.unwrap();
+        let Ok(prefix) = row.get_string(0).unwrap().parse::<Ipv4Net>() else {
+            continue;
+        };
+
+        initial_state.push(Insn::Insert(
+            prefix.addr(),
+            prefix.prefix_len(),
+            rng.gen::<u32>(),
+        ));
+    }
+
+    initial_state
 }
 
 pub fn generate_random_mods_dense(seed: u64, iter: usize) -> (Vec<Insn>, HashSet<(Ipv4Addr, u8)>) {
