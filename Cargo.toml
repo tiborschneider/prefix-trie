@@ -14,6 +14,7 @@ rust-version = "1.71.1"
 exclude = [
     "benches/prefixes.txt.gz",
     "benches/20260511-mutations-peer-193.0.0.56AS3333.parquet",
+    "benches/20260511-initial-state-peer-193.0.0.56AS3333.parquet",
 ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
