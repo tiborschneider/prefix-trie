@@ -6,7 +6,7 @@ use prefix_trie::*;
 
 #[test]
 fn dense_memory_usage() {
-    let addrs = ris_peer_initial_state();
+    let addrs = ris_peer_initial_state(12);
     let mods = fill_table(9, &addrs);
     let mut prefix_map = PrefixMap::new();
     let mut treebitmap = IpLookupTable::new();

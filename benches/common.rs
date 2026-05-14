@@ -32,7 +32,10 @@ pub fn random_addr(rng: &mut StdRng) -> (Ipv4Addr, u8) {
     (net.addr(), net.prefix_len())
 }
 
-pub fn ris_peer_initial_state() -> Vec<(Ipv4Addr, u8)> {
+/// Return all prefixes in the RIB of a RIS peer, in random order.
+pub fn ris_peer_initial_state(seed: u64) -> Vec<(Ipv4Addr, u8)> {
+    let mut rng = StdRng::seed_from_u64(seed);
+
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_INITIAL_STATE_PARQUET);
     let file = File::open(&path).unwrap_or_else(|err| {
         panic!("failed to open {}: {err}", path.display());
@@ -50,9 +53,14 @@ pub fn ris_peer_initial_state() -> Vec<(Ipv4Addr, u8)> {
         }
     }
 
+    prefixes.shuffle(&mut rng);
+
     return prefixes;
 }
 
+/// Return all mutations during 24h of a RIS peer
+/// 
+/// The data is sorted by time and the data is returned in original order.
 pub fn ris_peer_mutations() -> Vec<Insn> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_MUTATIONS_PARQUET);
     let file = File::open(&path).unwrap_or_else(|err| {
