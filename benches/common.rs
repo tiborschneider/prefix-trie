@@ -12,9 +12,10 @@ use std::fs::File;
 use std::io::Read;
 use std::net::Ipv4Addr;
 
-const PEER_MUTATIONS_PARQUET: &str = "benches/20260511-mutations-peer-193.0.0.56AS3333.parquet";
+const PEER_MUTATIONS_PARQUET: &str =
+    "benches/data/20260511-mutations-peer-193.0.0.56AS3333.parquet";
 const PEER_INITIAL_STATE_PARQUET: &str =
-    "benches/20260511-initial-state-peer-193.0.0.56AS3333.parquet";
+    "benches/data/20260511-initial-state-peer-193.0.0.56AS3333.parquet";
 
 pub enum Insn {
     Insert(Ipv4Addr, u8, u32),
@@ -75,8 +76,7 @@ pub fn bgp_peer_mutations() -> Vec<Insn> {
 }
 
 pub fn bgp_peer_initial_state() -> Vec<Insn> {
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_INITIAL_STATE_PARQUET);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_INITIAL_STATE_PARQUET);
     let file = File::open(&path).unwrap_or_else(|err| {
         panic!("failed to open {}: {err}", path.display());
     });
