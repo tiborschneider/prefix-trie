@@ -9,9 +9,10 @@ use prefix_trie::*;
 use std::collections::HashSet;
 
 pub fn random_mods(c: &mut Criterion) {
-    let mut group = c.benchmark_group("random-mods");
-
     let (insn, _) = generate_random_mods_dense(1, ITERS);
+
+    let mut group = c.benchmark_group("random-mods");
+    group.throughput(Throughput::Elements(insn.len() as u64));
 
     group.bench_function("PrefixMap", |b| {
         b.iter(|| {
@@ -39,6 +40,7 @@ pub fn random_lookup(c: &mut Criterion) {
     execute_treebitmap(&mut treebitmap, &mods);
 
     let mut group = c.benchmark_group("random-lookups");
+    group.throughput(Throughput::Elements(lookups.len() as u64));
 
     group.bench_function("PrefixMap", |b| {
         b.iter(|| {
@@ -55,11 +57,12 @@ pub fn random_lookup(c: &mut Criterion) {
 }
 
 pub fn bgp_mods(c: &mut Criterion) {
-    let mut group = c.benchmark_group("bgp-mods");
-
     let addrs = bgp_ipv4_prefixes();
     let setup = fill_table(9, &addrs);
     let insn = generate_random_mods_sparse(8, ITERS, &addrs);
+
+    let mut group = c.benchmark_group("bgp-mods");
+    group.throughput(Throughput::Elements(insn.len() as u64));
 
     group.bench_function("PrefixMap", |b| {
         b.iter_with_setup(
@@ -92,11 +95,12 @@ pub fn bgp_mods(c: &mut Criterion) {
 }
 
 pub fn bgp_lookup(c: &mut Criterion) {
-    let mut group = c.benchmark_group("bgp-lookups");
-
     let addrs = bgp_ipv4_prefixes();
     let mods = fill_table(9, &addrs);
     let lookups = generate_random_lookups_sparse(10, ITERS, &addrs);
+
+    let mut group = c.benchmark_group("bgp-lookups");
+    group.throughput(Throughput::Elements(lookups.len() as u64));
 
     let mut prefix_map = PrefixMap::new();
     let mut treebitmap = IpLookupTable::new();
