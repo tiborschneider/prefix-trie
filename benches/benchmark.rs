@@ -128,7 +128,7 @@ pub fn real_world_bgp_peer(c: &mut Criterion) {
     let mut group = c.benchmark_group("ris-announce-withdraws");
     group.throughput(Throughput::Elements(mutations.len() as u64));
 
-    group.bench_function("PrefixMap", |b| {
+    group.bench_function("PrefixMap/blank", |b| {
         b.iter(|| {
             let mut map = PrefixMap::new();
             execute_dense_prefix_map(&mut map, &mutations);
@@ -148,7 +148,7 @@ pub fn real_world_bgp_peer(c: &mut Criterion) {
             },
         )
     });
-    group.bench_function("TreeBitMap", |b| {
+    group.bench_function("TreeBitMap/blank", |b| {
         b.iter(|| {
             let mut map = IpLookupTable::new();
             execute_treebitmap(&mut map, &mutations);
