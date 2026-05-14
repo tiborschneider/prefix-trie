@@ -3,11 +3,16 @@
 
 use ip_network_table_deps_treebitmap::IpLookupTable;
 use ipnet::Ipv4Net;
+use parquet::file::reader::{FileReader, SerializedFileReader};
+use parquet::record::RowAccessor;
 use prefix_trie::*;
 use rand::prelude::*;
 use std::collections::HashSet;
+use std::fs::File;
 use std::io::Read;
 use std::net::Ipv4Addr;
+
+const PEER_193_MUTATIONS_PARQUET: &str = "benches/20260511-mutations-peer-193.0.0.56AS3333.parquet";
 
 pub enum Insn {
     Insert(Ipv4Addr, u8, u32),
@@ -36,6 +41,35 @@ pub fn bgp_ipv4_prefixes() -> Vec<(Ipv4Addr, u8)> {
         .filter_map(|x| x.parse::<Ipv4Net>().ok())
         .map(|net| (net.addr(), net.prefix_len()))
         .collect()
+}
+
+pub fn bgp_peer_mutations() -> Vec<Insn> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_193_MUTATIONS_PARQUET);
+    let file = File::open(&path).unwrap_or_else(|err| {
+        panic!("failed to open {}: {err}", path.display());
+    });
+    let reader = SerializedFileReader::new(file).unwrap_or_else(|err| {
+        panic!("failed to read {}: {err}", path.display());
+    });
+    let mut mutations = Vec::with_capacity(reader.metadata().file_metadata().num_rows() as usize);
+    let mut rng = StdRng::seed_from_u64(11);
+
+    for row in reader.get_row_iter(None).unwrap() {
+        let row = row.unwrap();
+        let operation = row.get_string(0).unwrap();
+        let Ok(prefix) = row.get_string(1).unwrap().parse::<Ipv4Net>() else {
+            continue;
+        };
+
+        let mutation = match operation.as_str() {
+            "A" => Insn::Insert(prefix.addr(), prefix.prefix_len(), rng.gen::<u32>()),
+            "W" => Insn::Remove(prefix.addr(), prefix.prefix_len()),
+            op => panic!("unknown mutation operation {op:?}"),
+        };
+        mutations.push(mutation);
+    }
+
+    mutations
 }
 
 pub fn generate_random_mods_dense(seed: u64, iter: usize) -> (Vec<Insn>, HashSet<(Ipv4Addr, u8)>) {
