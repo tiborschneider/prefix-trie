@@ -12,7 +12,6 @@ keywords = ["IP", "prefix", "trie", "tree", "collection"]
 description = "Prefix trie (tree) datastructure (both a set and a map) that provides exact and longest-prefix matches."
 rust-version = "1.71.1"
 exclude = [
-    "benches/data/prefixes.txt.gz",
     "benches/data/20260511-mutations-peer-193.0.0.56AS3333.parquet",
     "benches/data/20260511-initial-state-peer-193.0.0.56AS3333.parquet",
 ]
@@ -53,7 +52,6 @@ array-const-fn-init = "0.1.1"
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
-flate2 = "1.1.9"
 generic-tests = "0.1.2"
 ip_network_table-deps-treebitmap = "0.5.0"
 itertools = "0.14.0"
