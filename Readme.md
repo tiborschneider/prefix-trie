@@ -49,10 +49,10 @@ all IPv4 prefixes exchanged at AMS-IX in the bundled snapshot, currently 1,058,3
 
 | Operation       | Experiment      | `PrefixMap` | `TreeBitMap` | ratio |
 |-----------------|-----------------|-------------|--------------|-------|
-| Lookup          | random prefixes | **3.872ms** | 6.504ms      | ~1.68x |
-| Insert & Remove | random prefixes | **9.732ms** | 16.37ms      | ~1.68x |
-| Lookup          | AMS-IX prefixes | **8.075ms** | 13.09ms      | ~1.62x |
-| Insert & Remove | AMS-IX prefixes | **14.58ms** | 16.73ms      | ~1.15x |
+| Lookup          | random prefixes |  **3.54ms** | 6.38ms       | ~1.8x |
+| Insert & Remove | random prefixes |  **9.52ms** | 15.59ms      | ~1.6x |
+| Lookup          | AMS-IX prefixes |  **6.48ms** | 11.11ms      | ~1.7x |
+| Insert & Remove | AMS-IX prefixes | **12.18ms** | 17.34ms      | ~1.4x |
 
 The ratio is `TreeBitMap` divided by `PrefixMap`, so values above 1 mean `PrefixMap` was faster in
 that run.

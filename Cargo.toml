@@ -11,6 +11,7 @@ categories = ["network-programming"]
 keywords = ["IP", "prefix", "trie", "tree", "collection"]
 description = "Prefix trie (tree) datastructure (both a set and a map) that provides exact and longest-prefix matches."
 rust-version = "1.71.1"
+exclude = ["benches/prefixes.txt.gz"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
