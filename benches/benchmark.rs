@@ -3,7 +3,7 @@ use common::*;
 
 const ITERS: usize = 100_000;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use ip_network_table_deps_treebitmap::IpLookupTable;
 use prefix_trie::*;
 use std::collections::HashSet;
@@ -117,6 +117,30 @@ pub fn bgp_lookup(c: &mut Criterion) {
     group.finish();
 }
 
+pub fn bgp_peer_mutation_replay(c: &mut Criterion) {
+    let mutations = bgp_peer_mutations();
+
+    let mut group = c.benchmark_group("ris-announce-withdraws");
+    group.throughput(Throughput::Elements(mutations.len() as u64));
+
+    group.bench_function("PrefixMap", |b| {
+        b.iter(|| {
+            let mut map = PrefixMap::new();
+            execute_dense_prefix_map(&mut map, &mutations);
+            map
+        })
+    });
+    group.bench_function("TreeBitMap", |b| {
+        b.iter(|| {
+            let mut map = IpLookupTable::new();
+            execute_treebitmap(&mut map, &mutations);
+            map
+        })
+    });
+
+    group.finish();
+}
+
 #[derive(Default)]
 #[allow(dead_code)]
 struct MyProfiler {
@@ -159,6 +183,6 @@ criterion_group!(
         //.sample_size(50)
         // .with_profiler(MyProfiler::default())
         .measurement_time(std::time::Duration::from_secs(10));
-    targets = bgp_lookup, bgp_mods, random_lookup, random_mods,
+    targets = bgp_lookup, bgp_mods, random_lookup, random_mods, bgp_peer_mutation_replay,
 );
 criterion_main!(benches);
