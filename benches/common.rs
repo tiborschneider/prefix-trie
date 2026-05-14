@@ -9,7 +9,6 @@ use prefix_trie::*;
 use rand::prelude::*;
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::Read;
 use std::net::Ipv4Addr;
 
 const PEER_MUTATIONS_PARQUET: &str =
@@ -33,20 +32,28 @@ pub fn random_addr(rng: &mut StdRng) -> (Ipv4Addr, u8) {
     (net.addr(), net.prefix_len())
 }
 
-pub fn bgp_ipv4_prefixes() -> Vec<(Ipv4Addr, u8)> {
-    let compressed = include_bytes!("prefixes.txt.gz");
-    let mut decoder = flate2::read::GzDecoder::new(&compressed[..]);
-    let mut decompressed = Vec::new();
-    decoder.read_to_end(&mut decompressed).unwrap();
-    str::from_utf8(&decompressed)
-        .unwrap()
-        .lines()
-        .filter_map(|x| x.parse::<Ipv4Net>().ok())
-        .map(|net| (net.addr(), net.prefix_len()))
-        .collect()
+pub fn ris_peer_initial_state() -> Vec<(Ipv4Addr, u8)> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_INITIAL_STATE_PARQUET);
+    let file = File::open(&path).unwrap_or_else(|err| {
+        panic!("failed to open {}: {err}", path.display());
+    });
+    let reader = SerializedFileReader::new(file).unwrap_or_else(|err| {
+        panic!("failed to read {}: {err}", path.display());
+    });
+
+    let mut prefixes = Vec::with_capacity(reader.metadata().file_metadata().num_rows() as usize);
+
+    for row in reader.get_row_iter(None).unwrap() {
+        let row = row.unwrap();
+        if let Ok(prefix) = row.get_string(0).unwrap().parse::<Ipv4Net>() {
+            prefixes.push((prefix.addr(), prefix.prefix_len()));
+        }
+    }
+
+    return prefixes;
 }
 
-pub fn bgp_peer_mutations() -> Vec<Insn> {
+pub fn ris_peer_mutations() -> Vec<Insn> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_MUTATIONS_PARQUET);
     let file = File::open(&path).unwrap_or_else(|err| {
         panic!("failed to open {}: {err}", path.display());
@@ -73,34 +80,6 @@ pub fn bgp_peer_mutations() -> Vec<Insn> {
     }
 
     mutations
-}
-
-pub fn bgp_peer_initial_state() -> Vec<Insn> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_INITIAL_STATE_PARQUET);
-    let file = File::open(&path).unwrap_or_else(|err| {
-        panic!("failed to open {}: {err}", path.display());
-    });
-    let reader = SerializedFileReader::new(file).unwrap_or_else(|err| {
-        panic!("failed to read {}: {err}", path.display());
-    });
-    let mut initial_state =
-        Vec::with_capacity(reader.metadata().file_metadata().num_rows() as usize);
-    let mut rng = StdRng::seed_from_u64(12);
-
-    for row in reader.get_row_iter(None).unwrap() {
-        let row = row.unwrap();
-        let Ok(prefix) = row.get_string(0).unwrap().parse::<Ipv4Net>() else {
-            continue;
-        };
-
-        initial_state.push(Insn::Insert(
-            prefix.addr(),
-            prefix.prefix_len(),
-            rng.gen::<u32>(),
-        ));
-    }
-
-    initial_state
 }
 
 pub fn generate_random_mods_dense(seed: u64, iter: usize) -> (Vec<Insn>, HashSet<(Ipv4Addr, u8)>) {

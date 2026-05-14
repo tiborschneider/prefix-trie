@@ -57,7 +57,7 @@ pub fn random_lookup(c: &mut Criterion) {
 }
 
 pub fn bgp_mods(c: &mut Criterion) {
-    let addrs = bgp_ipv4_prefixes();
+    let addrs = ris_peer_initial_state();
     let setup = fill_table(9, &addrs);
     let insn = generate_random_mods_sparse(8, ITERS, &addrs);
 
@@ -95,7 +95,7 @@ pub fn bgp_mods(c: &mut Criterion) {
 }
 
 pub fn bgp_lookup(c: &mut Criterion) {
-    let addrs = bgp_ipv4_prefixes();
+    let addrs = ris_peer_initial_state();
     let mods = fill_table(9, &addrs);
     let lookups = generate_random_lookups_sparse(10, ITERS, &addrs);
 
@@ -122,8 +122,9 @@ pub fn bgp_lookup(c: &mut Criterion) {
 }
 
 pub fn real_world_bgp_peer(c: &mut Criterion) {
-    let initial_state = bgp_peer_initial_state();
-    let mutations = bgp_peer_mutations();
+    let addrs = ris_peer_initial_state();
+    let initial_table = fill_table(9, &addrs);
+    let mutations = ris_peer_mutations();
 
     let mut group = c.benchmark_group("ris-announce-withdraws");
     group.throughput(Throughput::Elements(mutations.len() as u64));
@@ -139,7 +140,7 @@ pub fn real_world_bgp_peer(c: &mut Criterion) {
         b.iter_with_setup(
             || {
                 let mut map = PrefixMap::new();
-                execute_dense_prefix_map(&mut map, &initial_state);
+                execute_dense_prefix_map(&mut map, &initial_table);
                 map
             },
             |mut map| {
@@ -159,7 +160,7 @@ pub fn real_world_bgp_peer(c: &mut Criterion) {
         b.iter_with_setup(
             || {
                 let mut map = IpLookupTable::new();
-                execute_treebitmap(&mut map, &initial_state);
+                execute_treebitmap(&mut map, &initial_table);
                 map
             },
             |mut map| {
