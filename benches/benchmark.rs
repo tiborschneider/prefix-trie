@@ -5,6 +5,7 @@ const ITERS: usize = 100_000;
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use ip_network_table_deps_treebitmap::IpLookupTable;
+use itertools::Itertools;
 use prefix_trie::*;
 use std::collections::HashSet;
 
@@ -57,7 +58,7 @@ pub fn random_lookup(c: &mut Criterion) {
 }
 
 pub fn bgp_mods(c: &mut Criterion) {
-    let addrs = ris_peer_initial_state();
+    let addrs = ris_peer_initial_state(12);
     let setup = fill_table(9, &addrs);
     let insn = generate_random_mods_sparse(8, ITERS, &addrs);
 
@@ -95,7 +96,7 @@ pub fn bgp_mods(c: &mut Criterion) {
 }
 
 pub fn bgp_lookup(c: &mut Criterion) {
-    let addrs = ris_peer_initial_state();
+    let addrs = ris_peer_initial_state(12);
     let mods = fill_table(9, &addrs);
     let lookups = generate_random_lookups_sparse(10, ITERS, &addrs);
 
@@ -121,8 +122,55 @@ pub fn bgp_lookup(c: &mut Criterion) {
     group.finish();
 }
 
+pub fn bgp_full_table_insert(c: &mut Criterion) {
+    let addrs: Vec<_> = ris_peer_initial_state(12);
+    let inserts = fill_table(9, &addrs);
+
+    let sorted_addrs: Vec<_> = addrs.iter().cloned().sorted().collect();
+    let sorted_inserts = fill_table(10, &sorted_addrs);
+
+    let mut group = c.benchmark_group("bgp-full-table-insert");
+    group.throughput(Throughput::Elements(inserts.len() as u64));
+
+    group.bench_function("PrefixMap/random", |b| {
+        b.iter_with_setup(
+            || PrefixMap::new(),
+            |mut prefix_map| {
+                execute_dense_prefix_map(&mut prefix_map, &inserts);
+            },
+        )
+    });
+    group.bench_function("TreeBitMap/random", |b| {
+        b.iter_with_setup(
+            || IpLookupTable::new(),
+            |mut treebitmap| {
+                execute_treebitmap(&mut treebitmap, &inserts);
+            },
+        )
+    });
+
+    group.bench_function("PrefixMap/sorted", |b| {
+        b.iter_with_setup(
+            || PrefixMap::new(),
+            |mut prefix_map| {
+                execute_dense_prefix_map(&mut prefix_map, &sorted_inserts);
+            },
+        )
+    });
+    group.bench_function("TreeBitMap/sorted", |b| {
+        b.iter_with_setup(
+            || IpLookupTable::new(),
+            |mut treebitmap| {
+                execute_treebitmap(&mut treebitmap, &sorted_inserts);
+            },
+        )
+    });
+
+    group.finish();
+}
+
 pub fn real_world_bgp_peer(c: &mut Criterion) {
-    let addrs = ris_peer_initial_state();
+    let addrs = ris_peer_initial_state(12);
     let initial_table = fill_table(9, &addrs);
     let mutations = ris_peer_mutations();
 
@@ -215,6 +263,6 @@ criterion_group!(
         //.sample_size(50)
         // .with_profiler(MyProfiler::default())
         .measurement_time(std::time::Duration::from_secs(10));
-    targets = bgp_lookup, bgp_mods, random_lookup, random_mods, real_world_bgp_peer,
+    targets = bgp_full_table_insert, bgp_lookup, bgp_mods, random_lookup, random_mods, real_world_bgp_peer,
 );
 criterion_main!(benches);
