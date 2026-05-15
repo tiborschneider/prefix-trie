@@ -6,10 +6,11 @@ use std::{
 
 use crate::node::MultiBitNode;
 
+const NUM_TIERS: usize = 7;
 /// Spacing for data allocations (tiers by capacity)
-pub(crate) const DATA_SPACING: [usize; 6] = [1, 2, 4, 8, 16, 31];
+pub(crate) const DATA_SPACING: [usize; NUM_TIERS] = [1, 2, 4, 8, 16, 24, 31];
 /// Spacing for children allocations (tiers by capacity)
-pub(crate) const CHILD_SPACING: [usize; 6] = [1, 2, 4, 8, 16, 32];
+pub(crate) const CHILD_SPACING: [usize; NUM_TIERS] = [1, 2, 4, 8, 16, 24, 32];
 
 /// Map count -> tier index for data (indices 0..=31)
 pub(crate) const DATA_COUNT_TO_TIER: [u8; 32] = build_count_to_tier_data();
@@ -138,7 +139,7 @@ pub(crate) type RawPtr<T> = *mut MaybeUninit<T>;
 
 pub(crate) struct CellAllocator<T> {
     data: UnsafeCell<Vec<MaybeUninit<T>>>,
-    free_lists: [Vec<u32>; 6], // one free list per tier
+    free_lists: [Vec<u32>; NUM_TIERS], // one free list per tier
 }
 
 impl<T> Default for CellAllocator<T> {
@@ -438,7 +439,7 @@ impl<T> CellAllocator<T> {
 #[derive(Clone)]
 pub(crate) struct NodeAllocator {
     data: Vec<MultiBitNode>,
-    free_lists: [Vec<u32>; 6], // one free list per tier
+    free_lists: [Vec<u32>; NUM_TIERS], // one free list per tier
 }
 
 impl Default for NodeAllocator {

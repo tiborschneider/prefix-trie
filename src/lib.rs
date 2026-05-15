@@ -18,23 +18,21 @@
 //! details.
 //!
 //! All benchmarks use IPv4 prefixes from a RIPE RIS peer snapshot (1,042,024 prefixes). See
-//! `benches/benchmark.rs` for details.
+//! `benches/benchmark.rs` and `benches/memory.rs` for details.
 //!
 //! | Benchmark           | `HashMap`                | `PrefixMap`              | `TreeBitMap`         | `BTreeMap`          |
 //! |---------------------|--------------------------|--------------------------|----------------------|---------------------|
 //! | **Lookup**          |                          |                          |                      |                     |
-//! | Random access       | 1.00x (14.5 Melem/s)     | **1.25x** (18.1 Melem/s) | 0.64x (9.3 Melem/s)  | 0.29x (4.2 Melem/s) |
-//! | BGP updates         | 1.00x (28.4 Melem/s)     | **1.04x** (29.6 Melem/s) | 0.51x (14.5 Melem/s) | 0.30x (8.6 Melem/s) |
+//! | Random access       | 1.00x (14.8 Melem/s)     | **1.24x** (18.4 Melem/s) | 0.64x (9.5 Melem/s)  | 0.29x (4.3 Melem/s) |
+//! | BGP updates         | 1.00x (28.9 Melem/s)     | **1.03x** (29.7 Melem/s) | 0.50x (14.6 Melem/s) | 0.31x (8.9 Melem/s) |
 //! | **Insert & Remove** |                          |                          |                      |                     |
-//! | Random access       | **1.00x** (11.5 Melem/s) | 0.79x (9.1 Melem/s)      | 0.68x (7.8 Melem/s)  | 0.34x (3.9 Melem/s) |
-//! | BGP updates         | **1.00x** (23.1 Melem/s) | 0.69x (16.0 Melem/s)     | 0.58x (13.5 Melem/s) | 0.37x (8.5 Melem/s) |
+//! | Random access       | **1.00x** (11.3 Melem/s) | 0.82x (9.2 Melem/s)      | 0.71x (7.9 Melem/s)  | 0.34x (3.8 Melem/s) |
+//! | BGP updates         | **1.00x** (22.6 Melem/s) | 0.71x (16.0 Melem/s)     | 0.59x (13.4 Melem/s) | 0.38x (8.6 Melem/s) |
 //! | **Create**          |                          |                          |                      |                     |
-//! | Random order        | **1.00x** (13.9 Melem/s) | 0.66x (9.1 Melem/s)      | 0.58x (8.1 Melem/s)  | 0.30x (4.2 Melem/s) |
-//! | Sorted order        | 1.00x (14.1 Melem/s)     | **1.07x** (15.1 Melem/s) | 0.85x (12.0 Melem/s) | 0.63x (8.9 Melem/s) |
-//!
-//! The memory benchmark (`cargo test --bench memory --release -- --nocapture`) stores all 1,042,024
-//! RIS IPv4 prefixes with 32-bit values. Both `PrefixMap` and `TreeBitMap` report 12.0 mB for that
-//! map.
+//! | Random order        | **1.00x** (14.0 Melem/s) | 0.67x (9.4 Melem/s)      | 0.59x (8.3 Melem/s)  | 0.31x (4.4 Melem/s) |
+//! | Sorted order        | 1.00x (13.9 Melem/s)     | **1.11x** (15.4 Melem/s) | 0.86x (12.0 Melem/s) | 0.65x (9.0 Melem/s) |
+//! | **Memory**          |                          |                          |                      |                     |
+//! | Full table          | 26.0 mB                  | 12.0 mB (set: 4.0 mB)    | **11.0 mB**          | 16.4 mB             |
 //!
 //! In addition, `prefix-trie` includes a [`PrefixSet`] analogous to `std::collections::HashSet`.
 //! Set operations are exposed through composable trie views, so operations such as union,
