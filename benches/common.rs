@@ -32,7 +32,9 @@ pub trait BenchMap: Sized {
 
 impl BenchMap for PrefixMap<Ipv4Net, u32> {
     const NAME: &'static str = "PrefixMap";
-    fn new_empty() -> Self { PrefixMap::new() }
+    fn new_empty() -> Self {
+        PrefixMap::new()
+    }
     fn insert(&mut self, addr: Ipv4Addr, len: u8, val: u32) {
         self.insert(Ipv4Net::new(addr, len).unwrap(), val);
     }
@@ -46,7 +48,9 @@ impl BenchMap for PrefixMap<Ipv4Net, u32> {
 
 impl BenchMap for IpLookupTable<Ipv4Addr, u32> {
     const NAME: &'static str = "TreeBitMap";
-    fn new_empty() -> Self { IpLookupTable::new() }
+    fn new_empty() -> Self {
+        IpLookupTable::new()
+    }
     fn insert(&mut self, addr: Ipv4Addr, len: u8, val: u32) {
         self.insert(addr, len as u32, val);
     }
@@ -60,7 +64,9 @@ impl BenchMap for IpLookupTable<Ipv4Addr, u32> {
 
 impl BenchMap for HashMap<Ipv4Net, u32> {
     const NAME: &'static str = "HashMap";
-    fn new_empty() -> Self { HashMap::new() }
+    fn new_empty() -> Self {
+        HashMap::new()
+    }
     fn insert(&mut self, addr: Ipv4Addr, len: u8, val: u32) {
         self.insert(Ipv4Net::new(addr, len).unwrap(), val);
     }
@@ -74,7 +80,9 @@ impl BenchMap for HashMap<Ipv4Net, u32> {
 
 impl BenchMap for BTreeMap<Ipv4Net, u32> {
     const NAME: &'static str = "BTreeMap";
-    fn new_empty() -> Self { BTreeMap::new() }
+    fn new_empty() -> Self {
+        BTreeMap::new()
+    }
     fn insert(&mut self, addr: Ipv4Addr, len: u8, val: u32) {
         self.insert(Ipv4Net::new(addr, len).unwrap(), val);
     }
