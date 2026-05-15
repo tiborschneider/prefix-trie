@@ -579,6 +579,36 @@ pub trait TrieView<'a>: Sized {
         ViewIter::new(self)
     }
 
+    /// Return an iterator starting at the given prefix in lexicographic order.
+    ///
+    /// If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
+    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    ///
+    /// If `prefix` is not present, the iterator starts at the first entry that would come
+    /// after `prefix` in lexicographic order, regardless of `inclusive`.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("10.0.0.0/8"), 1);
+    /// map.insert(net!("10.1.0.0/16"), 2);
+    /// map.insert(net!("10.2.0.0/16"), 3);
+    /// map.insert(net!("10.3.0.0/16"), 4);
+    ///
+    /// let page: Vec<_> = map.view().iter_from(&net!("10.1.0.0/16"), false).take(2).collect();
+    /// assert_eq!(page, vec![(net!("10.2.0.0/16"), &3), (net!("10.3.0.0/16"), &4)]);
+    /// # }
+    /// ```
+    #[inline]
+    fn iter_from(self, prefix: &Self::P, inclusive: bool) -> ViewIter<'a, Self> {
+        ViewIter::new_from(self, prefix, inclusive)
+    }
+
     /// Return an iterator over all prefixes in this sub-trie.
     ///
     /// ```

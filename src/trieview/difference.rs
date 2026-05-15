@@ -572,4 +572,61 @@ mod tests {
         let want = vec![(p(0x00000000, 5), &5)];
         assert_eq!(got, want);
     }
+
+    // -- iter_from on difference views ------------------------------------------
+
+    #[test]
+    fn diff_iter_from_inclusive() {
+        let a = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a010000, 16, 2),
+            (0x0a020000, 16, 3),
+            (0x0a030000, 16, 4),
+        ]);
+        let b = map_from(&[(0x0a010000, 16, 20)]);
+
+        // diff: 10/8, 10.2/16, 10.3/16
+        let from = collect_diff(
+            a.view()
+                .difference(b.view())
+                .iter_from(&p(0x0a020000, 16), true),
+        );
+        assert_eq!(from, vec![(p(0x0a020000, 16), 3), (p(0x0a030000, 16), 4)]);
+    }
+
+    #[test]
+    fn diff_iter_from_exclusive() {
+        let a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2), (0x0a020000, 16, 3)]);
+        let b = map_from(&[(0x0a010000, 16, 20)]);
+
+        // diff: 10/8, 10.2/16
+        let from = collect_diff(
+            a.view()
+                .difference(b.view())
+                .iter_from(&p(0x0a000000, 8), false),
+        );
+        assert_eq!(from, vec![(p(0x0a020000, 16), 3)]);
+    }
+
+    #[test]
+    fn diff_iter_from_subview() {
+        let a = map_from(&[
+            (0x0a000000, 8, 1), // excluded by sub-view
+            (0x0a020000, 16, 2),
+            (0x0a030000, 16, 3),
+            (0x0b000000, 8, 4), // excluded by sub-view
+        ]);
+        let b = map_from(&[(0x0a020000, 16, 20)]);
+
+        // Sub-view at 10.2.0.0/15 covers 10.2–10.3, excludes 10/8, 11/8
+        // a sub-view entries: 10.2/16, 10.3/16
+        // diff removes 10.2/16 → only 10.3/16 remains
+        let diff = a.view_at(&p(0x0a020000, 15)).unwrap().difference(b.view());
+        let all = collect_diff(diff.clone().iter());
+        assert_eq!(all, vec![(p(0x0a030000, 16), 3)]);
+
+        // iter_from inclusive at 10.3/16 → same single result
+        let from = collect_diff(diff.iter_from(&p(0x0a030000, 16), true));
+        assert_eq!(from, vec![(p(0x0a030000, 16), 3)]);
+    }
 }

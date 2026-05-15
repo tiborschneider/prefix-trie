@@ -524,6 +524,80 @@ pub(crate) fn extend_repr<R: Key>(key: R, depth: u32, offset: u32) -> R {
     root | shifted_offset
 }
 
+/// For data_bit `b`, returns `(data_mask, child_mask)` of all entries at or after `b` in lex
+/// order (inclusive of `b` itself).
+const LEX_AFTER_DATA: [(u32, u32); NUM_DATA] = {
+    let mut table = [(0u32, 0u32); NUM_DATA];
+    let mut i = NUM_DATA;
+    while i > 0 {
+        i -= 1;
+        // Walk LEX_ORDER from the end, accumulating bits. For each data_bit position,
+        // record the accumulated mask at the point where we encounter that data_bit.
+        let mut data_mask = 0u32;
+        let mut child_mask = 0u32;
+        let mut j = NUM_DATA + NUM_CHILDREN;
+        while j > 0 {
+            j -= 1;
+            let elem = LEX_ORDER[j];
+            match elem.decode() {
+                Ok(db) => {
+                    data_mask |= 1 << db;
+                    if db as usize == i {
+                        break;
+                    }
+                }
+                Err(cb) => {
+                    child_mask |= 1 << cb;
+                }
+            }
+        }
+        table[i] = (data_mask, child_mask);
+    }
+    table
+};
+
+/// For child_bit `b`, returns `(data_mask, child_mask)` of all entries strictly after `b` in
+/// lex order (excludes `b` itself from the child_mask).
+const LEX_AFTER_CHILD: [(u32, u32); NUM_CHILDREN] = {
+    let mut table = [(0u32, 0u32); NUM_CHILDREN];
+    let mut i = NUM_CHILDREN;
+    while i > 0 {
+        i -= 1;
+        let mut data_mask = 0u32;
+        let mut child_mask = 0u32;
+        let mut j = NUM_DATA + NUM_CHILDREN;
+        while j > 0 {
+            j -= 1;
+            let elem = LEX_ORDER[j];
+            match elem.decode() {
+                Ok(db) => {
+                    data_mask |= 1 << db;
+                }
+                Err(cb) => {
+                    if cb as usize == i {
+                        break;
+                    }
+                    child_mask |= 1 << cb;
+                }
+            }
+        }
+        table[i] = (data_mask, child_mask);
+    }
+    table
+};
+
+/// Returns `(data_mask, child_mask)` of all entries at or after `data_bit` in lex order.
+#[inline(always)]
+pub(crate) fn lex_after_data(data_bit: u32) -> (u32, u32) {
+    LEX_AFTER_DATA[data_bit as usize]
+}
+
+/// Returns `(data_mask, child_mask)` of all entries strictly after `child_bit` in lex order.
+#[inline(always)]
+pub(crate) fn lex_after_child(child_bit: u32) -> (u32, u32) {
+    LEX_AFTER_CHILD[child_bit as usize]
+}
+
 #[rustfmt::skip]
 pub(crate) const DATA_BIT_TO_PREFIX: [(u8, u8); NUM_DATA] = [
     (0b0000, 0),

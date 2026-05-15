@@ -320,6 +320,37 @@ impl<P: Prefix> PrefixSet<P> {
         self.into_iter()
     }
 
+    /// Return an iterator starting at the given prefix in lexicographic order.
+    ///
+    /// If `inclusive` is `true`, the iterator includes `prefix` (if present).
+    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    ///
+    /// If `prefix` is not present in the set, the iterator starts at the first prefix that
+    /// would come after it in lexicographic order, regardless of `inclusive`.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// set.insert("10.0.0.0/8".parse()?);
+    /// set.insert("10.1.0.0/16".parse()?);
+    /// set.insert("10.2.0.0/16".parse()?);
+    /// set.insert("10.3.0.0/16".parse()?);
+    ///
+    /// // Cursor pagination: skip last seen, fetch next page
+    /// let page: Vec<_> = set.iter_from(&"10.1.0.0/16".parse()?, false).take(2).collect();
+    /// assert_eq!(page, vec!["10.2.0.0/16".parse()?, "10.3.0.0/16".parse()?]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn iter_from<'a>(&'a self, prefix: &P, inclusive: bool) -> Iter<'a, P> {
+        Iter(self.0.iter_from(prefix, inclusive))
+    }
+
     /// Keep only prefixes that satisfy the predicate `f`.
     ///
     /// ```

@@ -822,6 +822,79 @@ where
         IterMut::new(&mut self.table)
     }
 
+    /// Return an iterator starting at the given prefix in lexicographic order.
+    ///
+    /// If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
+    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    ///
+    /// If `prefix` is not present in the map, the iterator starts at the first entry that
+    /// would come after `prefix` in lexicographic order, regardless of `inclusive`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("10.0.0.0/8".parse()?, 1);
+    /// pm.insert("10.1.0.0/16".parse()?, 2);
+    /// pm.insert("10.2.0.0/16".parse()?, 3);
+    /// pm.insert("10.3.0.0/16".parse()?, 4);
+    /// pm.insert("10.4.0.0/16".parse()?, 5);
+    ///
+    /// // Inclusive: start at 10.2.0.0/16 and take the next 2 entries
+    /// let page: Vec<_> = pm.iter_from(&"10.2.0.0/16".parse()?, true).take(2).collect();
+    /// assert_eq!(page, vec![("10.2.0.0/16".parse()?, &3), ("10.3.0.0/16".parse()?, &4)]);
+    ///
+    /// // Exclusive: cursor pagination — skip last seen, fetch next page
+    /// let last_seen: ipnet::Ipv4Net = "10.2.0.0/16".parse()?;
+    /// let next_page: Vec<_> = pm.iter_from(&last_seen, false).take(2).collect();
+    /// assert_eq!(next_page, vec![("10.3.0.0/16".parse()?, &4), ("10.4.0.0/16".parse()?, &5)]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn iter_from<'a>(&'a self, prefix: &P, inclusive: bool) -> Iter<'a, P, T> {
+        let key = prefix.mask();
+        let prefix_len = prefix.prefix_len() as u32;
+        let stack = self.table.build_iter_stack_at(key, prefix_len, inclusive);
+        Iter::from_stack(&self.table, stack)
+    }
+
+    /// Return a mutable iterator starting at the given prefix in lexicographic order.
+    ///
+    /// If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
+    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    ///
+    /// If `prefix` is not present in the map, the iterator starts at the first entry that
+    /// would come after `prefix` in lexicographic order, regardless of `inclusive`.
+    ///
+    /// ```
+    /// # use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("10.0.0.0/8".parse()?, 1);
+    /// pm.insert("10.1.0.0/16".parse()?, 2);
+    /// pm.insert("10.2.0.0/16".parse()?, 3);
+    ///
+    /// // Mutate all entries starting from 10.1.0.0/16 (inclusive)
+    /// pm.iter_from_mut(&"10.1.0.0/16".parse()?, true).for_each(|(_, v)| *v *= 10);
+    /// assert_eq!(pm.get(&"10.0.0.0/8".parse()?), Some(&1));
+    /// assert_eq!(pm.get(&"10.1.0.0/16".parse()?), Some(&20));
+    /// assert_eq!(pm.get(&"10.2.0.0/16".parse()?), Some(&30));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn iter_from_mut<'a>(&'a mut self, prefix: &P, inclusive: bool) -> IterMut<'a, P, T> {
+        let key = prefix.mask();
+        let prefix_len = prefix.prefix_len() as u32;
+        let stack = self.table.build_iter_stack_at(key, prefix_len, inclusive);
+        IterMut::from_stack(&mut self.table, stack)
+    }
+
     /// An iterator visiting all keys in lexicographic order. The iterator element type is
     /// reconstructed prefixes `P`.
     ///

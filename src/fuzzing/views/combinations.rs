@@ -354,3 +354,72 @@ sub_case!(
     check_difference_intersection_iter_mut,
     check_difference_intersection_lpm_mut
 );
+
+fn check_union_difference_iter_from(
+    left: Entries,
+    middle: Entries,
+    right: Entries,
+    root: Option<TestPrefix>,
+    query: TestPrefix,
+    inclusive: bool,
+) -> bool {
+    let (left_map, left_reference) = build_map(left);
+    let (middle_map, middle_reference) = build_map(middle);
+    let (right_map, right_reference) = build_map(right);
+    let empty_left = PrefixMap::new();
+    let empty_middle = PrefixMap::new();
+    let empty_right = PrefixMap::new();
+
+    let all = expected_union_difference(&left_reference, &middle_reference, &right_reference, root);
+    let want: Vec<_> = all
+        .into_iter()
+        .filter(|(p, _)| if inclusive { *p >= query } else { *p > query })
+        .collect();
+    let got: Vec<_> = view_or_empty(&left_map, &empty_left, root)
+        .union(view_or_empty(&middle_map, &empty_middle, root))
+        .difference(view_or_empty(&right_map, &empty_right, root))
+        .iter_from(&query, inclusive)
+        .map(|(prefix, item)| (prefix, norm_union(item)))
+        .collect();
+    got == want
+}
+
+qc!(
+    combination_union_difference_root_iter_from_inclusive,
+    _combination_union_difference_root_iter_from_inclusive
+);
+fn _combination_union_difference_root_iter_from_inclusive(
+    (left, middle, right, query): (Entries, Entries, Entries, TestPrefix),
+) -> bool {
+    check_union_difference_iter_from(left, middle, right, None, query, true)
+}
+
+qc!(
+    combination_union_difference_root_iter_from_exclusive,
+    _combination_union_difference_root_iter_from_exclusive
+);
+fn _combination_union_difference_root_iter_from_exclusive(
+    (left, middle, right, query): (Entries, Entries, Entries, TestPrefix),
+) -> bool {
+    check_union_difference_iter_from(left, middle, right, None, query, false)
+}
+
+qc!(
+    combination_union_difference_sub_iter_from_inclusive,
+    _combination_union_difference_sub_iter_from_inclusive
+);
+fn _combination_union_difference_sub_iter_from_inclusive(
+    (left, middle, right, root, query): (Entries, Entries, Entries, TestPrefix, TestPrefix),
+) -> bool {
+    check_union_difference_iter_from(left, middle, right, Some(root), query, true)
+}
+
+qc!(
+    combination_union_difference_sub_iter_from_exclusive,
+    _combination_union_difference_sub_iter_from_exclusive
+);
+fn _combination_union_difference_sub_iter_from_exclusive(
+    (left, middle, right, root, query): (Entries, Entries, Entries, TestPrefix, TestPrefix),
+) -> bool {
+    check_union_difference_iter_from(left, middle, right, Some(root), query, false)
+}

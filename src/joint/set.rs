@@ -317,6 +317,45 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         self.into_iter()
     }
 
+    /// Return an iterator starting at the given prefix in lexicographic order. If `inclusive` is
+    /// `true`, the iterator includes `prefix` itself (if present); otherwise it starts just after
+    /// it. This is useful for cursor-based pagination over a [`JointPrefixSet`].
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+    /// set.insert("192.168.0.0/24".parse()?);
+    /// set.insert("192.168.1.0/24".parse()?);
+    /// set.insert("192.168.2.0/24".parse()?);
+    /// set.insert("2001::1:0:0/96".parse()?);
+    ///
+    /// // Get the next 2 entries after a cursor
+    /// let page: Vec<_> = set.iter_from(&"192.168.0.0/24".parse()?, false).take(2).collect();
+    /// assert_eq!(page, vec!["192.168.1.0/24".parse()?, "192.168.2.0/24".parse()?]);
+    ///
+    /// // Starting from an IPv6 prefix skips all IPv4 entries
+    /// let page: Vec<_> = set.iter_from(&"2001::1:0:0/96".parse()?, true).take(1).collect();
+    /// assert_eq!(page, vec!["2001::1:0:0/96".parse()?]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn iter_from<'a>(&'a self, prefix: &P, inclusive: bool) -> Iter<'a, P> {
+        Iter(match prefix.p1_or_p2_ref() {
+            Left(p1) => super::map::Iter {
+                i1: Some(self.t1.0.iter_from(p1, inclusive)),
+                i2: Some(self.t2.0.iter()),
+            },
+            Right(p2) => super::map::Iter {
+                i1: None,
+                i2: Some(self.t2.0.iter_from(p2, inclusive)),
+            },
+        })
+    }
+
     /// Keep only the elements in the map that satisfy the given condition `f`.
     ///
     /// ```

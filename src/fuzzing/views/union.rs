@@ -221,3 +221,80 @@ sub_sub!(
     check_iter_mut,
     check_lpm_mut
 );
+
+fn check_iter_from(
+    left: Entries,
+    right: Entries,
+    left_root: Option<TestPrefix>,
+    right_root: Option<TestPrefix>,
+    query: TestPrefix,
+    inclusive: bool,
+) -> bool {
+    let (left_map, left_reference) = build_map(left);
+    let (right_map, right_reference) = build_map(right);
+    let empty_left = PrefixMap::new();
+    let empty_right = PrefixMap::new();
+    let all = expected_union(&left_reference, &right_reference, left_root, right_root);
+    let want: Vec<_> = all
+        .into_iter()
+        .filter(|(p, _)| if inclusive { *p >= query } else { *p > query })
+        .collect();
+    let got: Vec<_> = view_or_empty(&left_map, &empty_left, left_root)
+        .union(view_or_empty(&right_map, &empty_right, right_root))
+        .iter_from(&query, inclusive)
+        .map(|(prefix, item)| (prefix, norm_union(item)))
+        .collect();
+    got == want
+}
+
+qc!(
+    union_root_root_iter_from_inclusive,
+    _union_root_root_iter_from_inclusive
+);
+fn _union_root_root_iter_from_inclusive(
+    (left, right, query): (Entries, Entries, TestPrefix),
+) -> bool {
+    check_iter_from(left, right, None, None, query, true)
+}
+
+qc!(
+    union_root_root_iter_from_exclusive,
+    _union_root_root_iter_from_exclusive
+);
+fn _union_root_root_iter_from_exclusive(
+    (left, right, query): (Entries, Entries, TestPrefix),
+) -> bool {
+    check_iter_from(left, right, None, None, query, false)
+}
+
+qc!(
+    union_sub_sub_iter_from_inclusive,
+    _union_sub_sub_iter_from_inclusive
+);
+fn _union_sub_sub_iter_from_inclusive(
+    (left, right, left_root, right_root, query): (
+        Entries,
+        Entries,
+        TestPrefix,
+        TestPrefix,
+        TestPrefix,
+    ),
+) -> bool {
+    check_iter_from(left, right, Some(left_root), Some(right_root), query, true)
+}
+
+qc!(
+    union_sub_sub_iter_from_exclusive,
+    _union_sub_sub_iter_from_exclusive
+);
+fn _union_sub_sub_iter_from_exclusive(
+    (left, right, left_root, right_root, query): (
+        Entries,
+        Entries,
+        TestPrefix,
+        TestPrefix,
+        TestPrefix,
+    ),
+) -> bool {
+    check_iter_from(left, right, Some(left_root), Some(right_root), query, false)
+}

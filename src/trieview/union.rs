@@ -870,4 +870,68 @@ mod tests {
         // 10/8 (in a and c -> Both in ab∪c), 11/8 (b only), 12/8 (c only)
         assert_eq!(count, 3);
     }
+
+    // -- iter_from on union views -----------------------------------------------
+
+    #[test]
+    fn union_iter_from_inclusive() {
+        let a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2), (0x0a020000, 16, 3)]);
+        let b = map_from(&[(0x0a010000, 16, 20), (0x0a030000, 16, 40)]);
+
+        // Full union: 10/8(L), 10.1/16(B), 10.2/16(L), 10.3/16(R)
+        let u = a.view().union(b.view());
+        let from: Vec<_> = u
+            .iter_from(&p(0x0a010000, 16), true)
+            .map(|(p, _)| p)
+            .collect();
+        assert_eq!(
+            from,
+            vec![p(0x0a010000, 16), p(0x0a020000, 16), p(0x0a030000, 16)]
+        );
+    }
+
+    #[test]
+    fn union_iter_from_exclusive() {
+        let a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2), (0x0a020000, 16, 3)]);
+        let b = map_from(&[(0x0a010000, 16, 20), (0x0a030000, 16, 40)]);
+
+        let u = a.view().union(b.view());
+        let from: Vec<_> = u
+            .iter_from(&p(0x0a010000, 16), false)
+            .map(|(p, _)| p)
+            .collect();
+        assert_eq!(from, vec![p(0x0a020000, 16), p(0x0a030000, 16)]);
+    }
+
+    #[test]
+    fn union_iter_from_subview() {
+        let a = map_from(&[
+            (0x0a000000, 8, 1), // excluded by sub-view
+            (0x0a020000, 16, 2),
+            (0x0a030000, 16, 3),
+            (0x0b000000, 8, 4), // excluded by sub-view
+        ]);
+        let b = map_from(&[
+            (0x0a020000, 16, 20),
+            (0x0a030000, 16, 40),
+            (0x0b000000, 8, 50), // excluded by sub-view
+        ]);
+
+        // Sub-view at 10.2.0.0/15 covers 10.2.x.x–10.3.x.x, excludes 10/8, 11/8
+        let u = a
+            .view_at(&p(0x0a020000, 15))
+            .unwrap()
+            .union(b.view_at(&p(0x0a020000, 15)).unwrap());
+
+        // Full union of the sub-views: 10.2/16(B), 10.3/16(B)
+        let all: Vec<_> = u.clone().iter().map(|(p, _)| p).collect();
+        assert_eq!(all, vec![p(0x0a020000, 16), p(0x0a030000, 16)]);
+
+        // iter_from exclusive from 10.2/16 → only 10.3/16
+        let from: Vec<_> = u
+            .iter_from(&p(0x0a020000, 16), false)
+            .map(|(p, _)| p)
+            .collect();
+        assert_eq!(from, vec![p(0x0a030000, 16)]);
+    }
 }

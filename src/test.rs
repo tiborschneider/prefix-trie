@@ -577,6 +577,198 @@ mod t {
         assert!(pm.check_memory_alloc());
     }
 
+    #[test]
+    fn iter_from_inclusive<P: Prefix + Copy + PartialEq>() {
+        let mut pm = Map::<P>::new();
+        pm.insert(ip("10.0.0.0/8"), 1);
+        pm.insert(ip("10.1.0.0/16"), 2);
+        pm.insert(ip("10.2.0.0/16"), 3);
+        pm.insert(ip("10.3.0.0/16"), 4);
+        pm.insert(ip("10.4.0.0/16"), 5);
+
+        // Inclusive from the first entry yields everything
+        let all: Vec<_> = pm.iter_from(&ip("10.0.0.0/8"), true).collect();
+        assert_eq!(all, pm.iter().collect::<Vec<_>>());
+
+        // Inclusive from a middle entry
+        let from_mid: Vec<_> = pm.iter_from(&ip("10.2.0.0/16"), true).collect();
+        assert_eq!(
+            from_mid,
+            vec![
+                (ip("10.2.0.0/16"), &3),
+                (ip("10.3.0.0/16"), &4),
+                (ip("10.4.0.0/16"), &5)
+            ]
+        );
+
+        // Inclusive from the last entry
+        let from_last: Vec<_> = pm.iter_from(&ip("10.4.0.0/16"), true).collect();
+        assert_eq!(from_last, vec![(ip("10.4.0.0/16"), &5)]);
+    }
+
+    #[test]
+    fn iter_from_exclusive<P: Prefix + Copy + PartialEq>() {
+        let mut pm = Map::<P>::new();
+        pm.insert(ip("10.0.0.0/8"), 1);
+        pm.insert(ip("10.1.0.0/16"), 2);
+        pm.insert(ip("10.2.0.0/16"), 3);
+        pm.insert(ip("10.3.0.0/16"), 4);
+        pm.insert(ip("10.4.0.0/16"), 5);
+
+        // Exclusive from a middle entry (cursor pagination)
+        let after_mid: Vec<_> = pm.iter_from(&ip("10.2.0.0/16"), false).collect();
+        assert_eq!(
+            after_mid,
+            vec![(ip("10.3.0.0/16"), &4), (ip("10.4.0.0/16"), &5)]
+        );
+
+        // Exclusive from the last entry yields nothing
+        let after_last: Vec<_> = pm.iter_from(&ip("10.4.0.0/16"), false).collect();
+        assert!(after_last.is_empty());
+
+        // Exclusive with take for pagination
+        let page: Vec<_> = pm.iter_from(&ip("10.1.0.0/16"), false).take(2).collect();
+        assert_eq!(page, vec![(ip("10.2.0.0/16"), &3), (ip("10.3.0.0/16"), &4)]);
+    }
+
+    #[test]
+    fn iter_from_nonexistent<P: Prefix + Copy + PartialEq>() {
+        let mut pm = Map::<P>::new();
+        pm.insert(ip("10.0.0.0/8"), 1);
+        pm.insert(ip("10.2.0.0/16"), 2);
+        pm.insert(ip("10.4.0.0/16"), 3);
+
+        // Non-existent prefix between existing entries: starts at the next entry
+        let from: Vec<_> = pm.iter_from(&ip("10.1.0.0/16"), true).collect();
+        assert_eq!(from, vec![(ip("10.2.0.0/16"), &2), (ip("10.4.0.0/16"), &3)]);
+
+        let from: Vec<_> = pm.iter_from(&ip("10.1.0.0/16"), false).collect();
+        assert_eq!(from, vec![(ip("10.2.0.0/16"), &2), (ip("10.4.0.0/16"), &3)]);
+
+        // Non-existent prefix after all entries
+        let from: Vec<_> = pm.iter_from(&ip("11.0.0.0/8"), true).collect();
+        assert!(from.is_empty());
+    }
+
+    #[test]
+    fn iter_from_empty_map<P: Prefix + Copy + PartialEq>() {
+        let pm = Map::<P>::new();
+        let from: Vec<_> = pm.iter_from(&ip("10.0.0.0/8"), true).collect();
+        assert!(from.is_empty());
+        let from: Vec<_> = pm.iter_from(&ip("10.0.0.0/8"), false).collect();
+        assert!(from.is_empty());
+    }
+
+    #[test]
+    fn iter_from_with_parent_child<P: Prefix + Copy + PartialEq>() {
+        let mut pm = Map::<P>::new();
+        pm.insert(ip("10.0.0.0/8"), 1);
+        pm.insert(ip("10.0.0.0/16"), 2);
+        pm.insert(ip("10.0.0.0/24"), 3);
+        pm.insert(ip("10.1.0.0/16"), 4);
+
+        // From the parent prefix, inclusive: yields parent and all children
+        let from: Vec<_> = pm.iter_from(&ip("10.0.0.0/8"), true).collect();
+        assert_eq!(from, pm.iter().collect::<Vec<_>>());
+
+        // From the parent prefix, exclusive: yields only children
+        let from: Vec<_> = pm.iter_from(&ip("10.0.0.0/8"), false).collect();
+        assert_eq!(
+            from,
+            vec![
+                (ip("10.0.0.0/16"), &2),
+                (ip("10.0.0.0/24"), &3),
+                (ip("10.1.0.0/16"), &4),
+            ]
+        );
+
+        // From a child prefix: yields that child and later entries
+        let from: Vec<_> = pm.iter_from(&ip("10.0.0.0/16"), false).collect();
+        assert_eq!(from, vec![(ip("10.0.0.0/24"), &3), (ip("10.1.0.0/16"), &4)]);
+    }
+
+    #[test]
+    fn iter_from_set_inclusive<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::new();
+        set.insert(ip("10.0.0.0/8"));
+        set.insert(ip("10.1.0.0/16"));
+        set.insert(ip("10.2.0.0/16"));
+        set.insert(ip("10.3.0.0/16"));
+
+        // Inclusive from the first entry yields everything
+        let all: Vec<P> = set.iter_from(&ip("10.0.0.0/8"), true).collect();
+        assert_eq!(all, set.iter().collect::<Vec<_>>());
+
+        // Inclusive from a middle entry
+        let from_mid: Vec<P> = set.iter_from(&ip("10.2.0.0/16"), true).collect();
+        assert_eq!(from_mid, vec![ip("10.2.0.0/16"), ip("10.3.0.0/16")]);
+
+        // Inclusive from the last entry
+        let from_last: Vec<P> = set.iter_from(&ip("10.3.0.0/16"), true).collect();
+        assert_eq!(from_last, vec![ip("10.3.0.0/16")]);
+    }
+
+    #[test]
+    fn iter_from_set_exclusive<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::new();
+        set.insert(ip("10.0.0.0/8"));
+        set.insert(ip("10.1.0.0/16"));
+        set.insert(ip("10.2.0.0/16"));
+        set.insert(ip("10.3.0.0/16"));
+
+        // Exclusive from a middle entry
+        let after_mid: Vec<P> = set.iter_from(&ip("10.1.0.0/16"), false).collect();
+        assert_eq!(after_mid, vec![ip("10.2.0.0/16"), ip("10.3.0.0/16")]);
+
+        // Exclusive from the last entry yields nothing
+        let after_last: Vec<P> = set.iter_from(&ip("10.3.0.0/16"), false).collect();
+        assert!(after_last.is_empty());
+
+        // Exclusive with take for pagination
+        let page: Vec<P> = set.iter_from(&ip("10.0.0.0/8"), false).take(2).collect();
+        assert_eq!(page, vec![ip("10.1.0.0/16"), ip("10.2.0.0/16")]);
+    }
+
+    #[test]
+    fn iter_from_set_empty<P: Prefix + Copy + PartialEq>() {
+        let set = PrefixSet::<P>::new();
+        let from: Vec<P> = set.iter_from(&ip("10.0.0.0/8"), true).collect();
+        assert!(from.is_empty());
+        let from: Vec<P> = set.iter_from(&ip("10.0.0.0/8"), false).collect();
+        assert!(from.is_empty());
+    }
+
+    #[test]
+    fn iter_from_set_nonexistent<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::new();
+        set.insert(ip("10.0.0.0/8"));
+        set.insert(ip("10.2.0.0/16"));
+        set.insert(ip("10.4.0.0/16"));
+
+        // Non-existent prefix between existing entries
+        let from: Vec<P> = set.iter_from(&ip("10.1.0.0/16"), true).collect();
+        assert_eq!(from, vec![ip("10.2.0.0/16"), ip("10.4.0.0/16")]);
+
+        // Non-existent prefix after all entries
+        let from: Vec<P> = set.iter_from(&ip("11.0.0.0/8"), true).collect();
+        assert!(from.is_empty());
+    }
+
+    #[test]
+    fn iter_from_mut_test<P: Prefix + Copy + PartialEq>() {
+        let mut pm = Map::<P>::new();
+        pm.insert(ip("10.0.0.0/8"), 1);
+        pm.insert(ip("10.1.0.0/16"), 2);
+        pm.insert(ip("10.2.0.0/16"), 3);
+
+        // Mutate entries from 10.1.0.0/16 onwards
+        pm.iter_from_mut(&ip("10.1.0.0/16"), true)
+            .for_each(|(_, v)| *v *= 10);
+        assert_eq!(pm.get(&ip("10.0.0.0/8")), Some(&1));
+        assert_eq!(pm.get(&ip("10.1.0.0/16")), Some(&20));
+        assert_eq!(pm.get(&ip("10.2.0.0/16")), Some(&30));
+    }
+
     #[instantiate_tests(<(u32, u8)>)]
     mod raw32 {}
 

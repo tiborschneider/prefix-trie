@@ -343,4 +343,92 @@ mod tests {
         assert_eq!(got, Some((p(0x0a010100, 24), 33, 30)));
         assert_eq!(a.get(&p(0x0a010100, 24)), Some(&33));
     }
+
+    // -- iter_from on intersection views ----------------------------------------
+
+    #[test]
+    fn intersection_iter_from_inclusive() {
+        let a = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a010000, 16, 2),
+            (0x0a020000, 16, 3),
+            (0x0a030000, 16, 4),
+        ]);
+        let b = map_from(&[
+            (0x0a000000, 8, 10),
+            (0x0a020000, 16, 30),
+            (0x0a030000, 16, 40),
+        ]);
+
+        // Intersection: 10/8, 10.2/16, 10.3/16
+        let isect = a.view().intersection(b.view()).unwrap();
+        let from: Vec<_> = isect
+            .iter_from(&p(0x0a020000, 16), true)
+            .map(|(p, (l, r))| (p, (*l, *r)))
+            .collect();
+        assert_eq!(
+            from,
+            vec![(p(0x0a020000, 16), (3, 30)), (p(0x0a030000, 16), (4, 40))]
+        );
+    }
+
+    #[test]
+    fn intersection_iter_from_exclusive() {
+        let a = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2), (0x0a020000, 16, 3)]);
+        let b = map_from(&[
+            (0x0a000000, 8, 10),
+            (0x0a010000, 16, 20),
+            (0x0a020000, 16, 30),
+        ]);
+
+        let isect = a.view().intersection(b.view()).unwrap();
+        let from: Vec<_> = isect
+            .iter_from(&p(0x0a000000, 8), false)
+            .map(|(p, (l, r))| (p, (*l, *r)))
+            .collect();
+        assert_eq!(
+            from,
+            vec![(p(0x0a010000, 16), (2, 20)), (p(0x0a020000, 16), (3, 30))]
+        );
+    }
+
+    #[test]
+    fn intersection_iter_from_subview() {
+        let a = map_from(&[
+            (0x0a000000, 8, 1), // excluded by sub-view
+            (0x0a020000, 16, 2),
+            (0x0a030000, 16, 3),
+            (0x0b000000, 8, 4), // excluded by sub-view
+        ]);
+        let b = map_from(&[
+            (0x0a000000, 8, 10), // excluded by sub-view
+            (0x0a020000, 16, 20),
+            (0x0a030000, 16, 30),
+        ]);
+
+        // Sub-view at 10.2.0.0/15 covers 10.2–10.3, excludes 10/8, 11/8
+        // Intersection: 10.2/16, 10.3/16
+        let isect = a
+            .view_at(&p(0x0a020000, 15))
+            .unwrap()
+            .intersection(b.view_at(&p(0x0a020000, 15)).unwrap())
+            .unwrap();
+
+        let all: Vec<_> = isect
+            .clone()
+            .iter()
+            .map(|(p, (l, r))| (p, (*l, *r)))
+            .collect();
+        assert_eq!(
+            all,
+            vec![(p(0x0a020000, 16), (2, 20)), (p(0x0a030000, 16), (3, 30))]
+        );
+
+        // iter_from exclusive at 10.2/16 → only 10.3/16
+        let from: Vec<_> = isect
+            .iter_from(&p(0x0a020000, 16), false)
+            .map(|(p, (l, r))| (p, (*l, *r)))
+            .collect();
+        assert_eq!(from, vec![(p(0x0a030000, 16), (3, 30))]);
+    }
 }

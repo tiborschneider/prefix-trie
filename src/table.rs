@@ -5,8 +5,8 @@ use num_traits::Zero;
 use crate::{
     allocator::{AllocIdx, CellAllocator, Loc, NodeAllocator, RawPtr},
     node::{
-        child_bit, child_cover_mask, data_bit, data_cover_mask, extend_repr, Key, MaskedLexIter,
-        MultiBitNode, DATA_BIT_TO_PREFIX,
+        child_bit, child_cover_mask, data_bit, data_cover_mask, extend_repr, lex_after_child,
+        lex_after_data, Key, MaskedLexIter, MultiBitNode, DATA_BIT_TO_PREFIX,
     },
     prefix::mask_from_prefix_len,
     Prefix,
@@ -787,6 +787,61 @@ impl<T> Table<T> {
     /// occurred since `loc` was obtained).
     pub(crate) unsafe fn lex_iter<R: Key>(&self, loc: Loc, depth: u32, key: R) -> MaskedLexIter<R> {
         MaskedLexIter::new(loc, depth, key, *self.node(loc))
+    }
+
+    /// Build an iterator stack positioned at a given prefix in lex order.
+    ///
+    /// Navigates from the root toward `(key, prefix_len)`, pushing lex iterators onto the stack
+    /// with entries before the target masked out. If `inclusive` is false, the exact target
+    /// data slot is also excluded.
+    pub(crate) fn build_iter_stack_at<R: Key>(
+        &self,
+        key: R,
+        prefix_len: u32,
+        inclusive: bool,
+    ) -> Vec<MaskedLexIter<R>> {
+        let mut stack = Vec::new();
+        let mut loc = Loc::root();
+        let mut depth = 0u32;
+
+        loop {
+            // SAFETY: `loc` starts as `Loc::root()` (always valid) and is only updated to
+            // the result of a prior `child()` call, which returns a valid `Loc`.
+            let mut lex = unsafe { self.lex_iter(loc, depth, key) };
+
+            if prefix_len < depth + K {
+                // Target falls within this node as a data slot.
+                let data_bit = data_bit(key, prefix_len);
+                let (data_mask, child_mask) = lex_after_data(data_bit);
+                let data_mask = if inclusive {
+                    data_mask
+                } else {
+                    data_mask & !(1 << data_bit)
+                };
+                lex.apply_data_mask(data_mask);
+                lex.apply_child_mask(child_mask);
+                stack.push(lex);
+                break;
+            }
+
+            // Target is deeper; follow the child pointer.
+            let child_bit = child_bit(depth, key);
+            let (data_mask, child_mask) = lex_after_child(child_bit);
+            lex.apply_data_mask(data_mask);
+            lex.apply_child_mask(child_mask);
+            stack.push(lex);
+
+            // SAFETY: `loc` is valid (see above); `child()` returns a valid `Loc` if present.
+            match unsafe { self.child(loc, child_bit) } {
+                Some(next) => {
+                    loc = next;
+                    depth += K;
+                }
+                None => break, // child doesn't exist; entries after it are already in the mask
+            }
+        }
+
+        stack
     }
 
     /// Retain only the data elements for which `f` returns `true`, removing the rest and

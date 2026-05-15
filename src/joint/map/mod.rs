@@ -633,6 +633,89 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         self.into_iter()
     }
 
+    /// Return an iterator starting at the given prefix in lexicographic order.
+    ///
+    /// If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
+    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    ///
+    /// If `prefix` is not present in the map, the iterator starts at the first entry that
+    /// would come after `prefix` in lexicographic order, regardless of `inclusive`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/24".parse()?, 2);
+    /// pm.insert("2001::1:0:0/96".parse()?, 3);
+    /// pm.insert("2001::1:0:0/97".parse()?, 4);
+    ///
+    /// // Cursor pagination starting from an IPv4 prefix
+    /// let page: Vec<_> = pm.iter_from(&"192.168.0.0/24".parse()?, false).take(2).collect();
+    /// assert_eq!(page, vec![("2001::1:0:0/96".parse()?, &3), ("2001::1:0:0/97".parse()?, &4)]);
+    ///
+    /// // Starting from an IPv6 prefix
+    /// let page: Vec<_> = pm.iter_from(&"2001::1:0:0/96".parse()?, true).take(1).collect();
+    /// assert_eq!(page, vec![("2001::1:0:0/96".parse()?, &3)]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn iter_from<'a>(&'a self, prefix: &P, inclusive: bool) -> Iter<'a, P, T> {
+        match prefix.p1_or_p2_ref() {
+            Left(p1) => Iter {
+                i1: Some(self.t1.iter_from(p1, inclusive)),
+                i2: Some(self.t2.iter()),
+            },
+            Right(p2) => Iter {
+                i1: None,
+                i2: Some(self.t2.iter_from(p2, inclusive)),
+            },
+        }
+    }
+
+    /// Return a mutable iterator starting at the given prefix in lexicographic order.
+    ///
+    /// If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
+    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    ///
+    /// If `prefix` is not present in the map, the iterator starts at the first entry that
+    /// would come after `prefix` in lexicographic order, regardless of `inclusive`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("192.168.0.0/22".parse()?, 1);
+    /// pm.insert("192.168.0.0/24".parse()?, 2);
+    /// pm.insert("2001::1:0:0/96".parse()?, 3);
+    ///
+    /// // Mutate entries from 192.168.0.0/24 onwards (inclusive)
+    /// pm.iter_from_mut(&"192.168.0.0/24".parse()?, true).for_each(|(_, v)| *v *= 10);
+    /// assert_eq!(pm.get(&"192.168.0.0/22".parse()?), Some(&1));
+    /// assert_eq!(pm.get(&"192.168.0.0/24".parse()?), Some(&20));
+    /// assert_eq!(pm.get(&"2001::1:0:0/96".parse()?), Some(&30));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn iter_from_mut<'a>(&'a mut self, prefix: &P, inclusive: bool) -> IterMut<'a, P, T> {
+        match prefix.p1_or_p2_ref() {
+            Left(p1) => IterMut {
+                i1: Some(self.t1.iter_from_mut(p1, inclusive)),
+                i2: Some(self.t2.iter_mut()),
+            },
+            Right(p2) => IterMut {
+                i1: None,
+                i2: Some(self.t2.iter_from_mut(p2, inclusive)),
+            },
+        }
+    }
+
     /// Get a mutable iterator over all key-value pairs. The order of this iterator is lexicographic.
     /// ```
     /// # use prefix_trie::joint::*;

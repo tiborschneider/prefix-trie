@@ -52,6 +52,13 @@ impl<'a, P: Prefix, T> Iter<'a, P, T> {
             stack,
         }
     }
+
+    pub(crate) fn from_stack(table: &'a Table<T>, stack: Vec<MaskedLexIter<P::R>>) -> Self {
+        Self {
+            table: Some(table),
+            stack,
+        }
+    }
 }
 
 impl<'a, P: Prefix, T> Iterator for Iter<'a, P, T> {
@@ -146,6 +153,14 @@ impl<'a, P: Prefix, T> IterMut<'a, P, T> {
         Self {
             table: Some((table, ptr)),
             stack: vec![lex],
+        }
+    }
+
+    pub(crate) fn from_stack(table: &'a mut Table<T>, stack: Vec<MaskedLexIter<P::R>>) -> Self {
+        let ptr = table.raw_cells();
+        Self {
+            table: Some((table, ptr)),
+            stack,
         }
     }
 }

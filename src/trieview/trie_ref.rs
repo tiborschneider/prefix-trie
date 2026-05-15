@@ -304,4 +304,178 @@ mod tests {
         let expected: Vec<(P, i32)> = m.iter().map(|(p, v)| (p, *v)).collect();
         assert_eq!(from_for, expected);
     }
+
+    // -- iter_from on views --
+
+    #[test]
+    fn view_iter_from_inclusive() {
+        // 10.0.0.0/8, 10.1.0.0/16, 10.2.0.0/16, 10.3.0.0/16, 10.4.0.0/16
+        let m = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a010000, 16, 2),
+            (0x0a020000, 16, 3),
+            (0x0a030000, 16, 4),
+            (0x0a040000, 16, 5),
+        ]);
+
+        // From first entry → everything
+        let all: Vec<_> = m
+            .view()
+            .iter_from(&p(0x0a000000, 8), true)
+            .map(|(p, v)| (p, *v))
+            .collect();
+        assert_eq!(all, m.iter().map(|(p, v)| (p, *v)).collect::<Vec<_>>());
+
+        // From a middle entry
+        let from_mid: Vec<_> = m
+            .view()
+            .iter_from(&p(0x0a020000, 16), true)
+            .map(|(p, v)| (p, *v))
+            .collect();
+        assert_eq!(
+            from_mid,
+            vec![
+                (p(0x0a020000, 16), 3),
+                (p(0x0a030000, 16), 4),
+                (p(0x0a040000, 16), 5)
+            ]
+        );
+
+        // From last entry
+        let last: Vec<_> = m
+            .view()
+            .iter_from(&p(0x0a040000, 16), true)
+            .map(|(p, v)| (p, *v))
+            .collect();
+        assert_eq!(last, vec![(p(0x0a040000, 16), 5)]);
+    }
+
+    #[test]
+    fn view_iter_from_exclusive() {
+        let m = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a010000, 16, 2),
+            (0x0a020000, 16, 3),
+            (0x0a030000, 16, 4),
+            (0x0a040000, 16, 5),
+        ]);
+
+        let after_mid: Vec<_> = m
+            .view()
+            .iter_from(&p(0x0a020000, 16), false)
+            .map(|(p, v)| (p, *v))
+            .collect();
+        assert_eq!(
+            after_mid,
+            vec![(p(0x0a030000, 16), 4), (p(0x0a040000, 16), 5)]
+        );
+
+        // Exclusive from last → empty
+        let after_last: Vec<_> = m.view().iter_from(&p(0x0a040000, 16), false).collect();
+        assert!(after_last.is_empty());
+
+        // Pagination
+        let page: Vec<_> = m
+            .view()
+            .iter_from(&p(0x0a010000, 16), false)
+            .take(2)
+            .map(|(p, v)| (p, *v))
+            .collect();
+        assert_eq!(page, vec![(p(0x0a020000, 16), 3), (p(0x0a030000, 16), 4)]);
+    }
+
+    #[test]
+    fn view_iter_from_nonexistent() {
+        let m = map_from(&[(0x0a000000, 8, 1), (0x0a020000, 16, 2), (0x0a040000, 16, 3)]);
+
+        // Non-existent prefix between entries
+        let from: Vec<_> = m
+            .view()
+            .iter_from(&p(0x0a010000, 16), true)
+            .map(|(p, v)| (p, *v))
+            .collect();
+        assert_eq!(from, vec![(p(0x0a020000, 16), 2), (p(0x0a040000, 16), 3)]);
+
+        // Past all entries
+        let from: Vec<_> = m.view().iter_from(&p(0x0b000000, 8), true).collect();
+        assert!(from.is_empty());
+    }
+
+    #[test]
+    fn view_iter_from_empty() {
+        let m: PrefixMap<P, i32> = PrefixMap::new();
+        let from: Vec<_> = m.view().iter_from(&p(0x0a000000, 8), true).collect();
+        assert!(from.is_empty());
+    }
+
+    #[test]
+    fn view_iter_from_parent_child() {
+        let m = map_from(&[
+            (0x0a000000, 8, 1),
+            (0x0a000000, 16, 2),
+            (0x0a000000, 24, 3),
+            (0x0a010000, 16, 4),
+        ]);
+
+        // Exclusive from parent → children only
+        let from: Vec<_> = m
+            .view()
+            .iter_from(&p(0x0a000000, 8), false)
+            .map(|(p, v)| (p, *v))
+            .collect();
+        assert_eq!(
+            from,
+            vec![
+                (p(0x0a000000, 16), 2),
+                (p(0x0a000000, 24), 3),
+                (p(0x0a010000, 16), 4)
+            ]
+        );
+    }
+
+    #[test]
+    fn view_iter_from_subview() {
+        let m = map_from(&[
+            (0x0a000000, 8, 1),  // 10.0.0.0/8
+            (0x0a010000, 16, 2), // 10.1.0.0/16
+            (0x0a010000, 24, 3), // 10.1.0.0/24
+            (0x0a020000, 16, 4), // 10.2.0.0/16
+            (0x0b000000, 8, 5),  // 11.0.0.0/8  — outside sub-view
+        ]);
+
+        // Sub-view at 10.1.0.0/16 excludes 10/8, 10.2/16, 11/8
+        let sub = m.view_at(&p(0x0a010000, 16)).unwrap();
+        let all: Vec<_> = sub.iter().map(|(p, v)| (p, *v)).collect();
+        assert_eq!(all, vec![(p(0x0a010000, 16), 2), (p(0x0a010000, 24), 3)]);
+
+        // iter_from exclusive skips the root of the sub-view
+        let from: Vec<_> = sub
+            .iter_from(&p(0x0a010000, 16), false)
+            .map(|(p, v)| (p, *v))
+            .collect();
+        assert_eq!(from, vec![(p(0x0a010000, 24), 3)]);
+    }
+
+    #[test]
+    fn view_iter_from_outside_subview() {
+        let m = map_from(&[
+            (0x0a010000, 16, 1),
+            (0x0a010000, 24, 2),
+            (0x0a020000, 16, 3),
+        ]);
+
+        // Sub-view at 10.1.0.0/16; target before sub-view → full iter
+        let sub = m.view_at(&p(0x0a010000, 16)).unwrap();
+        let from: Vec<_> = sub
+            .iter_from(&p(0x09000000, 8), true)
+            .map(|(p, v)| (p, *v))
+            .collect();
+        let all: Vec<_> = sub.iter().map(|(p, v)| (p, *v)).collect();
+        assert_eq!(from, all);
+
+        // Sub-view at 10.1.0.0/16; target after sub-view → empty
+        let sub = m.view_at(&p(0x0a010000, 16)).unwrap();
+        let from: Vec<_> = sub.iter_from(&p(0x0a020000, 16), true).collect();
+        assert!(from.is_empty());
+    }
 }

@@ -470,3 +470,53 @@ fn _drop_check((pmap, root): (PrefixMap<TestPrefix, ()>, TestPrefix)) -> bool {
 
     count.get() == exp
 }
+
+qc!(
+    dense_set_iter_from_inclusive,
+    _dense_set_iter_from_inclusive
+);
+fn _dense_set_iter_from_inclusive(input: (Vec<TestPrefix>, TestPrefix)) -> bool {
+    let (list, query) = input;
+    let set: PrefixSet<TestPrefix> = list.into_iter().collect();
+    let got: Vec<_> = set.iter_from(&query, true).collect();
+    let want: Vec<_> = set.iter().skip_while(|p| *p < query).collect();
+    got == want
+}
+
+qc!(
+    dense_set_iter_from_exclusive,
+    _dense_set_iter_from_exclusive
+);
+fn _dense_set_iter_from_exclusive(input: (Vec<TestPrefix>, TestPrefix)) -> bool {
+    let (list, query) = input;
+    let set: PrefixSet<TestPrefix> = list.into_iter().collect();
+    let got: Vec<_> = set.iter_from(&query, false).collect();
+    let want: Vec<_> = set.iter().skip_while(|p| *p <= query).collect();
+    got == want
+}
+
+qc!(dense_iter_from_inclusive, _dense_iter_from_inclusive);
+fn _dense_iter_from_inclusive(input: (Vec<(TestPrefix, i32)>, TestPrefix)) -> bool {
+    let (list, query) = input;
+    let map: PrefixMap<TestPrefix, i32> = list.into_iter().collect();
+    let got: Vec<_> = map.iter_from(&query, true).map(|(p, v)| (p, *v)).collect();
+    let want: Vec<_> = map
+        .iter()
+        .skip_while(|(p, _)| *p < query)
+        .map(|(p, v)| (p, *v))
+        .collect();
+    got == want
+}
+
+qc!(dense_iter_from_exclusive, _dense_iter_from_exclusive);
+fn _dense_iter_from_exclusive(input: (Vec<(TestPrefix, i32)>, TestPrefix)) -> bool {
+    let (list, query) = input;
+    let map: PrefixMap<TestPrefix, i32> = list.into_iter().collect();
+    let got: Vec<_> = map.iter_from(&query, false).map(|(p, v)| (p, *v)).collect();
+    let want: Vec<_> = map
+        .iter()
+        .skip_while(|(p, _)| *p <= query)
+        .map(|(p, v)| (p, *v))
+        .collect();
+    got == want
+}
