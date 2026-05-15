@@ -7,7 +7,7 @@ use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::RowAccessor;
 use prefix_trie::*;
 use rand::prelude::*;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::net::Ipv4Addr;
 
@@ -20,7 +20,86 @@ pub enum Insn {
     Insert(Ipv4Addr, u8, u32),
     Remove(Ipv4Addr, u8),
     ExactMatch(Ipv4Addr, u8),
-    LongestPrefixMatch(Ipv4Addr, u8),
+}
+
+pub trait BenchMap: Sized {
+    const NAME: &'static str;
+    fn new_empty() -> Self;
+    fn insert(&mut self, addr: Ipv4Addr, len: u8, val: u32);
+    fn remove(&mut self, addr: Ipv4Addr, len: u8);
+    fn exact_match(&self, addr: Ipv4Addr, len: u8) -> Option<u32>;
+}
+
+impl BenchMap for PrefixMap<Ipv4Net, u32> {
+    const NAME: &'static str = "PrefixMap";
+    fn new_empty() -> Self { PrefixMap::new() }
+    fn insert(&mut self, addr: Ipv4Addr, len: u8, val: u32) {
+        self.insert(Ipv4Net::new(addr, len).unwrap(), val);
+    }
+    fn remove(&mut self, addr: Ipv4Addr, len: u8) {
+        self.remove(&Ipv4Net::new(addr, len).unwrap());
+    }
+    fn exact_match(&self, addr: Ipv4Addr, len: u8) -> Option<u32> {
+        self.get(&Ipv4Net::new(addr, len).unwrap()).copied()
+    }
+}
+
+impl BenchMap for IpLookupTable<Ipv4Addr, u32> {
+    const NAME: &'static str = "TreeBitMap";
+    fn new_empty() -> Self { IpLookupTable::new() }
+    fn insert(&mut self, addr: Ipv4Addr, len: u8, val: u32) {
+        self.insert(addr, len as u32, val);
+    }
+    fn remove(&mut self, addr: Ipv4Addr, len: u8) {
+        self.remove(addr, len as u32);
+    }
+    fn exact_match(&self, addr: Ipv4Addr, len: u8) -> Option<u32> {
+        self.exact_match(addr, len as u32).copied()
+    }
+}
+
+impl BenchMap for HashMap<Ipv4Net, u32> {
+    const NAME: &'static str = "HashMap";
+    fn new_empty() -> Self { HashMap::new() }
+    fn insert(&mut self, addr: Ipv4Addr, len: u8, val: u32) {
+        self.insert(Ipv4Net::new(addr, len).unwrap(), val);
+    }
+    fn remove(&mut self, addr: Ipv4Addr, len: u8) {
+        self.remove(&Ipv4Net::new(addr, len).unwrap());
+    }
+    fn exact_match(&self, addr: Ipv4Addr, len: u8) -> Option<u32> {
+        self.get(&Ipv4Net::new(addr, len).unwrap()).copied()
+    }
+}
+
+impl BenchMap for BTreeMap<Ipv4Net, u32> {
+    const NAME: &'static str = "BTreeMap";
+    fn new_empty() -> Self { BTreeMap::new() }
+    fn insert(&mut self, addr: Ipv4Addr, len: u8, val: u32) {
+        self.insert(Ipv4Net::new(addr, len).unwrap(), val);
+    }
+    fn remove(&mut self, addr: Ipv4Addr, len: u8) {
+        self.remove(&Ipv4Net::new(addr, len).unwrap());
+    }
+    fn exact_match(&self, addr: Ipv4Addr, len: u8) -> Option<u32> {
+        self.get(&Ipv4Net::new(addr, len).unwrap()).copied()
+    }
+}
+
+pub fn execute<M: BenchMap>(map: &mut M, insns: &[Insn]) {
+    for insn in insns {
+        std::hint::black_box(match insn {
+            Insn::Insert(addr, len, val) => {
+                map.insert(*addr, *len, *val);
+                None
+            }
+            Insn::Remove(addr, len) => {
+                map.remove(*addr, *len);
+                None
+            }
+            Insn::ExactMatch(addr, len) => map.exact_match(*addr, *len),
+        });
+    }
 }
 
 pub fn random_addr(rng: &mut StdRng) -> (Ipv4Addr, u8) {
@@ -55,7 +134,7 @@ pub fn ris_peer_initial_state(seed: u64) -> Vec<(Ipv4Addr, u8)> {
 
     prefixes.shuffle(&mut rng);
 
-    return prefixes;
+    prefixes
 }
 
 /// Return all mutations during 24h of a RIS peer
@@ -70,7 +149,7 @@ pub fn ris_peer_mutations() -> Vec<Insn> {
         panic!("failed to read {}: {err}", path.display());
     });
     let mut mutations = Vec::with_capacity(reader.metadata().file_metadata().num_rows() as usize);
-    let mut rng = StdRng::seed_from_u64(11);
+    let mut rng = StdRng::seed_from_u64(0);
 
     for row in reader.get_row_iter(None).unwrap() {
         let row = row.unwrap();
@@ -124,21 +203,16 @@ pub fn generate_random_lookups_dense(
     let mut result = Vec::new();
 
     for _ in 0..iter {
-        if rng.gen_bool(0.5) {
-            let (addr, len) = if addresses.is_empty() || rng.gen_bool(0.5) {
-                random_addr(&mut rng)
-            } else {
-                addresses
-                    .iter()
-                    .choose(&mut rng)
-                    .map(|(addr, len)| (*addr, *len))
-                    .unwrap()
-            };
-            result.push(Insn::ExactMatch(addr, len));
+        let (addr, len) = if addresses.is_empty() || rng.gen_bool(0.5) {
+            random_addr(&mut rng)
         } else {
-            let (addr, len) = random_addr(&mut rng);
-            result.push(Insn::LongestPrefixMatch(addr, len));
-        }
+            addresses
+                .iter()
+                .choose(&mut rng)
+                .map(|(addr, len)| (*addr, *len))
+                .unwrap()
+        };
+        result.push(Insn::ExactMatch(addr, len));
     }
     result
 }
@@ -188,95 +262,7 @@ pub fn generate_random_lookups_sparse(
     (0..iter)
         .map(|_| {
             let (addr, len) = addresses.iter().choose(&mut rng).unwrap();
-            if rng.gen_bool(0.5) {
-                Insn::ExactMatch(*addr, *len)
-            } else {
-                Insn::LongestPrefixMatch(*addr, *len)
-            }
+            Insn::ExactMatch(*addr, *len)
         })
         .collect()
-}
-
-pub fn execute_prefix_map(map: &mut PrefixMap<Ipv4Net, u32>, insns: &Vec<Insn>) {
-    for insn in insns {
-        std::hint::black_box(match insn {
-            Insn::Insert(addr, len, val) => map.insert(Ipv4Net::new(*addr, *len).unwrap(), *val),
-            Insn::Remove(addr, len) => map.remove(&Ipv4Net::new(*addr, *len).unwrap()),
-            Insn::ExactMatch(addr, len) => map.get(&Ipv4Net::new(*addr, *len).unwrap()).copied(),
-            Insn::LongestPrefixMatch(addr, len) => map
-                .get_lpm(&Ipv4Net::new(*addr, *len).unwrap())
-                .map(|(_, x)| *x),
-        });
-    }
-}
-
-pub fn execute_dense_prefix_map(map: &mut PrefixMap<Ipv4Net, u32>, insns: &Vec<Insn>) {
-    for insn in insns {
-        std::hint::black_box(match insn {
-            Insn::Insert(addr, len, val) => map.insert(Ipv4Net::new(*addr, *len).unwrap(), *val),
-            Insn::Remove(addr, len) => map.remove(&Ipv4Net::new(*addr, *len).unwrap()),
-            Insn::ExactMatch(addr, len) => map.get(&Ipv4Net::new(*addr, *len).unwrap()).copied(),
-            Insn::LongestPrefixMatch(addr, len) => map
-                .get_lpm(&Ipv4Net::new(*addr, *len).unwrap())
-                .map(|(_, x)| *x),
-        });
-    }
-}
-
-pub fn lookup_prefix_map(map: &PrefixMap<Ipv4Net, u32>, insns: &Vec<Insn>) {
-    for insn in insns {
-        std::hint::black_box(match insn {
-            Insn::Insert(_, _, _) => unreachable!(),
-            Insn::Remove(_, _) => unreachable!(),
-            Insn::ExactMatch(addr, len) => map.get(&Ipv4Net::new(*addr, *len).unwrap()).copied(),
-            Insn::LongestPrefixMatch(addr, len) => map
-                .get_lpm(&Ipv4Net::new(*addr, *len).unwrap())
-                .map(|(_, x)| *x),
-        });
-    }
-}
-
-pub fn lookup_dense_prefix_map(map: &PrefixMap<Ipv4Net, u32>, insns: &Vec<Insn>) {
-    for insn in insns {
-        std::hint::black_box(match insn {
-            Insn::Insert(_, _, _) => unreachable!(),
-            Insn::Remove(_, _) => unreachable!(),
-            Insn::ExactMatch(addr, len) => map.get(&Ipv4Net::new(*addr, *len).unwrap()).copied(),
-            Insn::LongestPrefixMatch(addr, len) => map
-                .get_lpm(&Ipv4Net::new(*addr, *len).unwrap())
-                .map(|(_, x)| *x),
-        });
-    }
-}
-
-pub fn execute_treebitmap(map: &mut IpLookupTable<Ipv4Addr, u32>, insns: &Vec<Insn>) {
-    for insn in insns {
-        std::hint::black_box(match insn {
-            Insn::Insert(addr, len, val) => map.insert(*addr, *len as u32, *val),
-            Insn::Remove(addr, len) => map.remove(*addr, *len as u32),
-            Insn::ExactMatch(addr, len) => map.exact_match(*addr, *len as u32).copied(),
-            Insn::LongestPrefixMatch(addr, _) => {
-                let mut octets = addr.octets();
-                octets[3] += 1;
-                let addr = octets.into();
-                map.longest_match(addr).map(|(_, _, x)| *x)
-            }
-        });
-    }
-}
-
-pub fn lookup_treebitmap(map: &IpLookupTable<Ipv4Addr, u32>, insns: &Vec<Insn>) {
-    for insn in insns {
-        std::hint::black_box(match insn {
-            Insn::Insert(_, _, _) => unreachable!(),
-            Insn::Remove(_, _) => unreachable!(),
-            Insn::ExactMatch(addr, len) => map.exact_match(*addr, *len as u32).copied(),
-            Insn::LongestPrefixMatch(addr, _) => {
-                let mut octets = addr.octets();
-                octets[3] += 1;
-                let addr = octets.into();
-                map.longest_match(addr).map(|(_, _, x)| *x)
-            }
-        });
-    }
 }

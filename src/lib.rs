@@ -13,28 +13,28 @@
 //!
 //! # Comparison with related projects
 //!
-//! The comparison baseline is the treebitmap crate,
-//! [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap),
-//! which provides an IP lookup table similar to [`PrefixMap`].
+//! Throughput is reported relative to `HashMap` (1.00x = HashMap speed), with absolute throughput in
+//! parentheses. **Bold** marks the fastest implementation per row. See `benches/benchmark.rs` for
+//! details.
 //!
-//! The following experiments perform `100_000` iterations and report the time for the complete
-//! batch. The random-prefix experiment uses randomly generated IPv4 prefixes. The BGP-prefix
-//! experiment uses all IPv4 prefixes exchanged at AMS-IX in the bundled snapshot, currently
-//! 1,058,306 prefixes. See `benches/benchmark.rs` for more details.
+//! All benchmarks use IPv4 prefixes from a RIPE RIS peer snapshot (1,042,024 prefixes). See
+//! `benches/benchmark.rs` for details.
 //!
-//! | Operation       | Experiment      | `PrefixMap` | `TreeBitMap` | ratio |
-//! |-----------------|-----------------|-------------|--------------|-------|
-//! | Lookup          | random prefixes |  **3.54ms** | 6.38ms       | ~1.8x |
-//! | Insert & Remove | random prefixes |  **9.52ms** | 15.59ms      | ~1.6x |
-//! | Lookup          | AMS-IX prefixes |  **6.48ms** | 11.11ms      | ~1.7x |
-//! | Insert & Remove | AMS-IX prefixes | **12.18ms** | 17.34ms      | ~1.4x |
+//! | Benchmark           | `HashMap`                | `PrefixMap`              | `TreeBitMap`         | `BTreeMap`          |
+//! |---------------------|--------------------------|--------------------------|----------------------|---------------------|
+//! | **Lookup**          |                          |                          |                      |                     |
+//! | Random access       | 1.00x (14.5 Melem/s)     | **1.25x** (18.1 Melem/s) | 0.64x (9.3 Melem/s)  | 0.29x (4.2 Melem/s) |
+//! | BGP updates         | 1.00x (28.4 Melem/s)     | **1.04x** (29.6 Melem/s) | 0.51x (14.5 Melem/s) | 0.30x (8.6 Melem/s) |
+//! | **Insert & Remove** |                          |                          |                      |                     |
+//! | Random access       | **1.00x** (11.5 Melem/s) | 0.79x (9.1 Melem/s)      | 0.68x (7.8 Melem/s)  | 0.34x (3.9 Melem/s) |
+//! | BGP updates         | **1.00x** (23.1 Melem/s) | 0.69x (16.0 Melem/s)     | 0.58x (13.5 Melem/s) | 0.37x (8.5 Melem/s) |
+//! | **Create**          |                          |                          |                      |                     |
+//! | Random order        | **1.00x** (13.9 Melem/s) | 0.66x (9.1 Melem/s)      | 0.58x (8.1 Melem/s)  | 0.30x (4.2 Melem/s) |
+//! | Sorted order        | 1.00x (14.1 Melem/s)     | **1.07x** (15.1 Melem/s) | 0.85x (12.0 Melem/s) | 0.63x (8.9 Melem/s) |
 //!
-//! The ratio is `TreeBitMap` divided by `PrefixMap`, so values above 1 mean `PrefixMap` was faster
-//! in that run.
-//!
-//! The memory benchmark (`cargo test --bench memory --release -- --nocapture`) stores all
-//! 1,058,306 AMS-IX IPv4 prefixes with 32-bit values. Both `PrefixMap` and `TreeBitMap` report
-//! 12.0 mB for that map.
+//! The memory benchmark (`cargo test --bench memory --release -- --nocapture`) stores all 1,042,024
+//! RIS IPv4 prefixes with 32-bit values. Both `PrefixMap` and `TreeBitMap` report 12.0 mB for that
+//! map.
 //!
 //! In addition, `prefix-trie` includes a [`PrefixSet`] analogous to `std::collections::HashSet`.
 //! Set operations are exposed through composable trie views, so operations such as union,
