@@ -1,3 +1,5 @@
+#![cfg_attr(docsrs, feature(doc_notable_trait, doc_auto_cfg))]
+
 //! This crate provides prefix-map and prefix-set collections for IP prefixes and other fixed-width
 //! prefix types. [`PrefixMap`] is backed by a compact TreeBitMap-style trie and supports exact,
 //! longest-prefix, and shortest-prefix matches. The crate supports both IPv4 and IPv6 (from either

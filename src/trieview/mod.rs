@@ -126,6 +126,7 @@ use crate::{
 ///
 /// All other methods (`left`/`right`/`find`/`find_lpm`/`iter`/etc.) are
 /// provided as defaults built from the eight required methods.
+#[cfg_attr(docsrs, doc(notable_trait))]
 pub trait TrieView<'a>: Sized {
     /// The prefix type.
     type P: Prefix;
