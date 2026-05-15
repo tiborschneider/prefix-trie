@@ -6,7 +6,7 @@ use crate::Prefix;
 
 use super::{
     map::{CoverKeys, PrefixMap},
-    trieview::{AsView, TrieRef, TrieRefMut},
+    trieview::{AsView, TrieRef, TrieRefMut, TrieView},
 };
 
 /// Set of prefixes, organized in a dense prefix trie.
@@ -419,14 +419,14 @@ impl<P: Prefix> Default for PrefixSet<P> {
 
 impl<P> PartialEq for PrefixSet<P>
 where
-    P: Prefix + PartialEq,
+    P: Prefix,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        self.len() == other.len() && self.view().eq_keys(other)
     }
 }
 
-impl<P> Eq for PrefixSet<P> where P: Prefix + Eq {}
+impl<P> Eq for PrefixSet<P> where P: Prefix {}
 
 impl<P> Debug for PrefixSet<P>
 where

@@ -1230,9 +1230,11 @@ where
     L: PartialEq<R>,
 {
     fn eq(&self, other: &JointPrefixMap<P, R>) -> bool {
-        self.iter()
-            .zip(other.iter())
-            .all(|((lp, lt), (rp, rt))| lt == rt && lp == rp)
+        self.len() == other.len()
+            && self
+                .iter()
+                .zip(other.iter())
+                .all(|((lp, lt), (rp, rt))| lp == rp && lt == rt)
     }
 }
 

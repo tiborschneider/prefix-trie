@@ -201,6 +201,60 @@ fn _equality_set(list: Vec<Operation<TestPrefix, ()>>) -> bool {
     set == clone && set.len() == clone.len() && set.is_empty() == clone.is_empty()
 }
 
+qc!(inequality, _inequality);
+fn _inequality((list, toggle): (Vec<Operation<TestPrefix, i32>>, TestPrefix)) -> bool {
+    let mut map = PrefixMap::default();
+
+    for op in list {
+        match op {
+            Operation::Add(p, t) => {
+                map.insert(p, t);
+            }
+            Operation::Remove(p) => {
+                map.remove(&p);
+            }
+            Operation::RemoveChildren(p) => {
+                map.remove_children(&p);
+            }
+        }
+    }
+
+    let clone = map.clone().into_iter().collect::<PrefixMap<_, _>>();
+    if map.contains_key(&toggle) {
+        map.remove(&toggle);
+    } else {
+        map.insert(toggle, 0);
+    }
+    map != clone
+}
+
+qc!(inequality_set, _inequality_set);
+fn _inequality_set((list, toggle): (Vec<Operation<TestPrefix, ()>>, TestPrefix)) -> bool {
+    let mut set = PrefixSet::default();
+
+    for op in list {
+        match op {
+            Operation::Add(p, _) => {
+                set.insert(p);
+            }
+            Operation::Remove(p) => {
+                set.remove(&p);
+            }
+            Operation::RemoveChildren(p) => {
+                set.remove_children(&p);
+            }
+        }
+    }
+
+    let clone = set.iter().collect::<PrefixSet<_>>();
+    if set.contains(&toggle) {
+        set.remove(&toggle);
+    } else {
+        set.insert(toggle);
+    }
+    set != clone
+}
+
 qc!(remove_children, _remove_children);
 fn _remove_children((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
     let want = select(&map, |p, _| !root.contains(p));
@@ -283,6 +337,104 @@ fn _cover_after_keep_tree_mods(
         .map(|(prefix, value)| (prefix, *value))
         .collect::<Vec<_>>();
     pmap.check_memory_alloc() && got == want
+}
+
+qc!(equality_joint_map, _equality_joint_map);
+fn _equality_joint_map(
+    (left_entries, right_entries): (Vec<(TestPrefix, i32)>, Vec<(TestPrefix, i32)>),
+) -> bool {
+    use crate::joint::JointPrefixMap;
+    use either::Either;
+
+    type JP = Either<TestPrefix, TestPrefix>;
+
+    let mut map: JointPrefixMap<JP, i32> = JointPrefixMap::new();
+    for (p, v) in &left_entries {
+        map.insert(Either::Left(*p), *v);
+    }
+    for (p, v) in &right_entries {
+        map.insert(Either::Right(*p), *v);
+    }
+
+    let clone: JointPrefixMap<JP, i32> = map.iter().map(|(p, v)| (p, *v)).collect();
+    map == clone && map.len() == clone.len() && map.is_empty() == clone.is_empty()
+}
+
+qc!(inequality_joint_map, _inequality_joint_map);
+fn _inequality_joint_map(
+    (left_entries, right_entries, toggle): (
+        Vec<(TestPrefix, i32)>,
+        Vec<(TestPrefix, i32)>,
+        TestPrefix,
+    ),
+) -> bool {
+    use crate::joint::JointPrefixMap;
+    use either::Either;
+
+    type JP = Either<TestPrefix, TestPrefix>;
+
+    let mut map: JointPrefixMap<JP, i32> = JointPrefixMap::new();
+    for (p, v) in &left_entries {
+        map.insert(Either::Left(*p), *v);
+    }
+    for (p, v) in &right_entries {
+        map.insert(Either::Right(*p), *v);
+    }
+
+    let clone: JointPrefixMap<JP, i32> = map.iter().map(|(p, v)| (p, *v)).collect();
+    let key = Either::Left(toggle);
+    if map.contains_key(&key) {
+        map.remove(&key);
+    } else {
+        map.insert(key, 0);
+    }
+    map != clone
+}
+
+qc!(equality_joint_set, _equality_joint_set);
+fn _equality_joint_set((left_entries, right_entries): (Vec<TestPrefix>, Vec<TestPrefix>)) -> bool {
+    use crate::joint::JointPrefixSet;
+    use either::Either;
+
+    type JP = Either<TestPrefix, TestPrefix>;
+
+    let mut set: JointPrefixSet<JP> = JointPrefixSet::new();
+    for p in &left_entries {
+        set.insert(Either::Left(*p));
+    }
+    for p in &right_entries {
+        set.insert(Either::Right(*p));
+    }
+
+    let clone: JointPrefixSet<JP> = set.iter().collect();
+    set == clone && set.len() == clone.len() && set.is_empty() == clone.is_empty()
+}
+
+qc!(inequality_joint_set, _inequality_joint_set);
+fn _inequality_joint_set(
+    (left_entries, right_entries, toggle): (Vec<TestPrefix>, Vec<TestPrefix>, TestPrefix),
+) -> bool {
+    use crate::joint::JointPrefixSet;
+    use either::Either;
+
+    type JP = Either<TestPrefix, TestPrefix>;
+
+    let mut set: JointPrefixSet<JP> = JointPrefixSet::new();
+    for p in &left_entries {
+        set.insert(Either::Left(*p));
+    }
+    for p in &right_entries {
+        set.insert(Either::Right(*p));
+    }
+
+    let clone: JointPrefixSet<JP> = set.iter().collect();
+    let key = Either::Right(toggle);
+    if set.contains(&key) {
+        set.remove(&key);
+    } else {
+        set.insert(key);
+    }
+    set != clone
 }
 
 qc!(drop_check, _drop_check);

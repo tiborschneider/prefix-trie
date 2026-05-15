@@ -8,6 +8,7 @@ mod combinations;
 mod covering_difference;
 mod covering_union;
 mod difference;
+mod equality;
 mod intersection;
 mod trie_ref;
 mod union;

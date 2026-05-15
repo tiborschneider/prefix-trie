@@ -16,17 +16,20 @@ enum Operation<P, T> {
     RemoveChildren(P),
 }
 
-#[cfg(miri)]
-const DEFAULT_NUM_TESTS: usize = 10;
-#[cfg(not(miri))]
-const DEFAULT_NUM_TESTS: usize = 2000;
+const NUM_TESTS: usize = if cfg!(miri) {
+    10
+} else if cfg!(debug_assertions) {
+    2000
+} else {
+    10_000
+};
 const DEFAULT_GEN_SIZE: usize = 100;
 
 fn proptest_runner<A: Arbitrary + Debug + PartialEq, F: Fn(A) -> bool>(f: F) {
     let num_tests: usize = std::env::var("QUICKCHECK_TESTS")
         .ok()
         .and_then(|x| x.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_NUM_TESTS);
+        .unwrap_or(NUM_TESTS);
 
     let gen_size: usize = std::env::var("QUICKCHECK_GENERATOR_SIZE")
         .ok()

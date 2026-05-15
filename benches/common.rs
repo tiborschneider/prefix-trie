@@ -59,7 +59,7 @@ pub fn ris_peer_initial_state(seed: u64) -> Vec<(Ipv4Addr, u8)> {
 }
 
 /// Return all mutations during 24h of a RIS peer
-/// 
+///
 /// The data is sorted by time and the data is returned in original order.
 pub fn ris_peer_mutations() -> Vec<Insn> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEER_MUTATIONS_PARQUET);

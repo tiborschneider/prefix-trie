@@ -611,7 +611,7 @@ impl<P: JointPrefix> Default for JointPrefixSet<P> {
 
 impl<P> PartialEq for JointPrefixSet<P>
 where
-    P: JointPrefix + PartialEq,
+    P: JointPrefix,
 {
     /// Compare two prefix sets by their canonical reconstructed prefixes.
     ///
@@ -628,11 +628,11 @@ where
     /// # fn main() {}
     /// ```
     fn eq(&self, other: &Self) -> bool {
-        self.iter().zip(other.iter()).all(|(a, b)| a == b)
+        self.t1 == other.t1 && self.t2 == other.t2
     }
 }
 
-impl<P> Eq for JointPrefixSet<P> where P: JointPrefix + Eq {}
+impl<P> Eq for JointPrefixSet<P> where P: JointPrefix {}
 
 /// An iterator over all entries of a [`JointPrefixSet`] in lexicographic order.
 pub struct Iter<'a, P: JointPrefix>(super::map::Iter<'a, P, ()>);

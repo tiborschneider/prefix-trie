@@ -86,6 +86,7 @@
 pub mod covering_difference;
 pub mod covering_union;
 pub mod difference;
+mod equality;
 pub mod intersection;
 pub(crate) mod iter;
 pub mod trie_ref;
@@ -802,6 +803,64 @@ pub trait TrieView<'a>: Sized {
         R: AsView<'a, P = Self::P>,
     {
         DifferenceView::new(self, other.view())
+    }
+
+    /// Check whether `self` and `other` contain exactly the same set of prefixes,
+    /// ignoring values.
+    ///
+    /// This uses a bitmap-based structural comparison (no prefix reconstruction)
+    /// and short-circuits as soon as a difference is found.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, PrefixSet, AsView, TrieView};
+    /// # type P = (u32, u8);
+    /// let a: PrefixMap<P, _> = [((0, 8), 1), ((0, 16), 2)].into_iter().collect();
+    /// let b: PrefixMap<P, _> = [((0, 8), 9), ((0, 16), 9)].into_iter().collect();
+    /// let c: PrefixMap<P, _> = [((0, 8), 1)].into_iter().collect();
+    ///
+    /// assert!(a.view().eq_keys(&b));   // same keys, different values
+    /// assert!(!a.view().eq_keys(&c));  // different key sets
+    /// ```
+    fn eq_keys<R: AsView<'a, P = Self::P>>(self, other: R) -> bool {
+        equality::eq_keys_recursive(self, other.view())
+    }
+
+    /// Check whether `self` and `other` contain the same prefixes with equal values,
+    /// using `cmp` to compare each value pair.
+    ///
+    /// Iterates both views in lexicographic order, verifying that prefixes match
+    /// and `cmp` returns `true` for every value pair, and that both views have the
+    /// same number of entries.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # type P = (u32, u8);
+    /// let a: PrefixMap<P, _> = [((0, 8), 1), ((0, 16), 2)].into_iter().collect();
+    /// let b: PrefixMap<P, _> = [((0, 8), 1), ((0, 16), 2)].into_iter().collect();
+    /// let c: PrefixMap<P, _> = [((0, 8), 1), ((0, 16), 9)].into_iter().collect();
+    ///
+    /// assert!(a.view().eq_by(&b, |a, b| a == b));
+    /// assert!(!a.view().eq_by(&c, |a, b| a == b));
+    /// ```
+    fn eq_by<R, F>(self, other: R, mut cmp: F) -> bool
+    where
+        Self::P: PartialEq,
+        R: AsView<'a, P = Self::P>,
+        F: FnMut(Self::T, <<R as AsView<'a>>::View as TrieView<'a>>::T) -> bool,
+    {
+        let mut left = self.iter();
+        let mut right = other.view().iter();
+        loop {
+            match (left.next(), right.next()) {
+                (None, None) => return true,
+                (Some((lp, lv)), Some((rp, rv))) if lp == rp => {
+                    if !cmp(lv, rv) {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
     }
 
     /// Return the covering difference of `self` minus `other` as a view.
