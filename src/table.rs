@@ -373,7 +373,9 @@ impl<T> Default for Table<T> {
 
 impl<T> Drop for Table<T> {
     fn drop(&mut self) {
-        self.drop_values();
+        if std::mem::needs_drop::<T>() {
+            self.drop_values();
+        }
     }
 }
 
