@@ -13,7 +13,9 @@ description = "Prefix trie (tree) datastructure (both a set and a map) that prov
 rust-version = "1.71.1"
 exclude = [
     "benches/data/20260511-mutations-peer-193.0.0.56AS3333.parquet",
+    "benches/data/20260511-mutations-peer-193.0.0.56AS3333-ipv6.parquet",
     "benches/data/20260511-initial-state-peer-193.0.0.56AS3333.parquet",
+    "benches/data/20260511-initial-state-peer-193.0.0.56AS3333-ipv6.parquet",
 ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -28,6 +30,11 @@ required-features = ["ipnet"]
 
 [[bench]]
 name = "memory"
+required-features = ["ipnet"]
+
+[[test]]
+name = "benchmark_ordering"
+path = "benches/tests/benchmark_ordering.rs"
 required-features = ["ipnet"]
 
 [[example]]
