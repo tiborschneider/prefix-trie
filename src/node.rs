@@ -276,7 +276,9 @@ const fn const_child_cover_pattern(i: usize) -> u32 {
     let node = pos >> (k - 1 - lvl);
     let block_size = k - lvl; // log2 of actual block size
     let start = node << block_size;
-    let mask = ((1usize << (1usize << block_size)) - 1) << start;
+    // Compute in u64 to avoid overflow on 32-bit targets where
+    // `1usize << 32` (when block_size == K == 5) would exceed usize width.
+    let mask = ((1u64 << (1u64 << block_size as u64)) - 1) << start;
 
     mask as u32
 }
