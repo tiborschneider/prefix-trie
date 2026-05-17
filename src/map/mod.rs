@@ -25,6 +25,8 @@ impl<P: Prefix + PartialEq, T: PartialEq> PartialEq for PrefixMap<P, T> {
     }
 }
 
+impl<P: Prefix + Eq, T: Eq> Eq for PrefixMap<P, T> {}
+
 impl<P, T> Default for PrefixMap<P, T> {
     fn default() -> Self {
         Self {
