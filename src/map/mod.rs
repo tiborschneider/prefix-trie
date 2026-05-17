@@ -1290,6 +1290,60 @@ mod tests {
     }
 
     #[test]
+    fn test_remove_children_deep_tree_slot_reuse() {
+        // Regression test for stale child_bitmap/children_idx after
+        // clear_node_and_children on a non-root node.
+        //
+        // The scenario:
+        //   1. Insert at /11 → creates nodes at depths 0, 5, 10
+        //   2. remove_children(&/5) → frees depth-10 node (slot goes to free list)
+        //   3. Insert into a DIFFERENT subtree at /11 → allocator reuses the freed
+        //      slot for a completely different node
+        //   4. If the depth-5 node's child_bitmap was left stale, traversal through
+        //      it would follow the old children_idx into the reused slot, reading a
+        //      node that belongs to a different subtree → data corruption
+        //
+        // With the fix (child_bitmap cleared), step 4 correctly sees "no children"
+        // and creates a fresh allocation instead.
+        let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+
+        // Step 1: build a 3-level subtree rooted at the left side (bit 0)
+        m.insert(p(0x00000000, 11), 100);
+        assert!(m.check_memory_alloc(), "after initial insert");
+
+        // Step 2: wipe that subtree
+        m.remove_children(&p(0x00000000, 5));
+        assert_eq!(m.len(), 0);
+        assert!(m.check_memory_alloc(), "after remove_children");
+
+        // Step 3: insert into a DIFFERENT subtree (bit 31 set → right side of root)
+        // This forces the allocator to allocate a new depth-10 node, which reuses
+        // the freed slot from step 2.
+        m.insert(p(0x80000000, 11), 200);
+        assert!(m.check_memory_alloc(), "after insert into different subtree");
+
+        // Step 4: insert back into the ORIGINAL subtree path
+        // If child_bitmap on the old depth-5 node is stale, find_or_insert_mut
+        // follows the stale children_idx to the slot now owned by the right
+        // subtree → wrong node → corruption.
+        m.insert(p(0x00000000, 11), 300);
+        assert!(m.check_memory_alloc(), "after re-insert into original subtree");
+
+        // Verify both entries exist independently with correct values
+        assert_eq!(m.len(), 2);
+        assert_eq!(m.get(&p(0x00000000, 11)), Some(&300));
+        assert_eq!(m.get(&p(0x80000000, 11)), Some(&200));
+
+        // Verify iteration yields exactly the two entries
+        let mut entries: Vec<_> = m.iter().map(|(k, v)| (k, *v)).collect();
+        entries.sort_by_key(|(k, _)| *k);
+        assert_eq!(
+            entries,
+            vec![(p(0x00000000, 11), 300), (p(0x80000000, 11), 200)],
+        );
+    }
+
+    #[test]
     fn test_retain_leak() {
         use crate::fuzzing::TestPrefix;
         let tp = |repr: u32, len: u8| -> TestPrefix { crate::Prefix::from_repr_len(repr, len) };
@@ -1463,6 +1517,99 @@ mod tests {
             );
             assert_eq!(m.get(&p(0x01020302, 32)), None, ".2/32 must be gone");
             assert_eq!(m.get(&p(0x01020303, 32)), None, ".3/32 must be gone");
+        }
+
+        #[test]
+        fn retain_slash32() {
+            let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+            m.insert(p(0x01020300, 32), 1);
+            m.insert(p(0x01020301, 32), 2);
+            m.insert(p(0x01020302, 32), 3);
+            m.insert(p(0x01020303, 32), 4);
+            m.insert(p(0x01020300, 24), 10);
+
+            m.retain(|k, _| k.1 == 32 && k.0 % 2 == 0);
+
+            assert_eq!(m.len(), 2);
+            assert_eq!(m.get(&p(0x01020300, 32)), Some(&1));
+            assert_eq!(m.get(&p(0x01020301, 32)), None);
+            assert_eq!(m.get(&p(0x01020302, 32)), Some(&3));
+            assert_eq!(m.get(&p(0x01020303, 32)), None);
+            assert_eq!(m.get(&p(0x01020300, 24)), None);
+            assert!(m.check_memory_alloc(), "leak after retain on /32s");
+        }
+
+        #[test]
+        fn remove_children_of_slash32() {
+            // remove_children of a /32 removes only that exact entry.
+            let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+            m.insert(p(0x01020300, 32), 1);
+            m.insert(p(0x01020301, 32), 2);
+
+            m.remove_children(&p(0x01020300, 32));
+
+            assert_eq!(m.len(), 1);
+            assert_eq!(m.get(&p(0x01020300, 32)), None);
+            assert_eq!(m.get(&p(0x01020301, 32)), Some(&2));
+            assert!(m.check_memory_alloc(), "leak after remove_children /32");
+        }
+
+        #[test]
+        fn cover_slash32() {
+            // cover() on a /32 should yield the /32 itself plus all ancestor prefixes.
+            let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+            m.insert(p(0x01020300, 24), 10);
+            m.insert(p(0x01020304, 32), 42);
+
+            let cover: Vec<_> = m
+                .cover(&p(0x01020304, 32))
+                .map(|(k, v)| (k, *v))
+                .collect();
+            assert_eq!(
+                cover,
+                vec![(p(0x01020300, 24), 10), (p(0x01020304, 32), 42)]
+            );
+        }
+
+        #[test]
+        fn lpm_all_depths_to_slash32() {
+            // Build a chain: /0, /5, /10, /15, /20, /25, /30, /32
+            // LPM for the /32 address should return the /32 entry.
+            let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+            let key = 0xAABBCCDDu32;
+            for &len in &[0, 5, 10, 15, 20, 25, 30, 32] {
+                m.insert(p(key, len), len as i32);
+            }
+            assert_eq!(m.len(), 8);
+            assert_eq!(m.get_lpm(&p(key, 32)), Some((p(key, 32), &32)));
+            // Verify each intermediate entry is retrievable
+            for &len in &[0, 5, 10, 15, 20, 25, 30, 32] {
+                assert_eq!(
+                    m.get(&p(key, len)),
+                    Some(&(len as i32)),
+                    "missing entry at /{}",
+                    len
+                );
+            }
+            assert!(m.check_memory_alloc(), "leak with all-depth chain");
+        }
+
+        #[test]
+        fn clear_with_slash32() {
+            let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+            for i in 0..4u32 {
+                m.insert(p(0x01020300 | i, 32), i as i32);
+            }
+            m.insert(p(0x01020300, 24), 99);
+            assert_eq!(m.len(), 5);
+
+            m.clear();
+            assert_eq!(m.len(), 0);
+            assert!(m.check_memory_alloc(), "leak after clear with /32s");
+
+            // Re-insert should work
+            m.insert(p(0x01020304, 32), 1);
+            assert_eq!(m.get(&p(0x01020304, 32)), Some(&1));
         }
     }
 }

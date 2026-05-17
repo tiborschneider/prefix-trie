@@ -938,9 +938,14 @@ pub trait TrieView<'a>: Sized {
 
     /// Step one binary level deeper, going left (0-bit) or right (1-bit).
     fn step(mut self, go_right: bool) -> Option<Self> {
+        let num_bits = <Self::P as Prefix>::R::zero().count_zeros();
+        // Cannot descend past the key width.
+        if self.prefix_len() >= num_bits {
+            return None;
+        }
         let new_prefix_len = self.prefix_len() + 1;
         let new_key = if go_right {
-            let bit_pos = <Self::P as Prefix>::R::zero().count_zeros() - self.prefix_len() - 1;
+            let bit_pos = num_bits - self.prefix_len() - 1;
             self.key() | <Self::P as Prefix>::R::one().unsigned_shl(bit_pos)
         } else {
             self.key()

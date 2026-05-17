@@ -478,4 +478,91 @@ mod tests {
         let from: Vec<_> = sub.iter_from(&p(0x0a020000, 16), true).collect();
         assert!(from.is_empty());
     }
+
+    #[test]
+    fn view_right_at_max_prefix_len() {
+        // Calling right() on a view at prefix_len == num_bits (32 for u32) must
+        // not panic. step() computes bit_pos = num_bits - prefix_len - 1 which
+        // underflows when prefix_len == num_bits.
+        let m = map_from(&[(0x01020304, 32, 1)]);
+        let v = m.view().find(&p(0x01020304, 32)).unwrap();
+        assert_eq!(v.prefix_len(), 32);
+        // This should return None (can't go deeper than /32), not panic.
+        assert!(v.right().is_none());
+        assert!(v.left().is_none());
+    }
+
+    #[test]
+    fn view_find_exact_slash32() {
+        let m = map_from(&[
+            (0x01020300, 32, 1),
+            (0x01020301, 32, 2),
+            (0x01020302, 32, 3),
+            (0x01020303, 32, 4),
+        ]);
+        for repr in 0x01020300..=0x01020303u32 {
+            let v = m.view().find_exact(&p(repr, 32)).unwrap();
+            assert_eq!(v.prefix(), p(repr, 32));
+            assert_eq!(v.value(), Some(&((repr - 0x01020300 + 1) as i32)));
+        }
+        assert!(m.view().find_exact(&p(0x01020304, 32)).is_none());
+    }
+
+    #[test]
+    fn view_find_lpm_slash32() {
+        let m = map_from(&[(0x01020300, 24, 10), (0x01020304, 32, 42)]);
+        let v = m.view().find_lpm(&p(0x01020304, 32)).unwrap();
+        assert_eq!(v.prefix(), p(0x01020304, 32));
+        assert_eq!(v.value(), Some(&42));
+
+        // LPM for a /32 without an exact match should find the covering /24
+        let v = m.view().find_lpm(&p(0x01020305, 32)).unwrap();
+        assert_eq!(v.prefix(), p(0x01020300, 24));
+        assert_eq!(v.value(), Some(&10));
+    }
+
+    #[test]
+    fn view_navigate_to_slash32() {
+        let m = map_from(&[(0x01020304, 32, 1)]);
+        let v = m.view().find(&p(0x01020304, 32)).unwrap();
+        assert_eq!(v.prefix_len(), 32);
+        assert_eq!(v.prefix(), p(0x01020304, 32));
+        assert_eq!(v.value(), Some(&1));
+    }
+
+    #[test]
+    fn view_iter_at_slash32() {
+        // A view navigated to a /32 should iterate only that single entry.
+        let m = map_from(&[
+            (0x01020300, 24, 10),
+            (0x01020304, 32, 42),
+            (0x01020305, 32, 43),
+        ]);
+        let v = m.view().find(&p(0x01020304, 32)).unwrap();
+        let entries: Vec<_> = v.iter().map(|(k, v)| (k, *v)).collect();
+        assert_eq!(entries, vec![(p(0x01020304, 32), 42)]);
+    }
+
+    #[test]
+    fn view_step_through_all_depths() {
+        // Walk from root to a /32 via left()/right(), one bit at a time.
+        // Key 0xAAAAAAAA = 1010_1010_... so we alternate right/left.
+        let key = 0xAAAAAAAAu32;
+        let m = map_from(&[(key, 32, 99)]);
+        let mut v = m.view();
+        for bit in 0..32u32 {
+            let go_right = (key >> (31 - bit)) & 1 == 1;
+            v = if go_right {
+                v.right().unwrap_or_else(|| panic!("right() failed at bit {bit}"))
+            } else {
+                v.left().unwrap_or_else(|| panic!("left() failed at bit {bit}"))
+            };
+        }
+        assert_eq!(v.prefix_len(), 32);
+        assert_eq!(v.prefix(), p(key, 32));
+        assert_eq!(v.value(), Some(&99));
+        // One more step should return None
+        assert!(v.left().is_none());
+        assert!(v.right().is_none());
+    }
 }
