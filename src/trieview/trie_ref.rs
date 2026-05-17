@@ -553,9 +553,11 @@ mod tests {
         for bit in 0..32u32 {
             let go_right = (key >> (31 - bit)) & 1 == 1;
             v = if go_right {
-                v.right().unwrap_or_else(|| panic!("right() failed at bit {bit}"))
+                v.right()
+                    .unwrap_or_else(|| panic!("right() failed at bit {bit}"))
             } else {
-                v.left().unwrap_or_else(|| panic!("left() failed at bit {bit}"))
+                v.left()
+                    .unwrap_or_else(|| panic!("left() failed at bit {bit}"))
             };
         }
         assert_eq!(v.prefix_len(), 32);

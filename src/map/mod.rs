@@ -1283,7 +1283,10 @@ mod tests {
 
         m.remove_children(&p(0x00000000, 5));
         assert_eq!(m.len(), 0);
-        assert!(m.check_memory_alloc(), "after remove_children: stale child pointers");
+        assert!(
+            m.check_memory_alloc(),
+            "after remove_children: stale child pointers"
+        );
 
         // Re-insert at the same depth to verify no corruption from stale pointers.
         m.insert(p(0x00000000, 11), 200);
@@ -1322,14 +1325,20 @@ mod tests {
         // This forces the allocator to allocate a new depth-10 node, which reuses
         // the freed slot from step 2.
         m.insert(p(0x80000000, 11), 200);
-        assert!(m.check_memory_alloc(), "after insert into different subtree");
+        assert!(
+            m.check_memory_alloc(),
+            "after insert into different subtree"
+        );
 
         // Step 4: insert back into the ORIGINAL subtree path
         // If child_bitmap on the old depth-5 node is stale, find_or_insert_mut
         // follows the stale children_idx to the slot now owned by the right
         // subtree → wrong node → corruption.
         m.insert(p(0x00000000, 11), 300);
-        assert!(m.check_memory_alloc(), "after re-insert into original subtree");
+        assert!(
+            m.check_memory_alloc(),
+            "after re-insert into original subtree"
+        );
 
         // Verify both entries exist independently with correct values
         assert_eq!(m.len(), 2);
@@ -1563,10 +1572,7 @@ mod tests {
             m.insert(p(0x01020300, 24), 10);
             m.insert(p(0x01020304, 32), 42);
 
-            let cover: Vec<_> = m
-                .cover(&p(0x01020304, 32))
-                .map(|(k, v)| (k, *v))
-                .collect();
+            let cover: Vec<_> = m.cover(&p(0x01020304, 32)).map(|(k, v)| (k, *v)).collect();
             assert_eq!(
                 cover,
                 vec![(p(0x01020300, 24), 10), (p(0x01020304, 32), 42)]
