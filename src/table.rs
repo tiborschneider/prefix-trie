@@ -373,7 +373,9 @@ impl<T> Default for Table<T> {
 
 impl<T> Drop for Table<T> {
     fn drop(&mut self) {
-        self.drop_values();
+        if std::mem::needs_drop::<T>() {
+            self.drop_values();
+        }
     }
 }
 
@@ -1025,9 +1027,11 @@ impl<T> Table<T> {
             let data_count = node_snap.data_bitmap.count_ones() as usize;
             count += data_count;
             if data_count > 0 {
-                for data_loc in node_snap.data_locs() {
-                    // SAFETY: data_locs yields only initialized slots (bitmap bit is set).
-                    let _ = unsafe { self.cells.remove_raw(data_loc) };
+                if std::mem::needs_drop::<T>() {
+                    for data_loc in node_snap.data_locs() {
+                        // SAFETY: data_locs yields only initialized slots (bitmap bit is set).
+                        let _ = unsafe { self.cells.remove_raw(data_loc) };
+                    }
                 }
                 self.cells.free(node_snap.data_idx, data_count);
                 self.nodes[loc].data_bitmap = 0;
