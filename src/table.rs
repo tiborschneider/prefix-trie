@@ -1037,6 +1037,18 @@ impl<T> Table<T> {
                 self.nodes[loc].data_bitmap = 0;
                 self.nodes[loc].data_idx = AllocIdx::empty();
             }
+
+            // Clear child pointers now that we have already pushed children onto the stack
+            // (via the snapshot). The child group allocation itself is freed in the post-loop
+            // section below via `nodes.free()`. We must clear the bitmap here because, in the
+            // `!is_all` path, the initial `loc` is NOT freed — it remains a live node reachable
+            // from its parent. Without this, `child_bitmap`/`children_idx` would be stale
+            // pointers into a freed allocation, causing use-after-free on the next insert that
+            // traverses this node.
+            if child_count > 0 {
+                self.nodes[loc].child_bitmap = 0;
+                self.nodes[loc].children_idx = AllocIdx::empty();
+            }
         }
 
         // we cleared everything

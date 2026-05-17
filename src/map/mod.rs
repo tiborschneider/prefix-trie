@@ -1268,6 +1268,28 @@ mod tests {
     }
 
     #[test]
+    fn test_remove_children_deep_tree() {
+        // With K=5, inserting at /11 creates nodes at depths 0, 5, and 10.
+        // remove_children(&/5) fast-tracks via clear_node_and_children on the
+        // depth-5 node. That node has a child at depth 10 whose allocation
+        // must be freed AND the depth-5 node's child_bitmap/children_idx must
+        // be cleared. Otherwise check_memory_alloc detects the stale pointer
+        // (slot referenced by live node AND on free list).
+        let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+        m.insert(p(0x00000000, 11), 100);
+        assert!(m.check_memory_alloc(), "before remove_children");
+
+        m.remove_children(&p(0x00000000, 5));
+        assert_eq!(m.len(), 0);
+        assert!(m.check_memory_alloc(), "after remove_children: stale child pointers");
+
+        // Re-insert at the same depth to verify no corruption from stale pointers.
+        m.insert(p(0x00000000, 11), 200);
+        assert_eq!(m.get(&p(0x00000000, 11)), Some(&200));
+        assert!(m.check_memory_alloc(), "after re-insert");
+    }
+
+    #[test]
     fn test_retain_leak() {
         use crate::fuzzing::TestPrefix;
         let tp = |repr: u32, len: u8| -> TestPrefix { crate::Prefix::from_repr_len(repr, len) };
