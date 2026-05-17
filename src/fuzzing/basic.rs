@@ -73,6 +73,31 @@ fn _new_mods(list: Vec<Operation<TestPrefix, i32>>) -> bool {
     pmap.check_memory_alloc() && pmap.into_iter().eq(hmap.into_iter().sorted())
 }
 
+qc!(new_mods_vec, _new_mods_vec);
+fn _new_mods_vec(list: Vec<Operation<TestPrefix, i32>>) -> bool {
+    let mut pmap = PrefixMap::new();
+    let mut hmap = HashMap::new();
+
+    for op in list {
+        match op {
+            Operation::Add(p, t) => {
+                pmap.insert(p, vec![t]);
+                hmap.insert(p, vec![t]);
+            }
+            Operation::Remove(p) => {
+                pmap.remove(&p);
+                hmap.remove(&p);
+            }
+            Operation::RemoveChildren(p) => {
+                pmap.remove_children(&p);
+                hmap.retain(|x, _| !p.contains(x));
+            }
+        }
+    }
+
+    pmap.check_memory_alloc() && pmap.into_iter().eq(hmap.into_iter().sorted())
+}
+
 qc!(mods_clone, _mods_clone);
 fn _mods_clone(list: Vec<Operation<TestPrefix, i32>>) -> bool {
     let mut pmap = PrefixMap::new();
@@ -257,6 +282,17 @@ fn _inequality_set((list, toggle): (Vec<Operation<TestPrefix, ()>>, TestPrefix))
 
 qc!(remove_children, _remove_children);
 fn _remove_children((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
+    let want = select(&map, |p, _| !root.contains(p));
+    map.remove_children(&root);
+    map.check_memory_alloc() && map.len() == want.len() && map.into_iter().eq(want)
+}
+
+qc!(remove_children_vec, _remove_children_vec);
+fn _remove_children_vec((map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
+    let mut map = map
+        .into_iter()
+        .map(|(p, t)| (p, vec![t]))
+        .collect::<PrefixMap<_, _>>();
     let want = select(&map, |p, _| !root.contains(p));
     map.remove_children(&root);
     map.check_memory_alloc() && map.len() == want.len() && map.into_iter().eq(want)
