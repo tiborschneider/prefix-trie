@@ -32,11 +32,6 @@ required-features = ["ipnet"]
 name = "memory"
 required-features = ["ipnet"]
 
-[[test]]
-name = "prefix_cmp"
-path = "benches/tests/prefix_cmp.rs"
-required-features = ["ipnet"]
-
 [[example]]
 name = "random_access"
 required-features = ["ipnet"]

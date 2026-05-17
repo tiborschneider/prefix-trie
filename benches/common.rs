@@ -35,6 +35,7 @@ pub fn adverse_cmp<P: Prefix>(a: &P, b: &P) -> std::cmp::Ordering {
         .then(a.repr().cmp(&b.repr()))
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum Insn<P> {
     Insert(P, u32),
     Remove(P),
@@ -67,6 +68,7 @@ pub fn fill_table<P: Copy>(seed: u64, addresses: &[P]) -> Vec<Insn<P>> {
         .collect()
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum SortingOrder {
     Lexicographic,
     Random,

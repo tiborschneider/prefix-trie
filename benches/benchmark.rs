@@ -9,6 +9,8 @@ use criterion::{
 };
 use ipnet::{Ipv4Net, Ipv6Net};
 use prefix_trie::{Prefix, PrefixMap};
+use rand::prelude::*;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 trait BenchPrefix
@@ -21,17 +23,26 @@ impl<P> BenchPrefix for P where Self: Prefix + Copy + Eq + Ord + std::hash::Hash
 fn bench_one<P: BenchPrefix, M: BenchMap<P>>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     setup: &[Insn<P>],
-    run: &[Insn<P>],
+    insn: &[Insn<P>],
+    shuffle_insn: bool,
 ) {
+    let mut rng = StdRng::seed_from_u64(0);
     group.bench_function(M::NAME, |b| {
         b.iter_with_setup(
             || {
+                let insn = if shuffle_insn {
+                    let mut insn = insn.to_vec();
+                    insn.shuffle(&mut rng);
+                    Cow::Owned(insn)
+                } else {
+                    Cow::Borrowed(insn)
+                };
                 let mut map = M::new_empty();
                 map.run(setup);
-                map
+                (map, insn)
             },
-            |mut map| {
-                map.run(run);
+            |(mut map, insn)| {
+                map.run(&insn);
                 map
             },
         )
@@ -41,12 +52,13 @@ fn bench_one<P: BenchPrefix, M: BenchMap<P>>(
 fn bench_all<P: BenchPrefix>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     setup: &[Insn<P>],
-    run: &[Insn<P>],
+    insn: &[Insn<P>],
+    shuffle_insn: bool,
 ) {
-    bench_one::<P, PrefixMap<P, u32>>(group, setup, run);
-    bench_one::<P, P::IpLookupTable>(group, setup, run);
-    bench_one::<P, HashMap<P, u32>>(group, setup, run);
-    bench_one::<P, BTreeMap<P, u32>>(group, setup, run);
+    bench_one::<P, PrefixMap<P, u32>>(group, setup, insn, shuffle_insn);
+    bench_one::<P, P::IpLookupTable>(group, setup, insn, shuffle_insn);
+    bench_one::<P, HashMap<P, u32>>(group, setup, insn, shuffle_insn);
+    bench_one::<P, BTreeMap<P, u32>>(group, setup, insn, shuffle_insn);
 }
 
 fn bgp_mods_random_for<P: BenchPrefix>(
@@ -60,7 +72,7 @@ fn bgp_mods_random_for<P: BenchPrefix>(
 
     let mut group = c.benchmark_group(group_name);
     group.throughput(Throughput::Elements(insn.len() as u64));
-    bench_all(&mut group, &setup, &insn);
+    bench_all(&mut group, &setup, &insn, false);
     group.finish();
 }
 
@@ -83,12 +95,12 @@ fn bgp_lookup_random_for<P: BenchPrefix>(
 
     let mut group = c.benchmark_group(group_name);
     group.throughput(Throughput::Elements(insn.len() as u64));
-    bench_all(&mut group, &setup, &insn);
+    bench_all(&mut group, &setup, &insn, false);
     group.finish();
 }
 
 pub fn bgp_lookup_random_ipv4(c: &mut Criterion) {
-    bgp_lookup_random_for::<Ipv4Net>(c, "bgp-lookup-random", SortingOrder::Random);
+    bgp_lookup_random_for::<Ipv4Net>(c, "bgp-lookup-random-ipv4", SortingOrder::Random);
 }
 
 pub fn bgp_lookup_random_ipv6(c: &mut Criterion) {
@@ -102,7 +114,7 @@ fn bgp_lookup_ris_for<P: BenchPrefix>(c: &mut Criterion, group_name: &str, order
 
     let mut group = c.benchmark_group(group_name);
     group.throughput(Throughput::Elements(insn.len() as u64));
-    bench_all(&mut group, &setup, &insn);
+    bench_all(&mut group, &setup, &insn, false);
     group.finish();
 }
 
@@ -121,7 +133,7 @@ fn bgp_mods_ris_for<P: BenchPrefix>(c: &mut Criterion, group_name: &str, orderin
 
     let mut group = c.benchmark_group(group_name);
     group.throughput(Throughput::Elements(insn.len() as u64));
-    bench_all(&mut group, &setup, &insn);
+    bench_all(&mut group, &setup, &insn, false);
     group.finish();
 }
 
@@ -139,7 +151,12 @@ fn bgp_create_for<P: BenchPrefix>(c: &mut Criterion, group_name: &str, ordering:
 
     let mut group = c.benchmark_group(group_name);
     group.throughput(Throughput::Elements(setup.len() as u64));
-    bench_all(&mut group, &[], &setup);
+    bench_all(
+        &mut group,
+        &[],
+        &setup,
+        matches!(ordering, SortingOrder::Random),
+    );
     group.finish();
 }
 
