@@ -1022,22 +1022,33 @@ impl<T> Table<T> {
             let child_count = node_snap.child_bitmap.count_ones() as usize;
             children_to_free.push((node_snap.children_idx, child_count));
 
-            // Drop all data values and free the allocation in one shot, avoiding the slot
-            // corruption that arises when take_data shifts elements during iteration.
+            // Extract all data values without dropping them yet. We must clear both
+            // bitmaps BEFORE any T::drop() runs for panic safety: if T::drop() panics,
+            // Table::drop() → drop_values() trusts the bitmap to find initialized slots.
+            // If the bitmap still references already-uninit slots, drop_values() would
+            // call assume_init() on them — undefined behavior.
             let data_count = node_snap.data_bitmap.count_ones() as usize;
             count += data_count;
-            if data_count > 0 {
-                if std::mem::needs_drop::<T>() {
-                    for data_loc in node_snap.data_locs() {
+            let _extracted: Vec<T> = if data_count > 0 && std::mem::needs_drop::<T>() {
+                node_snap
+                    .data_locs()
+                    .map(|data_loc| {
                         // SAFETY: data_locs yields only initialized slots (bitmap bit is set).
-                        let _ = unsafe { self.cells.remove_raw(data_loc) };
-                    }
-                }
+                        unsafe { self.cells.remove_raw(data_loc) }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            // Free allocations and clear bitmaps. This must happen BEFORE _extracted
+            // is dropped (end of loop body) so that a panic in T::drop() leaves the
+            // node with cleared bitmaps — safe for drop_values() during unwinding.
+            if data_count > 0 {
                 self.cells.free(node_snap.data_idx, data_count);
                 self.nodes[loc].data_bitmap = 0;
                 self.nodes[loc].data_idx = AllocIdx::empty();
             }
-
             // Clear child pointers now that we have already pushed children onto the stack
             // (via the snapshot). The child group allocation itself is freed in the post-loop
             // section below via `nodes.free()`. We must clear the bitmap here because, in the
@@ -1049,6 +1060,8 @@ impl<T> Table<T> {
                 self.nodes[loc].child_bitmap = 0;
                 self.nodes[loc].children_idx = AllocIdx::empty();
             }
+            // _extracted drops here (end of loop body). Both bitmaps are already cleared,
+            // so if T::drop() panics, drop_values() won't read uninit slots.
         }
 
         // we cleared everything

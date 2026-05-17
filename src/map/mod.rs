@@ -1611,5 +1611,55 @@ mod tests {
             m.insert(p(0x01020304, 32), 1);
             assert_eq!(m.get(&p(0x01020304, 32)), Some(&1));
         }
+
+        /// Verify that clear_node_and_children is panic-safe: if T::drop() panics,
+        /// Table::drop() during unwinding must not read already-uninit slots (UB).
+        /// Under Miri, the old code would fail; this test documents the fix.
+        #[test]
+        fn clear_panic_safety() {
+            use std::panic::{self, AssertUnwindSafe};
+            use std::sync::atomic::{AtomicU32, Ordering};
+
+            static DROP_COUNT: AtomicU32 = AtomicU32::new(0);
+            static PANIC_AT: AtomicU32 = AtomicU32::new(u32::MAX);
+
+            #[derive(Debug)]
+            struct PanicDrop(#[allow(dead_code)] u32);
+            impl Drop for PanicDrop {
+                fn drop(&mut self) {
+                    if DROP_COUNT.fetch_add(1, Ordering::Relaxed)
+                        == PANIC_AT.load(Ordering::Relaxed)
+                    {
+                        panic!("intentional panic in Drop");
+                    }
+                }
+            }
+
+            // Use prefix lengths 0-4 so entries land in the ROOT node (depth 0,
+            // covers /0../4 with K=5). This is critical: if the panic happens in
+            // a child node, the root's child_bitmap is already cleared from a prior
+            // iteration, so drop_values() never reaches the child — masking the UB.
+            // With root-level entries, drop_values() immediately reads the root's
+            // still-set bitmap and hits the uninit slots.
+            let mut m: PrefixMap<(u32, u8), PanicDrop> = PrefixMap::new();
+            m.insert(p(0x00000000, 0), PanicDrop(1));
+            m.insert(p(0x00000000, 1), PanicDrop(2));
+            m.insert(p(0x80000000, 1), PanicDrop(3));
+
+            // Panic on the 2nd drop during clear_node_and_children.
+            DROP_COUNT.store(0, Ordering::Relaxed);
+            PANIC_AT.store(1, Ordering::Relaxed);
+
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                m.clear();
+            }));
+            assert!(result.is_err());
+
+            // Disable panics and drop the partially-cleared map. With the fix,
+            // bitmaps are cleared before T::drop() runs, so drop_values() won't
+            // read uninit slots. Without the fix, this would be UB under Miri.
+            PANIC_AT.store(u32::MAX, Ordering::Relaxed);
+            drop(m);
+        }
     }
 }
