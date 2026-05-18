@@ -13,56 +13,6 @@
 //! This crate also provides a [`joint::JointPrefixMap`] and [`joint::JointPrefixSet`] that contains
 //! two tables, one for IPv4 and one for IPv6.
 //!
-//! # Comparison with related projects
-//!
-//! The library [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap)
-//! provides the same data structure (in the following called `TreeBitMap`) and uses a
-//! similar algorithm. The following table compares the performance and memory of the two libraries,
-//! and relates them to the `HashMap` and `BTreeMap` of the standard library. Throughput is reported
-//! relative to `HashMap` (1.00x = HashMap speed), with absolute throughput in parentheses. **Bold**
-//! marks the fastest implementation per row. See `benches/benchmark.rs` for details.
-//!
-//! All benchmarks use IPv4 prefixes from a RIPE RIS peer snapshot (1,042,024 IPv4 prefixes or
-//! 246,174 IPv6 prefixes). See `benches/benchmark.rs` and `benches/memory.rs` for details. The
-//! benchmark results below were obtained on an AMD EPYC server.
-//!
-//! | Benchmark          | `HashMap`             | `PrefixMap`           | `TreeBitMap`        | `BTreeMap`         |
-//! |--------------------|-----------------------|-----------------------|---------------------|--------------------|
-//! | *Lookup*           |                       |                       |                     |                    |
-//! | -> Random access   |                       |                       |                     |                    |
-//! | ---> IPv4          |   1.00x (7.4 Mops)    | **1.92x (14.2 Mops)** |   1.15x (8.5 Mops)  |   0.46x (3.4 Mops) |
-//! | ---> IPv6          | **1.00x (11.0 Mops)** |   0.97x (10.7 Mops)   |   0.58x (6.4 Mops)  |   0.45x (4.9 Mops) |
-//! | -> RIS updates     |                       |                       |                     |                    |
-//! | ---> IPv4          |   1.00x (17.5 Mops)   | **1.69x (29.5 Mops)** |   0.78x (13.7 Mops) |   0.47x (8.2 Mops) |
-//! | ---> IPv6          | **1.00x (24.8 Mops)** |   0.63x (15.7 Mops)   |   0.33x (8.2 Mops)  |   0.32x (7.9 Mops) |
-//! | *Insert & Remove*  |                       |                       |                     |                    |
-//! | -> Random access   |                       |                       |                     |                    |
-//! | ---> IPv4          |   1.00x (7.4 Mops)    | **1.04x (7.7 Mops)**  |   0.89x (6.6 Mops)  |   0.43x (3.2 Mops) |
-//! | ---> IPv6          | **1.00x (10.8 Mops)** |   0.48x (5.2 Mops)    |   0.44x (4.7 Mops)  |   0.39x (4.3 Mops) |
-//! | -> RIS updates     |                       |                       |                     |                    |
-//! | ---> IPv4          | **1.00x (17.1 Mops)** |   0.88x (15.0 Mops)   |   0.71x (12.2 Mops) |   0.47x (8.0 Mops) |
-//! | ---> IPv6          | **1.00x (25.0 Mops)** |   0.33x (8.3 Mops)    |   0.29x (7.3 Mops)  |   0.31x (7.7 Mops) |
-//! | *Create*           |                       |                       |                     |                    |
-//! | -> Random order    |                       |                       |                     |                    |
-//! | ---> IPv4          |   1.00x (7.8 Mops)    | **1.13x (8.8 Mops)**  |   0.95x (7.4 Mops)  |   0.55x (4.3 Mops) |
-//! | ---> IPv6          | **1.00x (11.4 Mops)** |   0.52x (5.9 Mops)    |   0.43x (4.9 Mops)  |   0.42x (4.8 Mops) |
-//! | -> Sorted order    |                       |                       |                     |                    |
-//! | ---> IPv4          |   1.00x (10.3 Mops)   | **1.45x (14.9 Mops)** |   1.04x (10.7 Mops) |   0.85x (8.8 Mops) |
-//! | ---> IPv6          | **1.00x (11.7 Mops)** |   0.70x (8.2 Mops)    |   0.55x (6.5 Mops)  |   0.51x (6.0 Mops) |
-//! | -> Scattered order |                       |                       |                     |                    |
-//! | ---> IPv4          |   1.00x (10.3 Mops)   | **1.02x (10.5 Mops)** |   0.76x (7.8 Mops)  |   0.34x (3.4 Mops) |
-//! | ---> IPv6          | **1.00x (11.6 Mops)** |   0.59x (6.9 Mops)    |   0.47x (5.5 Mops)  |   0.46x (5.4 Mops) |
-//! | **Memory**         |                       |                       |                     |                    |
-//! | -> IPv4            | 26.0 mB               | 12.0 mB (set: 4.0 mB) | **11.0 mB**         | 16.4 mB            |
-//! | -> IPv6            | 12.5 mB               |  6.0 mB (set: 4.0 mB) |  **4.3 mB**         |  8.1 mB            |
-//!
-//! Besides better performance than the [`TreeBitMap`](https://crates.io/crates/ip_network_table-deps-treebitmap),
-//! `prefix-trie` includes a `PrefixSet` analogous to `std::collections::HashSet`. Set operations
-//! are exposed through composable trie views, so operations such as union, intersection, difference,
-//! covering union, and covering difference can be combined without building temporary maps.
-//! `prefix-trie` has an interface similar to `std::collections`, and its longest-prefix matching
-//! is not limited to individual host addresses.
-//!
 //! # Description of the Tree
 //!
 //! [`PrefixMap`] stores the logical binary prefix trie in multi-bit nodes. Each internal node covers
