@@ -16,7 +16,7 @@
 //! # Comparison with related projects
 //!
 //! The library [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap)
-//! provides a datastructure (in the following called `TreeBitMap`) that essentially solves a
+//! provides the same data structure (in the following called `TreeBitMap`) and uses a
 //! similar algorithm. The following table compares the performance and memory of the two libraries,
 //! and relates them to the `HashMap` and `BTreeMap` of the standard library. Throughput is reported
 //! relative to `HashMap` (1.00x = HashMap speed), with absolute throughput in parentheses. **Bold**
