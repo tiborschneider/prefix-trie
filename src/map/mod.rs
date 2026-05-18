@@ -826,8 +826,9 @@ where
 
     /// Return an iterator starting at the given prefix in lexicographic order.
     ///
-    /// If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
-    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    /// - If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
+    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Prefixes that are contained
+    ///   within (are children of) `prefix` are still yielded.
     ///
     /// If `prefix` is not present in the map, the iterator starts at the first entry that
     /// would come after `prefix` in lexicographic order, regardless of `inclusive`.
@@ -840,17 +841,26 @@ where
     /// pm.insert("10.0.0.0/8".parse()?, 1);
     /// pm.insert("10.1.0.0/16".parse()?, 2);
     /// pm.insert("10.2.0.0/16".parse()?, 3);
-    /// pm.insert("10.3.0.0/16".parse()?, 4);
-    /// pm.insert("10.4.0.0/16".parse()?, 5);
+    /// pm.insert("10.2.0.0/24".parse()?, 4);
+    /// pm.insert("10.3.0.0/16".parse()?, 5);
+    /// pm.insert("10.4.0.0/16".parse()?, 6);
     ///
     /// // Inclusive: start at 10.2.0.0/16 and take the next 2 entries
-    /// let page: Vec<_> = pm.iter_from(&"10.2.0.0/16".parse()?, true).take(2).collect();
-    /// assert_eq!(page, vec![("10.2.0.0/16".parse()?, &3), ("10.3.0.0/16".parse()?, &4)]);
+    /// let page: Vec<_> = pm.iter_from(&"10.2.0.0/16".parse()?, true).take(3).collect();
+    /// assert_eq!(page, vec![
+    ///     ("10.2.0.0/16".parse()?, &3),
+    ///     ("10.2.0.0/24".parse()?, &4),
+    ///     ("10.3.0.0/16".parse()?, &5),
+    /// ]);
     ///
     /// // Exclusive: cursor pagination — skip last seen, fetch next page
     /// let last_seen: ipnet::Ipv4Net = "10.2.0.0/16".parse()?;
-    /// let next_page: Vec<_> = pm.iter_from(&last_seen, false).take(2).collect();
-    /// assert_eq!(next_page, vec![("10.3.0.0/16".parse()?, &4), ("10.4.0.0/16".parse()?, &5)]);
+    /// let next_page: Vec<_> = pm.iter_from(&last_seen, false).take(3).collect();
+    /// assert_eq!(next_page, vec![
+    ///     ("10.2.0.0/24".parse()?, &4),
+    ///     ("10.3.0.0/16".parse()?, &5),
+    ///     ("10.4.0.0/16".parse()?, &6)
+    /// ]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
