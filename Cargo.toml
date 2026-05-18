@@ -12,6 +12,7 @@ keywords = ["IP", "prefix", "trie", "tree", "collection"]
 description = "Prefix trie (tree) datastructure (both a set and a map) that provides exact and longest-prefix matches."
 rust-version = "1.71.1"
 exclude = [
+    "benches/report.py",
     "benches/data/20260511-mutations-peer-193.0.0.56AS3333.parquet",
     "benches/data/20260511-mutations-peer-193.0.0.56AS3333-ipv6.parquet",
     "benches/data/20260511-initial-state-peer-193.0.0.56AS3333.parquet",
