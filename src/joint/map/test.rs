@@ -228,6 +228,23 @@ mod entry {
     }
 
     #[test]
+    fn entry_occupied_into_mut<P: JointPrefix + Debug + PartialEq>() {
+        let mut pm: JointPrefixMap<P, _> = JointPrefixMap::new();
+
+        pm.insert(ip("192.168.1.0/24"), 1);
+        if let Entry::Occupied(e) = pm.entry(ip("192.168.1.0/24")) {
+            *e.into_mut() += 1
+        }
+        assert_eq!(pm.get(&ip("192.168.1.0/24")), Some(&2));
+
+        pm.insert(ip("2001:1::/48"), 1);
+        if let Entry::Occupied(e) = pm.entry(ip("2001:1::/48")) {
+            *e.into_mut() += 1
+        }
+        assert_eq!(pm.get(&ip("2001:1::/48")), Some(&2));
+    }
+
+    #[test]
     fn entry_occupied_insert<P: JointPrefix + Debug + PartialEq>() {
         let mut pm: JointPrefixMap<P, _> = JointPrefixMap::new();
 

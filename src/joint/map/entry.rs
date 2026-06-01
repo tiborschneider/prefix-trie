@@ -379,6 +379,16 @@ impl<P: JointPrefix, T> OccupiedEntry<'_, P, T> {
     }
 }
 
+impl<'a, P: JointPrefix, T> OccupiedEntry<'a, P, T> {
+    /// Converts this occupied entry into a mutable reference to the stored value.
+    pub fn into_mut(self) -> &'a mut T {
+        match self {
+            OccupiedEntry::P1(e) => e.into_mut(),
+            OccupiedEntry::P2(e) => e.into_mut(),
+        }
+    }
+}
+
 impl<'a, P: JointPrefix, T> VacantEntry<'a, P, T> {
     /// Gets a reference to the key in the entry.
     pub fn key(&self) -> P {
