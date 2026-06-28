@@ -101,6 +101,17 @@ impl<P: Prefix + Arbitrary, T: Arbitrary> Arbitrary for PrefixMap<P, T> {
     }
 }
 
+impl<P: Prefix + Arbitrary> Arbitrary for PrefixSet<P> {
+    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        <Vec<P> as Arbitrary>::arbitrary(g).into_iter().collect()
+    }
+
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        let elems = self.clone().into_iter().collect::<Vec<_>>();
+        Box::new(elems.shrink().map(PrefixSet::from_iter))
+    }
+}
+
 impl<P: Arbitrary, T: Arbitrary> Arbitrary for Operation<P, T> {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
         let p = P::arbitrary(g);

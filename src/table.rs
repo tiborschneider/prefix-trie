@@ -1101,7 +1101,15 @@ impl<T> Table<T> {
 
         let mut correct = true;
 
-        let cell_len = self.cells.total_slots();
+        // For a ZST `T`, all nodes share one dummy cell region, so per-slot
+        // accounting (double-reference / leak detection) does not apply. Leaving
+        // `cell_acc` empty turns every cell-marking and cell-leak loop below into a
+        // no-op while keeping the bitmap ↔ data_idx invariant checks active.
+        let cell_len = if std::mem::size_of::<T>() == 0 {
+            0
+        } else {
+            self.cells.total_slots()
+        };
         let node_len = self.nodes.total_slots();
 
         // false = unaccounted, true = accounted (referenced or free)

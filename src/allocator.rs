@@ -4,7 +4,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use crate::node::MultiBitNode;
+use crate::{node::MultiBitNode, table::NUM_DATA};
 
 const NUM_TIERS: usize = 7;
 /// Spacing for data allocations (tiers by capacity)
@@ -152,6 +152,13 @@ impl<T> Default for CellAllocator<T> {
 }
 
 impl<T> CellAllocator<T> {
+    /// Whether `T` is zero-sized. For such types (e.g. `PrefixSet`'s `()`) the cell
+    /// values carry no information — presence is tracked entirely by the node
+    /// bitmaps — so all nodes share a single dummy data region: `alloc` returns a
+    /// constant index, `free` is a no-op, and the free lists stay empty. The branch
+    /// is a compile-time constant and folds away for non-ZST `T`.
+    const IS_ZST: bool = std::mem::size_of::<T>() == 0;
+
     pub(crate) fn mem_size(&self) -> usize {
         // SAFETY: We only read the Vec's metadata (capacity), not any uninitialized elements.
         // No mutable reference to self.data exists, so shared access via get() is sound.
@@ -251,6 +258,16 @@ impl<T> CellAllocator<T> {
     /// Allocate a new group of given capacity tier. Returns AllocIdx to the start of the group.
     pub(crate) fn alloc(&mut self, count: usize) -> AllocIdx {
         debug_assert!(count > 0);
+        if Self::IS_ZST {
+            // All ZST cells share one dummy region at index 0. Ensure it is large
+            // enough that any node's slot (0..NUM_DATA) is in bounds; the values are
+            // zero-sized so this never touches the heap.
+            let data = self.data.get_mut();
+            if data.len() < NUM_DATA {
+                data.resize_with(NUM_DATA, MaybeUninit::uninit);
+            }
+            return AllocIdx::from_usize(0);
+        }
         let tier = DATA_COUNT_TO_TIER[count.min(31)] as usize;
         let cap = DATA_SPACING[tier];
 
@@ -269,6 +286,10 @@ impl<T> CellAllocator<T> {
     /// Free a group at the given AllocIdx (which was allocated with given count).
     pub(crate) fn free(&mut self, idx: AllocIdx, count: usize) {
         debug_assert!(!idx.is_empty());
+        if Self::IS_ZST {
+            // The shared ZST region is never reclaimed; no free list to maintain.
+            return;
+        }
         let tier = DATA_COUNT_TO_TIER[count.min(31)] as usize;
         self.free_lists[tier].push(idx.as_usize() as u32);
     }
@@ -791,6 +812,28 @@ mod tests {
     }
 
     // ============ CellAllocator Tests ============
+
+    #[test]
+    fn test_cell_allocator_zst_keeps_no_free_list() {
+        // For a zero-sized value type (e.g. `PrefixSet`'s `()`), the cell allocator
+        // stores no real data, so it should not maintain any free lists or grow its
+        // backing store. Allocate a whole batch first (so nothing can be recycled
+        // during the alloc phase), then free them all.
+        let mut alloc = CellAllocator::<()>::default();
+        let idxs: Vec<AllocIdx> = (0..100).map(|_| alloc.alloc(1)).collect();
+        for idx in idxs {
+            alloc.free(idx, 1);
+        }
+        assert!(
+            alloc.free_lists.iter().all(|fl| fl.is_empty()),
+            "ZST cell allocator should never push to its free lists"
+        );
+        assert_eq!(
+            alloc.mem_size(),
+            0,
+            "ZST cell allocator must not consume heap memory"
+        );
+    }
 
     #[test]
     fn test_cell_allocator_basic_alloc() {

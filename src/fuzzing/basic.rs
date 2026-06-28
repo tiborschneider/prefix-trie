@@ -280,6 +280,73 @@ fn _inequality_set((list, toggle): (Vec<Operation<TestPrefix, ()>>, TestPrefix))
     set != clone
 }
 
+// `PrefixSet` is `PrefixMap<P, ()>`, whose ZST cell allocator takes a different code
+// path (shared dummy region, no free list). These mutate a set and assert the allocator
+// stays consistent via `check_memory_alloc`, comparing against a `HashSet` reference.
+
+qc!(new_mods_set, _new_mods_set);
+fn _new_mods_set(list: Vec<Operation<TestPrefix, ()>>) -> bool {
+    let mut set = PrefixSet::new();
+    let mut href = std::collections::HashSet::new();
+
+    for op in list {
+        match op {
+            Operation::Add(p, ()) => {
+                set.insert(p);
+                href.insert(p);
+            }
+            Operation::Remove(p) => {
+                set.remove(&p);
+                href.remove(&p);
+            }
+            Operation::RemoveChildren(p) => {
+                set.remove_children(&p);
+                href.retain(|x| !p.contains(x));
+            }
+        }
+    }
+
+    set.0.check_memory_alloc() && set.into_iter().eq(href.into_iter().sorted())
+}
+
+qc!(mods_clone_set, _mods_clone_set);
+fn _mods_clone_set(list: Vec<Operation<TestPrefix, ()>>) -> bool {
+    let mut set = PrefixSet::new();
+
+    for op in list {
+        match op {
+            Operation::Add(p, ()) => {
+                set.insert(p);
+            }
+            Operation::Remove(p) => {
+                set.remove(&p);
+            }
+            Operation::RemoveChildren(p) => {
+                set.remove_children(&p);
+            }
+        }
+    }
+
+    if !set.0.check_memory_alloc() {
+        return false;
+    }
+
+    let cloned = set.clone();
+
+    cloned.0.check_memory_alloc() && cloned == set
+}
+
+qc!(retain_set, _retain_set);
+fn _retain_set((set, root): (PrefixSet<TestPrefix>, TestPrefix)) -> bool {
+    let mut set = set;
+    let want = set
+        .iter()
+        .filter(|p| !(root.contains(p) && p.1 >= root.1 + 2))
+        .collect::<Vec<_>>();
+    set.retain(|p| !(root.contains(p) && p.1 >= root.1 + 2));
+    set.0.check_memory_alloc() && set.into_iter().eq(want)
+}
+
 qc!(remove_children, _remove_children);
 fn _remove_children((mut map, root): (PrefixMap<TestPrefix, i32>, TestPrefix)) -> bool {
     let want = select(&map, |p, _| !root.contains(p));
