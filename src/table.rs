@@ -455,9 +455,7 @@ impl<T> Table<T> {
             let cb = child_bit(depth, key);
             // SAFETY: `loc` starts as `Loc::root()` (always valid) and is only updated
             // to the result of a prior `child()` call, which always returns a valid `Loc`.
-            let Some(next) = (unsafe { self.child(loc, cb) }) else {
-                return None;
-            };
+            let next = unsafe { self.child(loc, cb) }?;
             loc = next;
             depth += K;
         }

@@ -546,7 +546,6 @@ where
         }
         let node = loc_mut.node_loc();
         let depth = loc_mut.depth();
-        drop(loc_mut);
 
         // fast-track delete this index if it covers the entire node
         if prefix_len % K == 0 {
