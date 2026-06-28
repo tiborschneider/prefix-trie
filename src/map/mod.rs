@@ -15,7 +15,7 @@ use super::table::{Location, Table, K};
 #[derive(Clone)]
 pub struct PrefixMap<P, T> {
     table: Table<T>,
-    count: usize,
+    pub(crate) count: usize,
     marker: PhantomData<P>,
 }
 

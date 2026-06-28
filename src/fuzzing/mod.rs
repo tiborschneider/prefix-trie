@@ -6,6 +6,7 @@ use std::fmt::Debug;
 use crate::*;
 use quickcheck::Arbitrary;
 
+mod aggregate;
 mod basic;
 mod views;
 

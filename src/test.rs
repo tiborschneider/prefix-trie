@@ -560,6 +560,90 @@ mod t {
     }
 
     #[test]
+    fn aggregate_merges_siblings<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::from_iter([ip("10.0.0.0/24"), ip("10.0.1.0/24")]);
+        set.aggregate();
+        assert_eq!(Vec::from_iter(&set), vec![ip("10.0.0.0/23")]);
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn aggregate_cascades_four_into_one<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::from_iter([
+            ip("10.0.0.0/24"),
+            ip("10.0.1.0/24"),
+            ip("10.0.2.0/24"),
+            ip("10.0.3.0/24"),
+        ]);
+        set.aggregate();
+        assert_eq!(Vec::from_iter(&set), vec![ip("10.0.0.0/22")]);
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn aggregate_drops_covered<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::from_iter([
+            ip("10.0.0.0/16"),
+            ip("10.0.1.0/24"),
+            ip("10.0.128.0/20"),
+        ]);
+        set.aggregate();
+        assert_eq!(Vec::from_iter(&set), vec![ip("10.0.0.0/16")]);
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn aggregate_merges_across_node_boundary<P: Prefix + Copy + PartialEq>() {
+        // /10 and /11 siblings span the K=5 node boundary at depth 10, so the merge must travel
+        // up through a child pointer rather than within a single node.
+        let mut set = PrefixSet::<P>::from_iter([ip("10.0.0.0/11"), ip("10.32.0.0/11")]);
+        set.aggregate();
+        assert_eq!(Vec::from_iter(&set), vec![ip("10.0.0.0/10")]);
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn aggregate_keeps_unmergeable_siblings<P: Prefix + Copy + PartialEq>() {
+        // Only one half of each potential parent is present, so nothing merges or drops.
+        let original = [ip("10.0.0.0/24"), ip("10.0.2.0/24"), ip("10.1.0.0/16")];
+        let mut set = PrefixSet::<P>::from_iter(original);
+        set.aggregate();
+        assert_eq!(Vec::from_iter(&set), Vec::from(original));
+        assert_eq!(set.len(), 3);
+    }
+
+    #[test]
+    fn aggregate_empty_is_noop<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::new();
+        set.aggregate();
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn aggregate_collapses_to_default_route<P: Prefix + Copy + PartialEq>() {
+        // The two halves of the whole space merge all the way up to the default route.
+        let mut set = PrefixSet::<P>::from_iter([ip("0.0.0.0/1"), ip("128.0.0.0/1")]);
+        set.aggregate();
+        assert_eq!(Vec::from_iter(&set), vec![ip("0.0.0.0/0")]);
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn aggregate_is_idempotent<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::from_iter([
+            ip("10.0.0.0/24"),
+            ip("10.0.1.0/24"),
+            ip("10.0.2.0/23"),
+            ip("10.0.4.0/23"),
+            ip("10.0.5.0/24"),
+        ]);
+        set.aggregate();
+        let once = Vec::from_iter(&set);
+        set.aggregate();
+        assert_eq!(Vec::from_iter(&set), once);
+    }
+
+    #[test]
     fn regression_free_list_on_parent_collapse<P: Prefix + Copy + PartialEq>() {
         // Regression test for issue #23: Memory leak when removing leaf nodes
 

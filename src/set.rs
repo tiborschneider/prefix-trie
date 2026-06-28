@@ -2,7 +2,7 @@
 
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 
-use crate::Prefix;
+use crate::{allocator::Loc, Prefix};
 
 use super::{
     map::{CoverKeys, PrefixMap},
@@ -288,6 +288,42 @@ impl<P: Prefix> PrefixSet<P> {
     /// ```
     pub fn clear(&mut self) {
         self.0.clear()
+    }
+
+    /// Modifies the prefix set by removing entries that are already covered by another one with a
+    /// shorter prefix length, and by (recursively) merging adjacent prefixes.
+    ///
+    /// **Invariant**: If you compare `before` and `after` the aggregation, for any prefix `p`, the
+    /// aggregation ensures that `before.get_lpm(p).is_some() == after.get_lpm(p).is_some()`.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// set.insert("10.0.0.0/24".parse()?);
+    /// set.insert("10.0.1.0/24".parse()?); // merges with 10.0.0.0/24 into 10.0.0.0/23
+    /// set.insert("10.0.2.0/23".parse()?); // merges with 10.0.0.0/23 into 10.0.0.0/22
+    /// set.insert("10.0.4.0/23".parse()?);
+    /// set.insert("10.0.5.0/24".parse()?); // covered by 10.0.4.0/23
+    /// set.aggregate();
+    /// assert_eq!(
+    ///     set.iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         "10.0.0.0/22".parse()?,
+    ///         "10.0.4.0/23".parse()?,
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn aggregate(&mut self) {
+        // SAFETY: `Loc::root()` is always a valid, live node location.
+        let (_, count_delta) = unsafe { self.0.table_mut().aggregate_set(Loc::root(), 0) };
+        self.0.count = (self.0.count as i64 + count_delta) as usize;
     }
 
     /// Iterate over all prefixes in lexicographic order.

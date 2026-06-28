@@ -89,6 +89,7 @@
 #![allow(clippy::collapsible_else_if)]
 #![deny(missing_docs)]
 
+mod aggregate;
 mod allocator;
 mod fmt;
 #[cfg(test)]
