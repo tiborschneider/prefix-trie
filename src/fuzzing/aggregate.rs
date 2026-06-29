@@ -23,32 +23,48 @@ fn range(prefix: &TestPrefix) -> RangeInclusive<u32> {
     start..=end
 }
 
+/// How strongly an aggregated set is expected to be reduced; selects which structural invariants
+/// [`covered_space`] enforces while it walks the (sorted) members.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reduced {
+    /// No structural guarantee — used for the original, pre-aggregation set.
+    No,
+    /// Irredundant: no member is covered by another (the guarantee of `aggregate_consistent`).
+    /// Mergeable sibling pairs are still allowed.
+    Irredundant,
+    /// Minimal: irredundant *and* no two mergeable siblings remain (the guarantee of `aggregate`).
+    Minimal,
+}
+
 /// The covered address space of `set` as merged disjoint inclusive intervals, computed in a single
 /// pass over the (already sorted) members.
 ///
-/// When `assert_minimal` is set, the set is also checked to be an irreducible cover: consecutive
-/// members must never overlap (an overlap means one member contains another, so a redundant prefix
-/// was left in) and must never be mergeable siblings (the pair should have collapsed into their
-/// parent). Returns `None` if that check fails.
+/// `reduced` selects the structural invariant to enforce: [`Reduced::Irredundant`] requires that
+/// consecutive members never overlap (an overlap means one member contains another, so a redundant
+/// prefix was left in); [`Reduced::Minimal`] additionally forbids mergeable siblings (the pair
+/// should have collapsed into their parent). Returns `None` if the requested invariant is violated.
 fn covered_space(
     set: &PrefixSet<TestPrefix>,
-    assert_minimal: bool,
+    reduced: Reduced,
 ) -> Option<Vec<RangeInclusive<u32>>> {
     let mut merged: Vec<RangeInclusive<u32>> = Vec::new();
     let mut previous: Option<TestPrefix> = None;
     for prefix in set {
         let cur = range(&prefix);
-        if assert_minimal {
-            if let Some(previous) = previous {
-                let prev = range(&previous);
-                let overlaps = cur.start() <= prev.end();
-                let mergeable = sibling(&previous) == Some(prefix);
-                if overlaps || mergeable {
-                    return None;
-                }
+        if let Some(previous) = previous {
+            let prev = range(&previous);
+            let overlaps = cur.start() <= prev.end(); // one member contains another
+            let mergeable = sibling(&previous) == Some(prefix); // pair should have merged
+            let violated = match reduced {
+                Reduced::No => false,
+                Reduced::Irredundant => overlaps,
+                Reduced::Minimal => overlaps || mergeable,
+            };
+            if violated {
+                return None;
             }
-            previous = Some(prefix);
         }
+        previous = Some(prefix);
         match merged.last_mut() {
             // merge overlapping or touching ranges; saturating_add avoids overflow at the top.
             Some(last) if *cur.start() <= last.end().saturating_add(1) => {
@@ -69,13 +85,46 @@ fn _aggregate_set(prefixes: Vec<TestPrefix>) -> bool {
     let mut double_agg = aggregated.clone();
     double_agg.aggregate();
 
-    let original_space = covered_space(&original, false).unwrap();
-    let Some(aggregated_space) = covered_space(&aggregated, true) else {
+    let original_space = covered_space(&original, Reduced::No).unwrap();
+    let Some(aggregated_space) = covered_space(&aggregated, Reduced::Minimal) else {
         return false; // test failed.
     };
 
-    // The covered address space must be preserved exactly, and `len()` must stay in sync.
+    // The covered address space must be preserved exactly, and the cached `len()` must stay in sync
+    // with the actual element count (it is maintained manually via the aggregation's count delta).
     original_space == aggregated_space
         && aggregated.len() == aggregated.iter().count()
+        && aggregated.0.check_memory_alloc()
         && aggregated == double_agg
+}
+
+qc!(aggregate_consistent_set, _aggregate_consistent_set);
+fn _aggregate_consistent_set(prefixes: Vec<TestPrefix>) -> bool {
+    let original = prefixes.iter().copied().collect::<PrefixSet<_>>();
+    let mut aggregated = original.clone();
+    aggregated.aggregate_consistent();
+    let mut twice = aggregated.clone();
+    twice.aggregate_consistent();
+
+    // Drop-only preserves the covered address space and leaves the set irredundant (no member
+    // covered by another), but not necessarily minimal (mergeable siblings may remain).
+    let original_space = covered_space(&original, Reduced::No).unwrap();
+    let Some(aggregated_space) = covered_space(&aggregated, Reduced::Irredundant) else {
+        return false; // an unremoved covered member slipped through
+    };
+
+    // Drop-only never invents prefixes: every survivor existed in the original.
+    let is_subset = aggregated.iter().all(|p| original.contains(&p));
+
+    // `get_lpm` presence is preserved for every prefix in the original.
+    let lpm_presence_preserved = prefixes
+        .iter()
+        .all(|p| original.get_lpm(p).is_some() == aggregated.get_lpm(p).is_some());
+
+    original_space == aggregated_space
+        && is_subset
+        && lpm_presence_preserved
+        && aggregated.len() == aggregated.iter().count()
+        && aggregated.0.check_memory_alloc()
+        && aggregated == twice
 }

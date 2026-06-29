@@ -644,6 +644,114 @@ mod t {
     }
 
     #[test]
+    fn aggregate_consistent_drops_covered<P: Prefix + Copy + PartialEq>() {
+        // A member covered by a less-specific member is redundant and is dropped.
+        let mut set = PrefixSet::<P>::from_iter([ip("10.0.0.0/16"), ip("10.0.1.0/24")]);
+        set.aggregate_consistent();
+        assert_eq!(Vec::from_iter(&set), vec![ip("10.0.0.0/16")]);
+        assert_eq!(set.len(), 1);
+        assert!(set.0.check_memory_alloc());
+    }
+
+    #[test]
+    fn aggregate_consistent_keeps_siblings<P: Prefix + Copy + PartialEq>() {
+        // Unlike `aggregate`, drop-only must NOT merge sibling prefixes.
+        let original = [ip("10.0.0.0/24"), ip("10.0.1.0/24")];
+        let mut set = PrefixSet::<P>::from_iter(original);
+        set.aggregate_consistent();
+        assert_eq!(Vec::from_iter(&set), Vec::from(original));
+        assert_eq!(set.len(), 2);
+        assert!(set.0.check_memory_alloc());
+    }
+
+    #[test]
+    fn aggregate_consistent_drops_chain<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::from_iter([
+            ip("10.0.0.0/8"),
+            ip("10.0.0.0/16"),
+            ip("10.0.0.0/24"),
+        ]);
+        set.aggregate_consistent();
+        assert_eq!(Vec::from_iter(&set), vec![ip("10.0.0.0/8")]);
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn aggregate_consistent_drops_across_node_boundary<P: Prefix + Copy + PartialEq>() {
+        // /8 (a depth-5 node) covers /11 (a depth-10 node): the coverage crosses a node boundary.
+        let mut set = PrefixSet::<P>::from_iter([ip("10.0.0.0/8"), ip("10.0.0.0/11")]);
+        set.aggregate_consistent();
+        assert_eq!(Vec::from_iter(&set), vec![ip("10.0.0.0/8")]);
+        assert_eq!(set.len(), 1);
+        assert!(set.0.check_memory_alloc());
+    }
+
+    #[test]
+    fn aggregate_consistent_keeps_uncovered<P: Prefix + Copy + PartialEq>() {
+        // Nothing covers anything else here; the set is unchanged.
+        let original = [ip("10.0.0.0/24"), ip("10.0.2.0/24"), ip("10.1.0.0/16")];
+        let mut set = PrefixSet::<P>::from_iter(original);
+        set.aggregate_consistent();
+        assert_eq!(Vec::from_iter(&set), Vec::from(original));
+        assert_eq!(set.len(), 3);
+    }
+
+    #[test]
+    fn aggregate_consistent_empty_is_noop<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::new();
+        set.aggregate_consistent();
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn aggregate_consistent_preserves_lpm_presence<P: Prefix + Copy + PartialEq>() {
+        let entries = [
+            ip("10.0.0.0/8"),
+            ip("10.0.0.0/16"),
+            ip("10.0.5.0/24"),
+            ip("10.0.8.0/23"),
+            ip("11.0.0.0/24"),
+        ];
+        let original = PrefixSet::<P>::from_iter(entries);
+        let mut set = original.clone();
+        set.aggregate_consistent();
+        // `get_lpm` presence (Some/None) must be unchanged for every probed prefix.
+        let probes = [
+            ip("10.0.0.0/8"),
+            ip("10.0.0.0/16"),
+            ip("10.0.5.0/24"),
+            ip("10.0.5.128/25"),
+            ip("10.0.8.0/23"),
+            ip("10.0.9.0/24"),
+            ip("11.0.0.0/24"),
+            ip("9.0.0.0/8"),
+            ip("12.0.0.0/8"),
+        ];
+        for p in probes {
+            assert_eq!(
+                set.get_lpm(&p).is_some(),
+                original.get_lpm(&p).is_some(),
+                "lpm presence changed for {p:?}",
+            );
+        }
+        assert!(set.0.check_memory_alloc());
+    }
+
+    #[test]
+    fn aggregate_consistent_is_idempotent<P: Prefix + Copy + PartialEq>() {
+        let mut set = PrefixSet::<P>::from_iter([
+            ip("10.0.0.0/8"),
+            ip("10.0.0.0/16"),
+            ip("10.0.1.0/24"),
+            ip("10.1.0.0/16"),
+        ]);
+        set.aggregate_consistent();
+        let once = Vec::from_iter(&set);
+        set.aggregate_consistent();
+        assert_eq!(Vec::from_iter(&set), once);
+    }
+
+    #[test]
     fn regression_free_list_on_parent_collapse<P: Prefix + Copy + PartialEq>() {
         // Regression test for issue #23: Memory leak when removing leaf nodes
 

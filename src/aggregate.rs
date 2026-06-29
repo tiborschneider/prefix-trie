@@ -240,6 +240,86 @@ impl Table<()> {
 
         (coverage & 1 != 0, count_delta)
     }
+
+    /// Drop-only aggregation of the sub-trie rooted at `loc`: remove every member that is already
+    /// covered by an ancestor member, without merging anything.
+    ///
+    /// This preserves a stronger invariant than [`Self::aggregate_set`]: for *every* prefix `p`
+    /// (not only addresses), `before.get_lpm(p).is_some() == after.get_lpm(p).is_some()` — a dropped
+    /// member is always still covered by the ancestor that made it redundant.
+    ///
+    /// We only ever recurse into children that are *not* covered by a member here; a covered
+    /// child's whole sub-trie is redundant and is freed outright. As a consequence a recursed node
+    /// is never covered from above (its shallowest member always survives), so no `inherited` flag
+    /// is needed and a recursed child can never come back empty.
+    ///
+    /// Returns the signed change in the number of stored elements.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location.
+    pub(crate) unsafe fn aggregate_consistent_set(&mut self, loc: Loc, depth: u32) -> i64 {
+        let node = *self.node(loc);
+        let data_bitmap = node.data_bitmap();
+        let mut count_delta: i64 = 0;
+
+        // Push membership down the heap: `covered` holds the data bits whose strict ancestor in
+        // this node is a member; `children_under_member` holds the child slots sitting under such a
+        // member (their entire sub-trie is redundant).
+        let mut covered = 0u32;
+        covered |= push_l0(data_bitmap | covered);
+        covered |= push_l1(data_bitmap | covered);
+        covered |= push_l2(data_bitmap | covered);
+        covered |= push_l3(data_bitmap | covered);
+        let children_under_member = push_l4(data_bitmap | covered);
+
+        // Recurse only into children not covered by a member here.
+        for child in node.child_locs() {
+            if children_under_member & (1 << child.bit) != 0 {
+                continue;
+            }
+            // SAFETY: `child` comes from the snapshot of `loc`; recursing into a sibling only
+            // touches that sibling's own sub-trie, never `loc`'s own allocations, so every `child`
+            // location (and `loc` itself) stays valid across iterations.
+            count_delta += unsafe { self.aggregate_consistent_set(child, depth + K) };
+        }
+
+        // Drop the members covered by an ancestor member in this node. For a set `T = ()` the cell
+        // allocator is a no-op and `resolve_mut` recomputes the slot from the live bitmap on each
+        // call, so the removal order is irrelevant.
+        let bits_to_remove = data_bitmap & covered;
+        for bit in 0..NUM_DATA as u32 {
+            if bits_to_remove & (1 << bit) != 0 {
+                let data_idx = DataIdx {
+                    node: loc,
+                    bit,
+                    depth,
+                };
+                // SAFETY: `bit` is set in the current bitmap, and data removals touch only `loc`'s
+                // data allocation, leaving `loc` (in the parent's children allocation) valid.
+                unsafe { data_idx.resolve_mut(self) }
+                    .expect("aggregate_consistent_set: data bit not set")
+                    .take();
+                count_delta -= 1;
+            }
+        }
+
+        // Free the sub-tries that sit under a member here. Each child is re-resolved fresh because
+        // `remove_child_at` reallocates `loc`'s children allocation.
+        for child_bit in 0..NUM_CHILDREN as u32 {
+            if children_under_member & (1 << child_bit) != 0 {
+                // SAFETY: `loc` is valid; `child` re-reads the current bitmap, so `child_loc`
+                // points into the live children allocation even after prior removals.
+                unsafe {
+                    if let Some(child_loc) = self.child(loc, child_bit) {
+                        count_delta -= self.clear_node_and_children(child_loc) as i64;
+                        self.remove_child_at(loc, child_bit);
+                    }
+                }
+            }
+        }
+
+        count_delta
+    }
 }
 
 #[cfg(test)]
