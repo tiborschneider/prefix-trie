@@ -98,6 +98,79 @@ fn _aggregate_set(prefixes: Vec<TestPrefix>) -> bool {
         && aggregated == double_agg
 }
 
+/// The longest-prefix-match result of `map` for every address, as merged disjoint address
+/// intervals (the map analog of [`covered_space`]).
+///
+/// Each entry's address range is inserted least-specific first, so a more-specific entry overwrites
+/// its sub-range (`rangemap` replaces overlaps with the newer value). The result maps every covered
+/// address to its `get_lpm` value; uncovered addresses are absent. Two maps yield identical
+/// `get_lpm` for every address iff their `lpm_map`s are equal.
+///
+/// `reduced` selects the structural invariant to enforce (entries may legitimately nest when a
+/// more-specific entry has a *different* value): [`Reduced::Irredundant`] requires that no entry
+/// has the same value as its nearest covering ancestor (the guarantee of `aggregate_consistent`);
+/// [`Reduced::Minimal`] additionally forbids two equal-value sibling prefixes (the merging
+/// `aggregate` would have collapsed them). Returns `None` if the requested invariant is violated.
+fn lpm_map(
+    map: &PrefixMap<TestPrefix, u8>,
+    reduced: Reduced,
+) -> Option<rangemap::RangeInclusiveMap<u32, u8>> {
+    let entries: Vec<(TestPrefix, u8)> = map.iter().map(|(p, v)| (p, *v)).collect();
+
+    if reduced != Reduced::No {
+        for &(p, v) in &entries {
+            // Redundant: `p`'s nearest strictly-less-specific covering entry has the same value.
+            let redundant = entries
+                .iter()
+                .filter(|(q, _)| q.prefix_len() < p.prefix_len() && q.contains(&p))
+                .max_by_key(|(q, _)| q.prefix_len())
+                .is_some_and(|&(_, ancestor_value)| ancestor_value == v);
+            // Mergeable: `p`'s sibling is also present with the same value.
+            let mergeable = sibling(&p).is_some_and(|sib| map.get(&sib) == Some(&v));
+            let violated = match reduced {
+                Reduced::No => false,
+                Reduced::Irredundant => redundant,
+                Reduced::Minimal => redundant || mergeable,
+            };
+            if violated {
+                return None;
+            }
+        }
+    }
+
+    let mut sorted = entries;
+    sorted.sort_by_key(|(p, _)| p.prefix_len());
+    let mut lpm = rangemap::RangeInclusiveMap::new();
+    for (p, v) in sorted {
+        lpm.insert(range(&p), v);
+    }
+    Some(lpm)
+}
+
+qc!(aggregate_consistent_map, _aggregate_consistent_map);
+fn _aggregate_consistent_map(entries: Vec<(TestPrefix, u8)>) -> bool {
+    let original: PrefixMap<TestPrefix, u8> = entries.into_iter().collect();
+    let mut aggregated = original.clone();
+    aggregated.aggregate_consistent();
+    let mut twice = aggregated.clone();
+    twice.aggregate_consistent();
+
+    let original_lpm = lpm_map(&original, Reduced::No).unwrap();
+    let Some(aggregated_lpm) = lpm_map(&aggregated, Reduced::Irredundant) else {
+        return false; // a redundant entry survived
+    };
+
+    // Drop-only never invents prefixes: every survivor is an unchanged entry of the original.
+    let is_subset = aggregated.iter().all(|(p, v)| original.get(&p) == Some(v));
+
+    // `get_lpm` is identical for every address, and `aggregate_consistent` is idempotent.
+    original_lpm == aggregated_lpm
+        && is_subset
+        && aggregated.len() == aggregated.iter().count()
+        && aggregated.check_memory_alloc()
+        && aggregated == twice
+}
+
 qc!(aggregate_consistent_set, _aggregate_consistent_set);
 fn _aggregate_consistent_set(prefixes: Vec<TestPrefix>) -> bool {
     let original = prefixes.iter().copied().collect::<PrefixSet<_>>();

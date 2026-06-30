@@ -23,6 +23,7 @@
 
 use crate::{
     allocator::Loc,
+    node::MultiBitNode,
     table::{DataIdx, EmptyMut, Table, K, NUM_CHILDREN, NUM_DATA},
 };
 
@@ -123,6 +124,93 @@ pub(crate) const fn push_l4(m: u32) -> u32 {
     e | (e << 1)
 }
 
+// ===========================================================================
+// COVERAGE: composed push-down / fold-up sweeps over the whole heap.
+// ===========================================================================
+
+/// Find what an ancestor member in this node already covers. Returns `(covered,
+/// children_under_member)`: `covered` are the data bits whose strict ancestor in this node is a
+/// member, and `children_under_member` are the child slots sitting under such a member (their whole
+/// sub-trie is redundant). Independent of values, so it serves both the set and the map aggregations.
+#[inline(always)]
+pub(crate) const fn member_coverage(data_bitmap: u32) -> (u32, u32) {
+    let mut covered = 0u32;
+    covered |= push_l0(data_bitmap | covered);
+    covered |= push_l1(data_bitmap | covered);
+    covered |= push_l2(data_bitmap | covered);
+    covered |= push_l3(data_bitmap | covered);
+    let children_under_member = push_l4(data_bitmap | covered);
+    (covered, children_under_member)
+}
+
+/// Find which ranges are fully covered, with adjacent siblings merging into their parent. Bit `b`
+/// of the result means the whole range of `b` is covered. `data_bitmap` are the members present in
+/// this node and `child_coverage` are the child slots whose entire sub-trie is covered.
+#[inline(always)]
+pub(crate) const fn fold_coverage(data_bitmap: u32, child_coverage: u32) -> u32 {
+    let mut coverage = data_bitmap | fold_children(child_coverage);
+    coverage |= fold_l4(coverage);
+    coverage |= fold_l3(coverage);
+    coverage |= fold_l2(coverage);
+    coverage |= fold_l1(coverage);
+    coverage
+}
+
+/// Find which bits have their immediate heap parent covered: bit `b` of the result is set when
+/// `b`'s parent is covered. Used to test whether a covered bit also has a covering ancestor reaching
+/// contiguously down to it.
+#[inline(always)]
+pub(crate) const fn parent_coverage(coverage: u32) -> u32 {
+    push_l0(coverage) | push_l1(coverage) | push_l2(coverage) | push_l3(coverage)
+}
+
+impl<T> Table<T> {
+    /// Drop every data entry whose bit is set in `bits` from node `loc`, returning the (negative)
+    /// change in stored-element count. `resolve_mut` recomputes each slot from the live bitmap, so
+    /// the removal order is irrelevant.
+    ///
+    /// # Safety
+    /// `loc` must be valid and every bit set in `bits` must be set in `loc`'s data bitmap.
+    pub(crate) unsafe fn remove_data_bits(&mut self, loc: Loc, depth: u32, bits: u32) -> i64 {
+        let mut count_delta: i64 = 0;
+        for bit in 0..NUM_DATA as u32 {
+            if bits & (1 << bit) != 0 {
+                // SAFETY: `bit` is set in the current bitmap, and data removals touch only `loc`'s
+                // data allocation, leaving `loc` (in the parent's children allocation) valid.
+                unsafe { DataIdx { node: loc, bit, depth }.resolve_mut(self) }
+                    .expect("remove_data_bits: data bit not set")
+                    .take();
+                count_delta -= 1;
+            }
+        }
+        count_delta
+    }
+
+    /// Free every child sub-trie whose slot is set in `child_bits` of node `loc`: clear the child
+    /// and its descendants, then detach it. Returns the (negative) change in stored-element count.
+    /// Each child is re-resolved fresh because `remove_child_at` reallocates `loc`'s children
+    /// allocation.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location.
+    pub(crate) unsafe fn free_children(&mut self, loc: Loc, child_bits: u32) -> i64 {
+        let mut count_delta: i64 = 0;
+        for child_bit in 0..NUM_CHILDREN as u32 {
+            if child_bits & (1 << child_bit) != 0 {
+                // SAFETY: `loc` is valid; `child` re-reads the current bitmap, so `child_loc`
+                // points into the live children allocation even after prior removals.
+                unsafe {
+                    if let Some(child_loc) = self.child(loc, child_bit) {
+                        count_delta -= self.clear_node_and_children(child_loc) as i64;
+                        self.remove_child_at(loc, child_bit);
+                    }
+                }
+            }
+        }
+        count_delta
+    }
+}
+
 impl Table<()> {
     /// Aggregate the sub-trie rooted at `loc` (a node at binary-tree `depth`) into its minimal
     /// prefix cover, in place.
@@ -142,16 +230,10 @@ impl Table<()> {
         let data_bitmap = node.data_bitmap();
         let mut count_delta: i64 = 0;
 
-        // Push every member's coverage down through the heap. `covered_by_member` holds the data
-        // bits whose strict ancestor in this node is a member, and `children_under_member` holds
-        // the child slots sitting under such a member. A child under a member is redundant, so it
-        // is never recursed into. Nothing is mutated here; this is pure analysis.
-        let mut covered_by_member = 0u32;
-        covered_by_member |= push_l0(data_bitmap | covered_by_member);
-        covered_by_member |= push_l1(data_bitmap | covered_by_member);
-        covered_by_member |= push_l2(data_bitmap | covered_by_member);
-        covered_by_member |= push_l3(data_bitmap | covered_by_member);
-        let children_under_member = push_l4(data_bitmap | covered_by_member);
+        // `covered_by_member` are the data bits whose strict ancestor here is a member;
+        // `children_under_member` are the child slots under such a member, redundant so never
+        // recursed into. Nothing is mutated here; this is pure analysis.
+        let (covered_by_member, children_under_member) = member_coverage(data_bitmap);
 
         // Recurse into the children that are not already covered by a member, collecting which of
         // them end up fully covered.
@@ -171,40 +253,16 @@ impl Table<()> {
             }
         }
 
-        // Fold coverage upward: `coverage` bit `b` means the whole range of `b` is covered, with
-        // merges of adjacent siblings cascading up the levels.
-        let mut coverage = data_bitmap;
-        coverage |= fold_children(child_coverage);
-        coverage |= fold_l4(coverage);
-        coverage |= fold_l3(coverage);
-        coverage |= fold_l2(coverage);
-        coverage |= fold_l1(coverage);
+        let coverage = fold_coverage(data_bitmap, child_coverage);
 
         // Keep a covered bit only if no ancestor covers it. A covering ancestor is either
         // merge-covered, in which case its coverage reaches contiguously down to the immediate
         // parent (`parent_coverage`), or a member (`covered_by_member`).
-        let parent_coverage =
-            push_l0(coverage) | push_l1(coverage) | push_l2(coverage) | push_l3(coverage);
-        let keep = coverage & !parent_coverage & !covered_by_member;
+        let keep = coverage & !parent_coverage(coverage) & !covered_by_member;
 
-        // Drop the members that are no longer kept, highest bit first so lower bits keep their raw
-        // offset while the data allocation compacts.
-        let bits_to_remove = data_bitmap & !keep;
-        for bit in (0..NUM_DATA as u32).rev() {
-            if bits_to_remove & (1 << bit) != 0 {
-                let data_idx = DataIdx {
-                    node: loc,
-                    bit,
-                    depth,
-                };
-                // SAFETY: `bit` is set in the current bitmap, and data removals touch only `loc`'s
-                // data allocation, leaving `loc` (in the parent's children allocation) valid.
-                unsafe { data_idx.resolve_mut(self) }
-                    .expect("aggregate_set: data bit not set")
-                    .take();
-                count_delta -= 1;
-            }
-        }
+        // Drop the members that are no longer kept.
+        // SAFETY: every dropped bit is set in `data_bitmap`, and `loc` is valid.
+        count_delta += unsafe { self.remove_data_bits(loc, depth, data_bitmap & !keep) };
 
         // Add the merged prefixes that are kept but were not present before.
         let bits_to_insert = keep & !data_bitmap;
@@ -222,21 +280,10 @@ impl Table<()> {
         }
 
         // Free every sub-trie that now sits under a kept prefix, whether covered by a member
-        // (`children_under_member`) or by a merge (`push_l4(coverage)`). Each child is re-resolved
-        // fresh because `remove_child_at` reallocates `loc`'s children allocation.
+        // (`children_under_member`) or by a merge (`push_l4(coverage)`).
         let absorbed_children = (children_under_member | push_l4(coverage)) & node.child_bitmap();
-        for child_bit in 0..NUM_CHILDREN as u32 {
-            if absorbed_children & (1 << child_bit) != 0 {
-                // SAFETY: `loc` is valid; `child` re-reads the current bitmap, so `child_location`
-                // points into the live children allocation even after prior removals.
-                unsafe {
-                    if let Some(child_location) = self.child(loc, child_bit) {
-                        count_delta -= self.clear_node_and_children(child_location) as i64;
-                        self.remove_child_at(loc, child_bit);
-                    }
-                }
-            }
-        }
+        // SAFETY: `loc` is valid.
+        count_delta += unsafe { self.free_children(loc, absorbed_children) };
 
         (coverage & 1 != 0, count_delta)
     }
@@ -262,15 +309,9 @@ impl Table<()> {
         let data_bitmap = node.data_bitmap();
         let mut count_delta: i64 = 0;
 
-        // Push membership down the heap: `covered` holds the data bits whose strict ancestor in
-        // this node is a member; `children_under_member` holds the child slots sitting under such a
-        // member (their entire sub-trie is redundant).
-        let mut covered = 0u32;
-        covered |= push_l0(data_bitmap | covered);
-        covered |= push_l1(data_bitmap | covered);
-        covered |= push_l2(data_bitmap | covered);
-        covered |= push_l3(data_bitmap | covered);
-        let children_under_member = push_l4(data_bitmap | covered);
+        // `covered` are the data bits whose strict ancestor here is a member; `children_under_member`
+        // are the child slots sitting under such a member (their entire sub-trie is redundant).
+        let (covered, children_under_member) = member_coverage(data_bitmap);
 
         // Recurse only into children not covered by a member here.
         for child in node.child_locs() {
@@ -283,42 +324,143 @@ impl Table<()> {
             count_delta += unsafe { self.aggregate_consistent_set(child, depth + K) };
         }
 
-        // Drop the members covered by an ancestor member in this node. For a set `T = ()` the cell
-        // allocator is a no-op and `resolve_mut` recomputes the slot from the live bitmap on each
-        // call, so the removal order is irrelevant.
-        let bits_to_remove = data_bitmap & covered;
-        for bit in 0..NUM_DATA as u32 {
-            if bits_to_remove & (1 << bit) != 0 {
-                let data_idx = DataIdx {
-                    node: loc,
-                    bit,
-                    depth,
-                };
-                // SAFETY: `bit` is set in the current bitmap, and data removals touch only `loc`'s
-                // data allocation, leaving `loc` (in the parent's children allocation) valid.
-                unsafe { data_idx.resolve_mut(self) }
-                    .expect("aggregate_consistent_set: data bit not set")
-                    .take();
-                count_delta -= 1;
-            }
-        }
+        // Drop the members covered by an ancestor member in this node.
+        // SAFETY: every dropped bit is set in `data_bitmap`, and `loc` is valid.
+        count_delta += unsafe { self.remove_data_bits(loc, depth, data_bitmap & covered) };
 
-        // Free the sub-tries that sit under a member here. Each child is re-resolved fresh because
-        // `remove_child_at` reallocates `loc`'s children allocation.
+        // Free the sub-tries that sit under a member here.
+        // SAFETY: `loc` is valid.
+        count_delta += unsafe { self.free_children(loc, children_under_member) };
+
+        count_delta
+    }
+}
+
+impl<T: Clone + Eq> Table<T> {
+    /// Find the covering value for each slot of the 31-slot heap, and whether the slot is redundant
+    /// (the value-aware analog of [`member_coverage`]). Returns `(covering_value, redundant)`:
+    ///
+    /// * `covering_value[b]` is the value covering position `b` *including* `b`'s own member: the
+    ///   member's value if `b` is present, otherwise the value reaching `b` from above. The value
+    ///   covering `b` from *strictly* above is therefore `covering_value[parent(b)]` (or `inherited`
+    ///   for `b == 0`).
+    /// * `redundant` is the set of present members whose value equals the value covering them from
+    ///   strictly above, i.e. the members an ancestor already accounts for.
+    ///
+    /// Parents have a smaller heap index than their children, so a single forward pass fills them
+    /// first. No clones: the returned array borrows both `self` and `inherited`.
+    ///
+    /// # Safety
+    /// `loc` must be valid and `data_bitmap` must be its live data bitmap.
+    pub(crate) unsafe fn covering_values<'a>(
+        &'a self,
+        loc: Loc,
+        depth: u32,
+        data_bitmap: u32,
+        inherited: Option<&'a T>,
+    ) -> ([Option<&'a T>; NUM_DATA], u32) {
+        let mut covering_value: [Option<&T>; NUM_DATA] = [None; NUM_DATA];
+        let mut redundant = 0u32;
+        for b in 0..NUM_DATA {
+            let from_above = if b == 0 {
+                inherited
+            } else {
+                covering_value[(b - 1) / 2]
+            };
+            covering_value[b] = if data_bitmap & (1 << b) != 0 {
+                // SAFETY: bit `b` is set and the node is unmodified during this read scan.
+                let present = unsafe { DataIdx { node: loc, bit: b as u32, depth }.resolve(self) }
+                    .expect("covering_values: data bit not set");
+                let val = present.get();
+                if Some(val) == from_above {
+                    redundant |= 1 << b;
+                }
+                Some(val)
+            } else {
+                from_above
+            };
+        }
+        (covering_value, redundant)
+    }
+
+    /// The covering value handed to each present child of `node`, as owned clones (the only clones a
+    /// value-aware aggregation makes). Child slot `c` sits below level-4 data bit `15 + c / 2`, so it
+    /// is covered by `covering_value[15 + c / 2]`; absent children get `None`.
+    pub(crate) fn child_cover(
+        node: &MultiBitNode,
+        covering_value: &[Option<&T>; NUM_DATA],
+    ) -> [Option<T>; NUM_CHILDREN] {
+        std::array::from_fn(|c| {
+            if node.has_child_bit(c as u32) {
+                covering_value[15 + c / 2].cloned()
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Drop-only, value-aware aggregation of the sub-trie rooted at `loc`: remove every entry whose
+    /// nearest covering ancestor entry has the **same value**, without merging anything.
+    ///
+    /// Preserves a stronger invariant than the merging `aggregate`: for every prefix `p`,
+    /// `before.get_lpm(p)` and `after.get_lpm(p)` yield the same value (and `Some`/`None`); only the
+    /// matched prefix may change. Unlike the set variant we recurse into *every* child, because a
+    /// covered child may still hold a differing-value entry that must survive.
+    ///
+    /// `inherited` is the value of the nearest covering ancestor entry (`None` if uncovered), passed
+    /// by owned clone so no borrow of `self` is held across the recursion. Returns
+    /// `(node_is_now_empty, count_delta)`: the first tells the caller to free this node, the second
+    /// is the signed change in the number of stored elements.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location.
+    pub(crate) unsafe fn aggregate_consistent_map(
+        &mut self,
+        loc: Loc,
+        depth: u32,
+        inherited: Option<T>,
+    ) -> (bool, i64) {
+        let node = *self.node(loc);
+        let data_bitmap = node.data_bitmap();
+        let mut count_delta: i64 = 0;
+
+        // Drop-only: an entry is redundant exactly when it equals its strict-ancestor covering value.
+        // SAFETY: `data_bitmap` is `loc`'s live bitmap and the node is unmodified during this read.
+        let (covering_value, bits_to_remove) =
+            unsafe { self.covering_values(loc, depth, data_bitmap, inherited.as_ref()) };
+
+        // The covering value handed to each present child (the only clones we make).
+        let mut child_cover = Self::child_cover(&node, &covering_value);
+
+        // Recurse into every child, then free the ones that came back empty, in a single pass.
+        // (`covering_value` is dropped here: its last use was building `child_cover`, releasing the
+        // shared borrow of `self`.) We iterate by `child_bit` and re-resolve `self.child(..)` each step
+        // because `remove_child_at` reallocates `loc`'s children allocation.
         for child_bit in 0..NUM_CHILDREN as u32 {
-            if children_under_member & (1 << child_bit) != 0 {
-                // SAFETY: `loc` is valid; `child` re-reads the current bitmap, so `child_loc`
-                // points into the live children allocation even after prior removals.
-                unsafe {
-                    if let Some(child_loc) = self.child(loc, child_bit) {
-                        count_delta -= self.clear_node_and_children(child_loc) as i64;
-                        self.remove_child_at(loc, child_bit);
-                    }
+            // SAFETY: `loc` is valid; `child` re-reads the current bitmap.
+            if let Some(child_loc) = unsafe { self.child(loc, child_bit) } {
+                let child_inherited = child_cover[child_bit as usize].take();
+                // SAFETY: `child_loc` was just resolved; recursing only touches that child's
+                // sub-trie, never `loc`'s allocations beyond what we free below.
+                let (child_empty, delta) =
+                    unsafe { self.aggregate_consistent_map(child_loc, depth + K, child_inherited) };
+                count_delta += delta;
+                if child_empty {
+                    // SAFETY: an empty node owns no data/children allocations, so detaching it from
+                    // `loc` (which compacts it out of `loc`'s children block) fully frees it.
+                    unsafe { self.remove_child_at(loc, child_bit) };
                 }
             }
         }
 
-        count_delta
+        // Drop the redundant entries.
+        // SAFETY: every bit in `bits_to_remove` is set in `data_bitmap`, and `loc` is valid.
+        count_delta += unsafe { self.remove_data_bits(loc, depth, bits_to_remove) };
+
+        // Report whether this node is now empty, so the caller can free it.
+        let node = self.node(loc);
+        let empty = node.data_bitmap() == 0 && node.child_bitmap() == 0;
+        (empty, count_delta)
     }
 }
 

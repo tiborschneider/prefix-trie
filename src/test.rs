@@ -752,6 +752,144 @@ mod t {
     }
 
     #[test]
+    fn map_aggregate_consistent_drops_same_value_descendant<P: Prefix + Copy + PartialEq>() {
+        // A more specific entry with the same value as its covering entry is redundant.
+        let mut map = Map::<P>::from_iter([(ip("10.0.0.0/16"), 1), (ip("10.0.1.0/24"), 1)]);
+        map.aggregate_consistent();
+        assert_eq!(Vec::from_iter(&map), vec![(ip("10.0.0.0/16"), &1)]);
+        assert_eq!(map.len(), 1);
+        assert!(map.check_memory_alloc());
+    }
+
+    #[test]
+    fn map_aggregate_consistent_keeps_diff_value_descendant<P: Prefix + Copy + PartialEq>() {
+        // A more specific entry with a different value is a real exception and is kept.
+        let original = [(ip("10.0.0.0/16"), 1), (ip("10.0.1.0/24"), 2)];
+        let mut map = Map::<P>::from_iter(original);
+        map.aggregate_consistent();
+        assert_eq!(
+            Vec::from_iter(&map),
+            vec![(ip("10.0.0.0/16"), &1), (ip("10.0.1.0/24"), &2)]
+        );
+    }
+
+    #[test]
+    fn map_aggregate_consistent_keeps_equal_siblings<P: Prefix + Copy + PartialEq>() {
+        // Drop-only never merges, even when sibling values are equal.
+        let original = [(ip("10.0.0.0/24"), 1), (ip("10.0.1.0/24"), 1)];
+        let mut map = Map::<P>::from_iter(original);
+        map.aggregate_consistent();
+        assert_eq!(
+            Vec::from_iter(&map),
+            vec![(ip("10.0.0.0/24"), &1), (ip("10.0.1.0/24"), &1)]
+        );
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn map_aggregate_consistent_drops_chain<P: Prefix + Copy + PartialEq>() {
+        let mut map = Map::<P>::from_iter([
+            (ip("10.0.0.0/8"), 1),
+            (ip("10.0.0.0/16"), 1),
+            (ip("10.0.0.0/24"), 1),
+        ]);
+        map.aggregate_consistent();
+        assert_eq!(Vec::from_iter(&map), vec![(ip("10.0.0.0/8"), &1)]);
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn map_aggregate_consistent_chain_mixed_values<P: Prefix + Copy + PartialEq>() {
+        // /16 differs from its covering /8 -> kept. /24 equals its covering /16 -> dropped.
+        let mut map = Map::<P>::from_iter([
+            (ip("10.0.0.0/8"), 1),
+            (ip("10.0.0.0/16"), 2),
+            (ip("10.0.0.0/24"), 2),
+        ]);
+        map.aggregate_consistent();
+        assert_eq!(
+            Vec::from_iter(&map),
+            vec![(ip("10.0.0.0/8"), &1), (ip("10.0.0.0/16"), &2)]
+        );
+        assert_eq!(map.len(), 2);
+        assert!(map.check_memory_alloc());
+    }
+
+    #[test]
+    fn map_aggregate_consistent_across_node_boundary<P: Prefix + Copy + PartialEq>() {
+        // /8 (depth-5 node) covers /11 (depth-10 node). Same value -> dropped.
+        let mut same = Map::<P>::from_iter([(ip("10.0.0.0/8"), 5), (ip("10.0.0.0/11"), 5)]);
+        same.aggregate_consistent();
+        assert_eq!(Vec::from_iter(&same), vec![(ip("10.0.0.0/8"), &5)]);
+        assert!(same.check_memory_alloc());
+
+        // Different value across the boundary -> both kept.
+        let mut diff = Map::<P>::from_iter([(ip("10.0.0.0/8"), 5), (ip("10.0.0.0/11"), 6)]);
+        diff.aggregate_consistent();
+        assert_eq!(
+            Vec::from_iter(&diff),
+            vec![(ip("10.0.0.0/8"), &5), (ip("10.0.0.0/11"), &6)]
+        );
+    }
+
+    #[test]
+    fn map_aggregate_consistent_empty_is_noop<P: Prefix + Copy + PartialEq>() {
+        let mut map = Map::<P>::new();
+        map.aggregate_consistent();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn map_aggregate_consistent_preserves_lpm<P: Prefix + Copy + PartialEq>() {
+        let entries = [
+            (ip("10.0.0.0/8"), 1),
+            (ip("10.0.0.0/16"), 1), // redundant (same as /8)
+            (ip("10.0.5.0/24"), 2), // exception
+            (ip("10.0.8.0/23"), 1), // redundant (same as /8)
+            (ip("11.0.0.0/24"), 3),
+        ];
+        let original = Map::<P>::from_iter(entries);
+        let mut map = original.clone();
+        map.aggregate_consistent();
+
+        // `get_lpm` must return the same *value* (and Some/None) for every probed prefix.
+        let probes = [
+            ip("10.0.0.0/8"),
+            ip("10.0.0.0/16"),
+            ip("10.0.5.0/24"),
+            ip("10.0.5.128/25"),
+            ip("10.0.8.0/23"),
+            ip("10.0.9.0/24"),
+            ip("11.0.0.0/24"),
+            ip("10.255.255.255/32"),
+            ip("9.0.0.0/32"),
+            ip("12.0.0.0/32"),
+        ];
+        for p in probes {
+            assert_eq!(
+                map.get_lpm(&p).map(|(_, v)| *v),
+                original.get_lpm(&p).map(|(_, v)| *v),
+                "lpm value changed for {p:?}",
+            );
+        }
+        assert!(map.check_memory_alloc());
+    }
+
+    #[test]
+    fn map_aggregate_consistent_is_idempotent<P: Prefix + Copy + PartialEq>() {
+        let mut map = Map::<P>::from_iter([
+            (ip("10.0.0.0/8"), 1),
+            (ip("10.0.0.0/16"), 1),
+            (ip("10.0.1.0/24"), 2),
+            (ip("10.1.0.0/16"), 3),
+        ]);
+        map.aggregate_consistent();
+        let once = Vec::from_iter(map.iter().map(|(p, v)| (p, *v)));
+        map.aggregate_consistent();
+        assert_eq!(Vec::from_iter(map.iter().map(|(p, v)| (p, *v))), once);
+    }
+
+    #[test]
     fn regression_free_list_on_parent_collapse<P: Prefix + Copy + PartialEq>() {
         // Regression test for issue #23: Memory leak when removing leaf nodes
 

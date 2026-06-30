@@ -674,6 +674,46 @@ where
         self.count -= removed;
     }
 
+    /// Removes every entry whose nearest covering ancestor (a less specific prefix) maps to the
+    /// **same value**, without merging anything.
+    ///
+    /// **Invariant**: for *any* prefix `p`, `before.get_lpm(p)` and `after.get_lpm(p)` return the
+    /// same value (the matched prefix may become less specific). A dropped entry is always still
+    /// covered by the ancestor that made it redundant, so longest-prefix-match results are
+    /// unchanged. Because it never introduces new prefixes, it also commutes with later insertions.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixMap;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("10.0.0.0/16".parse()?, 1);
+    /// pm.insert("10.0.1.0/24".parse()?, 1); // same value as 10.0.0.0/16 -> dropped
+    /// pm.insert("10.0.2.0/24".parse()?, 2); // different value -> kept
+    /// pm.aggregate_consistent();
+    /// assert_eq!(
+    ///     pm.iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         ("10.0.0.0/16".parse()?, &1),
+    ///         ("10.0.2.0/24".parse()?, &2),
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn aggregate_consistent(&mut self)
+    where
+        T: Clone + Eq,
+    {
+        // SAFETY: `Loc::root()` is always a valid, live node location.
+        let (_, count_delta) =
+            unsafe { self.table.aggregate_consistent_map(Loc::root(), 0, None) };
+        self.count = (self.count as i64 + count_delta) as usize;
+    }
+
     /// Iterate over all entries in the map that covers the given `prefix` (including `prefix`
     /// itself if that is present in the map). The returned iterator yields `(P, &'a T)`, with
     /// reconstructed prefixes `P`.
