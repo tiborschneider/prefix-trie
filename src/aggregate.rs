@@ -782,8 +782,8 @@ impl<T: Clone + Ord> Table<T> {
         let (covering_value, _) =
             unsafe { self.covering_values(loc, depth, node.data_bitmap(), covering_inherited) };
         // Snapshot the covering value of each of the 16 level-4 bits before we start mutating.
-        let child_covering: Vec<Option<T>> =
-            (0..16).map(|j| covering_value[15 + j].cloned()).collect();
+        let child_covering: [Option<T>; 16] =
+            std::array::from_fn(|j| covering_value[15 + j].cloned());
 
         // Walk the heap top-down: assign every bit and edit its entry.
         // SAFETY: `loc` is valid and `node` is its snapshot.
