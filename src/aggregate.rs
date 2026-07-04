@@ -493,6 +493,8 @@ impl<T: Clone + Eq> Table<T> {
 enum CandidateSet<T> {
     /// The region contains uncovered space; no covering entry may be placed at or above it.
     ContainsHole,
+    /// The region is fully covered with a single value.
+    One(T),
     /// The region is fully covered; these are the candidate values.
     Values(BTreeSet<T>),
 }
@@ -503,13 +505,27 @@ impl<T: Clone + Ord> CandidateSet<T> {
     fn combine(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::ContainsHole, _) | (_, Self::ContainsHole) => Self::ContainsHole,
+            (Self::One(l), Self::One(r)) if l == r => Self::One(l.clone()),
+            (Self::One(l), Self::One(r)) => {
+                Self::Values([l.clone(), r.clone()].into_iter().collect())
+            }
+            (Self::One(s), Self::Values(m)) | (Self::Values(m), Self::One(s)) if m.contains(s) => {
+                Self::One(s.clone())
+            }
+            (Self::One(s), Self::Values(m)) | (Self::Values(m), Self::One(s)) => {
+                let mut m = m.clone();
+                m.insert(s.clone());
+                Self::Values(m)
+            }
             (Self::Values(l), Self::Values(r)) => {
                 let intersection: BTreeSet<T> = l.intersection(r).cloned().collect();
-                Self::Values(if intersection.is_empty() {
-                    l.union(r).cloned().collect()
+                if intersection.is_empty() {
+                    Self::Values(l.union(r).cloned().collect())
+                } else if intersection.len() == 1 {
+                    Self::One(intersection.into_iter().next().unwrap())
                 } else {
-                    intersection
-                })
+                    Self::Values(intersection)
+                }
             }
         }
     }
@@ -530,9 +546,9 @@ impl<T: Clone + Ord, F: Fn() -> T + Copy> Aggregation<F> {
     /// The candidate set of a leaf whose covering value from above is `covering`.
     fn leaf_set(self, covering: Option<&T>) -> CandidateSet<T> {
         match (covering, self) {
-            (Some(v), _) => CandidateSet::Values(BTreeSet::from([v.clone()])),
+            (Some(v), _) => CandidateSet::One(v.clone()),
             (None, Aggregation::Drop) => CandidateSet::ContainsHole,
-            (None, Aggregation::Fill(f)) => CandidateSet::Values(BTreeSet::from([f()])),
+            (None, Aggregation::Fill(f)) => CandidateSet::One(f()),
         }
     }
 
@@ -802,52 +818,85 @@ impl<T: Clone + Ord> Table<T> {
             }
 
             // Inherit: the covering ancestor already forwards a value in the set; drop any entry.
+            CandidateSet::One(s) if parent_assigned.is_some_and(|v| v == s) => {
+                (parent_assigned, unsafe {
+                    self.rewrite_bit_remove(loc, depth, b, present)
+                })
+            }
             CandidateSet::Values(s) if parent_assigned.is_some_and(|v| s.contains(v)) => {
-                if present {
-                    // SAFETY: bit `b` is set; `resolve_mut` re-reads the live bitmap.
-                    unsafe {
-                        DataIdx {
-                            node: loc,
-                            bit: b as u32,
-                            depth,
-                        }
-                        .resolve_mut(self)
-                    }
-                    .expect("rewrite: data bit not set")
-                    .take();
-                    (parent_assigned, -1)
-                } else {
-                    (parent_assigned, 0)
-                }
+                (parent_assigned, unsafe {
+                    self.rewrite_bit_remove(loc, depth, b, present)
+                })
             }
 
             // Otherwise emit `min(s)` here, overwriting or inserting (the one clone into the trie).
+            CandidateSet::One(winner) => self.rewrite_bit_insert(loc, depth, b, present, winner),
             CandidateSet::Values(s) => {
                 let winner = s.iter().next().expect("Values holds a non-empty set");
-                if present {
-                    // SAFETY: bit `b` is set; `resolve_mut` re-reads the live bitmap.
-                    unsafe {
-                        DataIdx {
-                            node: loc,
-                            bit: b as u32,
-                            depth,
-                        }
-                        .resolve_mut(self)
-                    }
-                    .expect("rewrite: data bit not set")
-                    .replace(winner.clone());
-                    (Some(winner), 0)
-                } else {
-                    EmptyMut {
-                        table: self,
-                        node: loc,
-                        data_bit: b as u32,
-                        depth,
-                    }
-                    .insert(winner.clone());
-                    (Some(winner), 1)
-                }
+                self.rewrite_bit_insert(loc, depth, b, present, winner)
             }
+        }
+    }
+
+    /// Remove the value at the given position, returning the delta in number of elements.
+    ///
+    /// # Safety
+    /// `loc` must be valid and `node` must be its live snapshot.
+    #[inline]
+    unsafe fn rewrite_bit_remove(&mut self, loc: Loc, depth: u32, b: usize, present: bool) -> i64 {
+        if !present {
+            return 0;
+        }
+        // SAFETY: bit `b` is set; `resolve_mut` re-reads the live bitmap.
+        unsafe {
+            DataIdx {
+                node: loc,
+                bit: b as u32,
+                depth,
+            }
+            .resolve_mut(self)
+        }
+        .expect("rewrite: data bit not set")
+        .take();
+        -1
+    }
+
+    /// replace the value at the given position, returning the new value and the delta in number of
+    /// elements.
+    ///
+    /// # Safety
+    /// `loc` must be valid and `node` must be its live snapshot.
+    #[inline]
+    unsafe fn rewrite_bit_insert<'x>(
+        &mut self,
+        loc: Loc,
+        depth: u32,
+        b: usize,
+        present: bool,
+        winner: &'x T,
+    ) -> (Option<&'x T>, i64) {
+        if present {
+            // SAFETY: bit `b` is set; `resolve_mut` re-reads the live bitmap.
+            unsafe {
+                DataIdx {
+                    node: loc,
+                    bit: b as u32,
+                    depth,
+                }
+                .resolve_mut(self)
+            }
+            .expect("rewrite: data bit not set")
+            .replace(winner.clone());
+            (Some(winner), 0)
+        } else {
+            EmptyMut {
+                table: self,
+                node: loc,
+                data_bit: b as u32,
+                depth,
+            }
+            .insert(winner.clone());
+            (Some(winner), 1)
         }
     }
 
