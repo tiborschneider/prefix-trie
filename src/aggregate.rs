@@ -21,9 +21,11 @@
 //! of an adjacent pair can never fabricate a bit outside the pair); push-down **does** need one,
 //! since its global `<<` would otherwise drag deeper levels up into the target range.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::{
     allocator::Loc,
-    node::MultiBitNode,
+    node::{extend_repr, Key, MultiBitNode},
     table::{DataIdx, EmptyMut, Table, K, NUM_CHILDREN, NUM_DATA},
 };
 
@@ -177,9 +179,16 @@ impl<T> Table<T> {
             if bits & (1 << bit) != 0 {
                 // SAFETY: `bit` is set in the current bitmap, and data removals touch only `loc`'s
                 // data allocation, leaving `loc` (in the parent's children allocation) valid.
-                unsafe { DataIdx { node: loc, bit, depth }.resolve_mut(self) }
-                    .expect("remove_data_bits: data bit not set")
-                    .take();
+                unsafe {
+                    DataIdx {
+                        node: loc,
+                        bit,
+                        depth,
+                    }
+                    .resolve_mut(self)
+                }
+                .expect("remove_data_bits: data bit not set")
+                .take();
                 count_delta -= 1;
             }
         }
@@ -369,8 +378,15 @@ impl<T: Clone + Eq> Table<T> {
             };
             covering_value[b] = if data_bitmap & (1 << b) != 0 {
                 // SAFETY: bit `b` is set and the node is unmodified during this read scan.
-                let present = unsafe { DataIdx { node: loc, bit: b as u32, depth }.resolve(self) }
-                    .expect("covering_values: data bit not set");
+                let present = unsafe {
+                    DataIdx {
+                        node: loc,
+                        bit: b as u32,
+                        depth,
+                    }
+                    .resolve(self)
+                }
+                .expect("covering_values: data bit not set");
                 let val = present.get();
                 if Some(val) == from_above {
                     redundant |= 1 << b;
@@ -461,6 +477,445 @@ impl<T: Clone + Eq> Table<T> {
         let node = self.node(loc);
         let empty = node.data_bitmap() == 0 && node.child_bitmap() == 0;
         (empty, count_delta)
+    }
+}
+
+// ===========================================================================
+// ORTC: value-aware `aggregate` and `aggregate_ortc`.
+// ===========================================================================
+
+/// A position's ORTC candidate set.
+///
+/// `ContainsHole` is absorbing under [`CandidateSet::combine`]: once a region contains uncovered
+/// space, no single covering value may represent it. This is exactly what lets `aggregate` never
+/// cover a hole (a flat set of `Option<T>` would drop the hole on an intersection).
+#[derive(Clone, PartialEq, Eq)]
+enum CandidateSet<T> {
+    /// The region contains uncovered space; no covering entry may be placed at or above it.
+    ContainsHole,
+    /// The region is fully covered; these are the candidate values.
+    Values(BTreeSet<T>),
+}
+
+impl<T: Clone + Ord> CandidateSet<T> {
+    /// The candidate set of the parent of two positions: `l ∩ r` if non-empty, else `l ∪ r`; a hole
+    /// in either child poisons the result.
+    fn combine(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::ContainsHole, _) | (_, Self::ContainsHole) => Self::ContainsHole,
+            (Self::Values(l), Self::Values(r)) => {
+                let intersection: BTreeSet<T> = l.intersection(r).cloned().collect();
+                Self::Values(if intersection.is_empty() {
+                    l.union(r).cloned().collect()
+                } else {
+                    intersection
+                })
+            }
+        }
+    }
+}
+
+/// The single knob distinguishing the two aggregations: what an uncovered leaf forwards to.
+///
+/// `Fill` carries a copyable factory producing the default value on demand.
+#[derive(Clone, Copy)]
+pub(crate) enum Aggregation<F> {
+    /// `aggregate`: uncovered space stays uncovered.
+    Drop,
+    /// `aggregate_ortc`: uncovered space forwards to `F()`.
+    Fill(F),
+}
+
+impl<T: Clone + Ord, F: Fn() -> T + Copy> Aggregation<F> {
+    /// The candidate set of a leaf whose covering value from above is `covering`.
+    fn leaf_set(self, covering: Option<&T>) -> CandidateSet<T> {
+        match (covering, self) {
+            (Some(v), _) => CandidateSet::Values(BTreeSet::from([v.clone()])),
+            (None, Aggregation::Drop) => CandidateSet::ContainsHole,
+            (None, Aggregation::Fill(f)) => CandidateSet::Values(BTreeSet::from([f()])),
+        }
+    }
+
+    /// The single value a uniform leaf region forwards to (the scalar form of [`Self::leaf_set`]).
+    fn leaf_value(self, covering: Option<&T>) -> Option<T> {
+        match (covering, self) {
+            (Some(v), _) => Some(v.clone()),
+            (None, Aggregation::Drop) => None,
+            (None, Aggregation::Fill(f)) => Some(f()),
+        }
+    }
+}
+
+/// Candidate sets from Walk A, keyed by the stable position identity `(node_key, depth, bit)`. Holds
+/// only positions whose set differs from their parent's; elsewhere Walk B carries the parent set.
+type ChangeSets<R, T> = BTreeMap<(R, u32, u32), CandidateSet<T>>;
+
+impl<T: Clone + Ord> Table<T> {
+    /// Rewrite the trie into an equivalent minimal one (ORTC, Draves and King). `mode` chooses
+    /// whether uncovered space stays uncovered (`aggregate`) or is filled with a default
+    /// (`aggregate_ortc`).
+    ///
+    /// Returns the change in the number of stored entries, as a signed `i64` for the caller to add
+    /// to its `count`.
+    ///
+    /// For [`Aggregation::Drop`] this is always `<= 0`: forwarding is preserved exactly, so the
+    /// original is already a valid representation and the minimal result is never larger.
+    ///
+    /// For [`Aggregation::Fill`] it is `<= 1`: filling previously-uncovered space with the default
+    /// may add a single default route (the `/0`; an empty map becomes one `/0` entry, `+1`), while
+    /// every other emitted entry only replaces or merges existing ones.
+    pub(crate) fn aggregate_map<R, F>(&mut self, mode: Aggregation<F>) -> i64
+    where
+        R: Key,
+        F: Fn() -> T + Copy,
+    {
+        let mut sets: ChangeSets<R, T> = ChangeSets::new();
+
+        // Walk A (bottom-up): candidate set per position; store only where it differs from the
+        // parent. Returns the set for the whole trie.
+        // SAFETY: the root node always exists.
+        let root_set =
+            unsafe { self.collect_sets(Loc::root(), 0, R::zero(), None, mode, &mut sets) };
+
+        // Walk B (top-down): assign a value to every position and edit the trie to match. The value
+        // above the root is `None`, so the /0 position itself decides whether a default route is
+        // emitted.
+        // SAFETY: the root exists; `sets` describes the same trie we are about to edit.
+        unsafe {
+            self.rewrite(
+                Loc::root(),
+                0,
+                R::zero(),
+                None,
+                &root_set,
+                None,
+                mode,
+                &sets,
+            )
+        }
+    }
+
+    /// Walk A. Fills `sets` and returns the candidate set for the subtree rooted at `loc`.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location.
+    unsafe fn collect_sets<R, F>(
+        &self,
+        loc: Loc,
+        depth: u32,
+        key: R,
+        covering_inherited: Option<&T>,
+        mode: Aggregation<F>,
+        sets: &mut ChangeSets<R, T>,
+    ) -> CandidateSet<T>
+    where
+        R: Key,
+        F: Fn() -> T + Copy,
+    {
+        let node = *self.node(loc);
+        // SAFETY: `data_bitmap` is `loc`'s live bitmap and the node is unmodified during this read.
+        let (covering_value, _) =
+            unsafe { self.covering_values(loc, depth, node.data_bitmap(), covering_inherited) };
+
+        // The candidate set at each of the 32 child slots: recurse into a present child, or take the
+        // leaf set of the uniform region an absent slot covers.
+        let mut child_sets: Vec<CandidateSet<T>> = Vec::with_capacity(NUM_CHILDREN);
+        for c in 0..NUM_CHILDREN {
+            let covering = covering_value[15 + c / 2];
+            // SAFETY: `loc` is valid; the child resolves from the live, unmodified node.
+            let set = if let Some(child) = unsafe { self.child(loc, c as u32) } {
+                let child_key = extend_repr(key, depth, c as u32);
+                unsafe { self.collect_sets(child, depth + K, child_key, covering, mode, sets) }
+            } else {
+                mode.leaf_set(covering)
+            };
+            child_sets.push(set);
+        }
+
+        // Fold the 31-bit internal nodes: level-4 bits from child-slot pairs, then the rest bottom-up.
+        let mut node_sets: [Option<CandidateSet<T>>; NUM_DATA] = std::array::from_fn(|_| None);
+        for j in 0..16 {
+            node_sets[15 + j] = Some(child_sets[2 * j].combine(&child_sets[2 * j + 1]));
+        }
+        for b in (0..15).rev() {
+            let merged = node_sets[2 * b + 1]
+                .as_ref()
+                .unwrap()
+                .combine(node_sets[2 * b + 2].as_ref().unwrap());
+            node_sets[b] = Some(merged);
+        }
+
+        // Store only the positions whose set differs from their parent's. Present children first,
+        // since they read the level-4 heap sets; this consumes `child_root`.
+        for (c, set) in child_sets.into_iter().enumerate() {
+            if node.has_child_bit(c as u32) && set != *node_sets[15 + c / 2].as_ref().unwrap() {
+                let child_key = extend_repr(key, depth, c as u32);
+                sets.insert((child_key, depth + K, 0), set);
+            }
+        }
+        // Then the internal bits, bottom-up so a set taken for storage is never needed again as a
+        // parent. A node never stores its own bit 0: the parent stores it (as the child above), and
+        // the root's bit 0 is passed to Walk B directly (the root will be added to the set by the
+        // parent)
+        for b in (1..NUM_DATA).rev() {
+            if node_sets[b] != node_sets[(b - 1) / 2] {
+                let set = node_sets[b].take().unwrap();
+                sets.insert((key, depth, b as u32), set);
+            }
+        }
+
+        node_sets[0].take().unwrap()
+    }
+
+    /// Walk B. Edits the subtree rooted at `loc` to match the ORTC assignment; returns the signed
+    /// change in the number of stored entries.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn rewrite<'x, R, F>(
+        &mut self,
+        loc: Loc,
+        depth: u32,
+        key: R,
+        assigned_from_above: Option<&'x T>,
+        set_from_above: &'x CandidateSet<T>,
+        covering_inherited: Option<&T>,
+        mode: Aggregation<F>,
+        sets: &'x ChangeSets<R, T>,
+    ) -> i64
+    where
+        R: Key,
+        F: Fn() -> T + Copy,
+    {
+        let node = *self.node(loc);
+        // SAFETY: `data_bitmap` is `loc`'s live bitmap and the node is unmodified at this point.
+        let (covering_value, _) =
+            unsafe { self.covering_values(loc, depth, node.data_bitmap(), covering_inherited) };
+        // Snapshot the covering value of each of the 16 level-4 bits before we start mutating.
+        let child_covering: Vec<Option<T>> =
+            (0..16).map(|j| covering_value[15 + j].cloned()).collect();
+
+        // Walk the heap top-down: assign every bit and edit its entry.
+        // SAFETY: `loc` is valid and `node` is its snapshot.
+        let (assigned, effective_sets, mut delta) = unsafe {
+            self.assign_nodes(
+                &node,
+                loc,
+                depth,
+                key,
+                assigned_from_above,
+                set_from_above,
+                sets,
+            )
+        };
+
+        // Recurse into each child slot, inheriting the assignment and set of the level-4 bit above it.
+        for c in 0..NUM_CHILDREN {
+            let above = 15 + c / 2;
+            // SAFETY: `loc` is valid.
+            delta += unsafe {
+                self.rewrite_child(
+                    loc,
+                    depth,
+                    key,
+                    c,
+                    assigned[above],
+                    effective_sets[above].unwrap(),
+                    child_covering[c / 2].as_ref(),
+                    mode,
+                    sets,
+                )
+            };
+        }
+
+        delta
+    }
+
+    /// Assign a value to every bit of `node`, top-down, editing entries as it goes.
+    ///
+    /// Returns the value assigned per bit (borrowed from the candidate sets), the set applied at
+    /// each bit (`effective_sets`, which the child slots below still need), and the count delta.
+    /// `effective_sets[b]` is the stored change-set at `b` if there is one, else the set carried
+    /// down from `b`'s parent.
+    ///
+    /// # Safety
+    /// `loc` must be valid and `node` must be its live snapshot.
+    unsafe fn assign_nodes<'x, R: Key>(
+        &mut self,
+        node: &MultiBitNode,
+        loc: Loc,
+        depth: u32,
+        key: R,
+        assigned_from_above: Option<&'x T>,
+        set_from_above: &'x CandidateSet<T>,
+        sets: &'x ChangeSets<R, T>,
+    ) -> (
+        [Option<&'x T>; NUM_DATA],               // assigned
+        [Option<&'x CandidateSet<T>>; NUM_DATA], // effective_sets
+        i64,                                     // delta
+    ) {
+        let mut assigned: [Option<&'x T>; NUM_DATA] = [None; NUM_DATA];
+        let mut effective_sets: [Option<&'x CandidateSet<T>>; NUM_DATA] = [None; NUM_DATA];
+        let mut delta = 0;
+        for b in 0..NUM_DATA {
+            let parent_assigned = if b == 0 {
+                assigned_from_above
+            } else {
+                assigned[(b - 1) / 2]
+            };
+            let parent_set = if b == 0 {
+                set_from_above
+            } else {
+                effective_sets[(b - 1) / 2].unwrap()
+            };
+            let set = sets.get(&(key, depth, b as u32)).unwrap_or(parent_set);
+            effective_sets[b] = Some(set);
+            // SAFETY: `loc` is valid and `node` is its snapshot.
+            let (value, d) = unsafe { self.rewrite_bit(node, loc, depth, b, parent_assigned, set) };
+            assigned[b] = value;
+            delta += d;
+        }
+        (assigned, effective_sets, delta)
+    }
+
+    /// Assign heap bit `b` and edit its entry. Returns `(assigned_value, count_delta)`, the assigned
+    /// value borrowed from the candidate set.
+    ///
+    /// # Safety
+    /// `loc` must be valid and `node` must be its live snapshot.
+    unsafe fn rewrite_bit<'x>(
+        &mut self,
+        node: &MultiBitNode,
+        loc: Loc,
+        depth: u32,
+        b: usize,
+        parent_assigned: Option<&'x T>,
+        set: &'x CandidateSet<T>,
+    ) -> (Option<&'x T>, i64) {
+        let present = node.has_data_bit(b as u32);
+        match set {
+            // A hole is never covered, so no entry can sit here.
+            CandidateSet::ContainsHole => {
+                debug_assert!(!present, "a hole position never holds an entry");
+                (None, 0)
+            }
+
+            // Inherit: the covering ancestor already forwards a value in the set; drop any entry.
+            CandidateSet::Values(s) if parent_assigned.is_some_and(|v| s.contains(v)) => {
+                if present {
+                    // SAFETY: bit `b` is set; `resolve_mut` re-reads the live bitmap.
+                    unsafe {
+                        DataIdx {
+                            node: loc,
+                            bit: b as u32,
+                            depth,
+                        }
+                        .resolve_mut(self)
+                    }
+                    .expect("rewrite: data bit not set")
+                    .take();
+                    (parent_assigned, -1)
+                } else {
+                    (parent_assigned, 0)
+                }
+            }
+
+            // Otherwise emit `min(s)` here, overwriting or inserting (the one clone into the trie).
+            CandidateSet::Values(s) => {
+                let winner = s.iter().next().expect("Values holds a non-empty set");
+                if present {
+                    // SAFETY: bit `b` is set; `resolve_mut` re-reads the live bitmap.
+                    unsafe {
+                        DataIdx {
+                            node: loc,
+                            bit: b as u32,
+                            depth,
+                        }
+                        .resolve_mut(self)
+                    }
+                    .expect("rewrite: data bit not set")
+                    .replace(winner.clone());
+                    (Some(winner), 0)
+                } else {
+                    EmptyMut {
+                        table: self,
+                        node: loc,
+                        data_bit: b as u32,
+                        depth,
+                    }
+                    .insert(winner.clone());
+                    (Some(winner), 1)
+                }
+            }
+        }
+    }
+
+    /// Rewrite child slot `c`: recurse into a present child, freeing it if the rewrite empties it,
+    /// or pin an absent uniform region with one entry when its value differs from the inherited one.
+    /// Returns the count delta.
+    ///
+    /// # Safety
+    /// `loc` must be valid.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn rewrite_child<'x, R, F>(
+        &mut self,
+        loc: Loc,
+        depth: u32,
+        key: R,
+        c: usize,
+        assigned_above: Option<&'x T>,
+        set_above: &'x CandidateSet<T>,
+        covering: Option<&T>,
+        mode: Aggregation<F>,
+        sets: &'x ChangeSets<R, T>,
+    ) -> i64
+    where
+        R: Key,
+        F: Fn() -> T + Copy,
+    {
+        // SAFETY: `loc` is valid; the child is resolved from the live node.
+        if let Some(child_loc) = unsafe { self.child(loc, c as u32) } {
+            let child_key = extend_repr(key, depth, c as u32);
+            // SAFETY: `child_loc` was just resolved; the recursion only touches its own sub-trie.
+            let delta = unsafe {
+                self.rewrite(
+                    child_loc,
+                    depth + K,
+                    child_key,
+                    assigned_above,
+                    set_above,
+                    covering,
+                    mode,
+                    sets,
+                )
+            };
+            let child = self.node(child_loc);
+            if child.data_bitmap() == 0 && child.child_bitmap() == 0 {
+                // SAFETY: an empty node owns no allocations; detaching it fully frees it.
+                unsafe { self.remove_child_at(loc, c as u32) };
+            }
+            delta
+        } else if let Some(value) = mode.leaf_value(covering) {
+            // Absent slot: a uniform region forwarding `value`. Needs an entry only when it would
+            // otherwise inherit something else.
+            if Some(&value) == assigned_above {
+                return 0;
+            }
+            let child_key = extend_repr(key, depth, c as u32);
+            match self.find_or_insert_mut(child_key, depth + K) {
+                Ok(present) => {
+                    present.replace(value);
+                    0
+                }
+                Err(empty) => {
+                    empty.insert(value);
+                    1
+                }
+            }
+        } else {
+            0
+        }
     }
 }
 

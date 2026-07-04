@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use crate::{allocator::Loc, Prefix};
+use crate::{aggregate::Aggregation, allocator::Loc, Prefix};
 
 mod entry;
 mod iter;
@@ -682,23 +682,28 @@ where
     /// covered by the ancestor that made it redundant, so longest-prefix-match results are
     /// unchanged. Because it never introduces new prefixes, it also commutes with later insertions.
     ///
+    /// The same map is used in the examples of [`aggregate`](Self::aggregate) and
+    /// [`aggregate_fill`](Self::aggregate_fill) to contrast the three behaviours.
+    ///
     /// ```
     /// use prefix_trie::PrefixMap;
     ///
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, u32> = PrefixMap::new();
     /// pm.insert("10.0.0.0/16".parse()?, 1);
-    /// pm.insert("10.0.1.0/24".parse()?, 1); // same value as 10.0.0.0/16 -> dropped
-    /// pm.insert("10.0.2.0/24".parse()?, 2); // different value -> kept
+    /// pm.insert("10.0.0.0/24".parse()?, 2);    // exception under 10.0.0.0/16
+    /// pm.insert("10.0.1.0/24".parse()?, 2);    // sibling of the above, same value
+    /// pm.insert("10.0.2.0/24".parse()?, 1);    // same value as 10.0.0.0/16 -> redundant
+    /// pm.insert("192.168.0.0/16".parse()?, 1); // a separate branch, same value
     /// pm.aggregate_consistent();
-    /// assert_eq!(
-    ///     pm.iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         ("10.0.0.0/16".parse()?, &1),
-    ///         ("10.0.2.0/24".parse()?, &2),
-    ///     ]
-    /// );
+    /// // Only the redundant 10.0.2.0/24 is dropped; nothing is merged.
+    /// assert_eq!(pm.iter().collect::<Vec<_>>(), vec![
+    ///     ("10.0.0.0/16".parse()?, &1),
+    ///     ("10.0.0.0/24".parse()?, &2),
+    ///     ("10.0.1.0/24".parse()?, &2),
+    ///     ("192.168.0.0/16".parse()?, &1),
+    /// ]);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
@@ -712,6 +717,103 @@ where
         let (_, count_delta) =
             unsafe { self.table.aggregate_consistent_map(Loc::root(), 0, None) };
         self.count = (self.count as i64 + count_delta) as usize;
+    }
+
+    /// Reduce the map to the fewest entries that keep every lookup unchanged.
+    ///
+    /// For any address `a` (a host prefix, i.e. one of maximum length), `self.get_lpm(&a)` resolves
+    /// to the same value as before, and to `None` exactly when it did before (only the matched prefix
+    /// may differ). Among all maps with that property this keeps the fewest entries.
+    ///
+    /// The guarantee is per address, not per prefix: entries may be merged or moved, so which entry a
+    /// prefix matches can change. Use [`aggregate_consistent`](Self::aggregate_consistent) instead to
+    /// keep every prefix matching the same entry.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixMap;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, u32> = PrefixMap::new();
+    /// pm.insert("10.0.0.0/16".parse()?, 1);
+    /// pm.insert("10.0.0.0/24".parse()?, 2);
+    /// pm.insert("10.0.1.0/24".parse()?, 2);
+    /// pm.insert("10.0.2.0/24".parse()?, 1);
+    /// pm.insert("192.168.0.0/16".parse()?, 1);
+    /// pm.aggregate();
+    /// // The siblings merge into a /23 and the redundant /24 is dropped, but the two /16 branches
+    /// // cannot merge across the uncovered space between them.
+    /// assert_eq!(pm.iter().collect::<Vec<_>>(), vec![
+    ///     ("10.0.0.0/16".parse()?, &1),
+    ///     ("10.0.0.0/23".parse()?, &2),
+    ///     ("192.168.0.0/16".parse()?, &1),
+    /// ]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn aggregate(&mut self)
+    where
+        T: Clone + Ord,
+    {
+        let delta = self.table.aggregate_map::<P::R, fn() -> T>(Aggregation::Drop);
+        self.count = (self.count as i64 + delta) as usize;
+    }
+
+    /// Reduce the map to the fewest entries, sending otherwise-uncovered addresses to `default`.
+    ///
+    /// For any address `a` (a host prefix, i.e. one of maximum length), the value of
+    /// `self.get_lpm(&a)` under `.unwrap_or_else(default)` is unchanged: covered addresses keep their
+    /// value, and uncovered addresses now resolve to `default()`. Among all maps with that property
+    /// this keeps the fewest entries.
+    ///
+    /// Because no address is left uncovered, the result is always **total**: it contains a default
+    /// route (the root prefix, e.g. `0.0.0.0/0`), so [`get_lpm`](Self::get_lpm) returns `Some` for
+    /// every address. This is the one entry [`aggregate`](Self::aggregate) never adds.
+    ///
+    /// The guarantee is per address, not per prefix: entries may be merged or moved. Use
+    /// [`aggregate_consistent`](Self::aggregate_consistent) instead to keep every prefix matching the
+    /// same entry.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixMap;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, u32> = PrefixMap::new();
+    /// pm.insert("10.0.0.0/16".parse()?, 1);
+    /// pm.insert("10.0.0.0/24".parse()?, 2);
+    /// pm.insert("10.0.1.0/24".parse()?, 2);
+    /// pm.insert("10.0.2.0/24".parse()?, 1);
+    /// pm.insert("192.168.0.0/16".parse()?, 1);
+    /// pm.aggregate_fill(|| 1);
+    /// // Filling the gaps with 1 lets both /16 branches and all uncovered space collapse into one
+    /// // default route; only the 10.0.0.0/23 = 2 exception survives.
+    /// assert_eq!(pm.iter().collect::<Vec<_>>(), vec![
+    ///     ("0.0.0.0/0".parse()?, &1),
+    ///     ("10.0.0.0/23".parse()?, &2),
+    /// ]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn aggregate_fill<F>(&mut self, default: F)
+    where
+        T: Clone + Ord,
+        F: Fn() -> T + Copy,
+    {
+        let delta = self.table.aggregate_map::<P::R, F>(Aggregation::Fill(default));
+        self.count = (self.count as i64 + delta) as usize;
+    }
+
+    /// [`aggregate_fill`](Self::aggregate_fill) with `T::default` as the fill value.
+    pub fn aggregate_fill_default(&mut self)
+    where
+        T: Clone + Ord + Default,
+    {
+        self.aggregate_fill(T::default)
     }
 
     /// Iterate over all entries in the map that covers the given `prefix` (including `prefix`

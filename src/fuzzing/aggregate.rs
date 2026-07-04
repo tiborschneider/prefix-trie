@@ -201,3 +201,53 @@ fn _aggregate_consistent_set(prefixes: Vec<TestPrefix>) -> bool {
         && aggregated.0.check_memory_alloc()
         && aggregated == twice
 }
+
+qc!(aggregate_map, _aggregate_map);
+fn _aggregate_map(entries: Vec<(TestPrefix, u8)>) -> bool {
+    let original: PrefixMap<TestPrefix, u8> = entries.into_iter().collect();
+    let mut aggregated = original.clone();
+    aggregated.aggregate();
+    let mut twice = aggregated.clone();
+    twice.aggregate();
+
+    let original_lpm = lpm_map(&original, Reduced::No).unwrap();
+    // `Reduced::Minimal` also asserts the result is irredundant and has no equal-value siblings.
+    let Some(aggregated_lpm) = lpm_map(&aggregated, Reduced::Minimal) else {
+        return false; // a redundant or mergeable entry survived
+    };
+
+    // Equal range-maps mean `get_lpm` matches for every address, covered set included: a newly
+    // covered hole would appear as an extra range and fail the comparison.
+    original_lpm == aggregated_lpm
+        && aggregated.len() == aggregated.iter().count()
+        && aggregated.check_memory_alloc()
+        && aggregated == twice
+}
+
+qc!(aggregate_fill_map, _aggregate_fill_map);
+fn _aggregate_fill_map(entries: Vec<(TestPrefix, u8)>) -> bool {
+    const DEFAULT: u8 = 0;
+    let original: PrefixMap<TestPrefix, u8> = entries.into_iter().collect();
+    let mut aggregated = original.clone();
+    aggregated.aggregate_fill(|| DEFAULT);
+    let mut twice = aggregated.clone();
+    twice.aggregate_fill(|| DEFAULT);
+
+    let original_lpm = lpm_map(&original, Reduced::No).unwrap();
+    let Some(aggregated_lpm) = lpm_map(&aggregated, Reduced::Minimal) else {
+        return false;
+    };
+
+    // Expected forwarding: `DEFAULT` across the whole space, with the original forwarding on top
+    // (this is `original.get_lpm(a).unwrap_or(DEFAULT)` for every address).
+    let mut expected = rangemap::RangeInclusiveMap::new();
+    expected.insert(0..=u32::MAX, DEFAULT);
+    for (r, v) in original_lpm.iter() {
+        expected.insert(r.clone(), *v);
+    }
+
+    aggregated_lpm == expected
+        && aggregated.len() == aggregated.iter().count()
+        && aggregated.check_memory_alloc()
+        && aggregated == twice
+}
