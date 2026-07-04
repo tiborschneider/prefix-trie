@@ -21,7 +21,7 @@
 //! of an adjacent pair can never fabricate a bit outside the pair); push-down **does** need one,
 //! since its global `<<` would otherwise drag deeper levels up into the target range.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::{
     allocator::Loc,
@@ -562,9 +562,16 @@ impl<T: Clone + Ord, F: Fn() -> T + Copy> Aggregation<F> {
     }
 }
 
-/// Candidate sets from Walk A, keyed by the stable position identity `(node_key, depth, bit)`. Holds
-/// only positions whose set differs from their parent's; elsewhere Walk B carries the parent set.
-type ChangeSets<R, T> = BTreeMap<(R, u32, u32), CandidateSet<T>>;
+/// Candidate sets from Walk A, tagged with the position identity `(node_key, depth, bit)`.
+///
+/// This is a plain append-only `Vec`, not a map: Walk A pushes entries in *descending* position
+/// order (it recurses children back-to-front and emits a node's bits high-to-low, bit 0 last), and
+/// Walk B reads them back-to-front, which is exactly *ascending* position order (its pre-order
+/// traversal visits `(repr, depth, bit)` monotonically). So Walk B consumes the `Vec` with a single
+/// cursor moving from the end toward the front, matching each position in O(1) with no search and no
+/// sort. The two walks are coupled by this ordering (see [`Table::collect_sets`] /
+/// [`Table::rewrite`]); the aggregation tests cover it.
+type ChangeSets<R, T> = Vec<((R, u32, u32), CandidateSet<T>)>;
 
 impl<T: Clone + Ord> Table<T> {
     /// Rewrite the trie into an equivalent minimal one (ORTC, Draves and King). `mode` chooses
@@ -587,28 +594,17 @@ impl<T: Clone + Ord> Table<T> {
     {
         let mut sets: ChangeSets<R, T> = ChangeSets::new();
 
-        // Walk A (bottom-up): candidate set per position; store only where it differs from the
-        // parent. Returns the set for the whole trie.
+        // Walk A (bottom-up): candidate set per position, appended in descending position order.
         // SAFETY: the root node always exists.
-        let root_set =
-            unsafe { self.collect_sets(Loc::root(), 0, R::zero(), None, mode, &mut sets) };
+        unsafe { self.collect_sets(Loc::root(), 0, R::zero(), None, mode, &mut sets) };
 
         // Walk B (top-down): assign a value to every position and edit the trie to match. The value
         // above the root is `None`, so the /0 position itself decides whether a default route is
-        // emitted.
+        // emitted. Walk B pops `sets` from the back, which visits the positions in ascending order.
         // SAFETY: the root exists; `sets` describes the same trie we are about to edit.
-        unsafe {
-            self.rewrite(
-                Loc::root(),
-                0,
-                R::zero(),
-                None,
-                &root_set,
-                None,
-                mode,
-                &sets,
-            )
-        }
+        let delta = unsafe { self.rewrite(Loc::root(), 0, R::zero(), None, None, mode, &mut sets) };
+        debug_assert!(sets.is_empty(), "every stored change-set must be consumed exactly once");
+        delta
     }
 
     /// Walk A. Fills `sets` and returns the candidate set for the subtree rooted at `loc`.
@@ -634,9 +630,10 @@ impl<T: Clone + Ord> Table<T> {
             unsafe { self.covering_values(loc, depth, node.data_bitmap(), covering_inherited) };
 
         // The candidate set at each of the 32 child slots: recurse into a present child, or take the
-        // leaf set of the uniform region an absent slot covers.
-        let mut child_sets: Vec<CandidateSet<T>> = Vec::with_capacity(NUM_CHILDREN);
-        for c in 0..NUM_CHILDREN {
+        // leaf set of the uniform region an absent slot covers. We recurse *back-to-front* so that
+        // the child sub-trie sets are appended to `sets` in descending position order.
+        let mut child_sets: [Option<CandidateSet<T>>; NUM_CHILDREN] = std::array::from_fn(|_| None);
+        for c in (0..NUM_CHILDREN).rev() {
             let covering = covering_value[15 + c / 2];
             // SAFETY: `loc` is valid; the child resolves from the live, unmodified node.
             let set = if let Some(child) = unsafe { self.child(loc, c as u32) } {
@@ -645,13 +642,17 @@ impl<T: Clone + Ord> Table<T> {
             } else {
                 mode.leaf_set(covering)
             };
-            child_sets.push(set);
+            child_sets[c] = Some(set);
         }
 
         // Fold the 31-bit internal nodes: level-4 bits from child-slot pairs, then the rest bottom-up.
         let mut node_sets: [Option<CandidateSet<T>>; NUM_DATA] = std::array::from_fn(|_| None);
         for j in 0..16 {
-            node_sets[15 + j] = Some(child_sets[2 * j].combine(&child_sets[2 * j + 1]));
+            let merged = child_sets[2 * j]
+                .as_ref()
+                .unwrap()
+                .combine(child_sets[2 * j + 1].as_ref().unwrap());
+            node_sets[15 + j] = Some(merged);
         }
         for b in (0..15).rev() {
             let merged = node_sets[2 * b + 1]
@@ -661,26 +662,19 @@ impl<T: Clone + Ord> Table<T> {
             node_sets[b] = Some(merged);
         }
 
-        // Store only the positions whose set differs from their parent's. Present children first,
-        // since they read the level-4 heap sets; this consumes `child_root`.
-        for (c, set) in child_sets.into_iter().enumerate() {
-            if node.has_child_bit(c as u32) && set != *node_sets[15 + c / 2].as_ref().unwrap() {
-                let child_key = extend_repr(key, depth, c as u32);
-                sets.insert((child_key, depth + K, 0), set);
-            }
-        }
-        // Then the internal bits, bottom-up so a set taken for storage is never needed again as a
-        // parent. A node never stores its own bit 0: the parent stores it (as the child above), and
-        // the root's bit 0 is passed to Walk B directly (the root will be added to the set by the
-        // parent)
+        // Append this node's positions after its children (so its bits sort after them), in
+        // descending order: the internal bits `30..1` that differ from their in-node parent, then
+        // bit 0 unconditionally (bit 0 has no in-node parent, so every node stores its own root set;
+        // Walk B always finds it and never needs a set carried across the node boundary).
         for b in (1..NUM_DATA).rev() {
             if node_sets[b] != node_sets[(b - 1) / 2] {
                 let set = node_sets[b].take().unwrap();
-                sets.insert((key, depth, b as u32), set);
+                sets.push(((key, depth, b as u32), set));
             }
         }
-
-        node_sets[0].take().unwrap()
+        let root_set = node_sets[0].take().unwrap();
+        sets.push(((key, depth, 0), root_set.clone()));
+        root_set
     }
 
     /// Walk B. Edits the subtree rooted at `loc` to match the ORTC assignment; returns the signed
@@ -689,16 +683,15 @@ impl<T: Clone + Ord> Table<T> {
     /// # Safety
     /// `loc` must be a valid, live node location.
     #[allow(clippy::too_many_arguments)]
-    unsafe fn rewrite<'x, R, F>(
+    unsafe fn rewrite<R, F>(
         &mut self,
         loc: Loc,
         depth: u32,
         key: R,
-        assigned_from_above: Option<&'x T>,
-        set_from_above: &'x CandidateSet<T>,
+        assigned_from_above: Option<&T>,
         covering_inherited: Option<&T>,
         mode: Aggregation<F>,
-        sets: &'x ChangeSets<R, T>,
+        sets: &mut ChangeSets<R, T>,
     ) -> i64
     where
         R: Key,
@@ -714,19 +707,10 @@ impl<T: Clone + Ord> Table<T> {
 
         // Walk the heap top-down: assign every bit and edit its entry.
         // SAFETY: `loc` is valid and `node` is its snapshot.
-        let (assigned, effective_sets, mut delta) = unsafe {
-            self.assign_nodes(
-                &node,
-                loc,
-                depth,
-                key,
-                assigned_from_above,
-                set_from_above,
-                sets,
-            )
-        };
+        let (assigned, mut delta) =
+            unsafe { self.assign_nodes(&node, loc, depth, key, assigned_from_above, sets) };
 
-        // Recurse into each child slot, inheriting the assignment and set of the level-4 bit above it.
+        // Recurse into each child slot, inheriting the assignment of the level-4 bit above it.
         for c in 0..NUM_CHILDREN {
             let above = 15 + c / 2;
             // SAFETY: `loc` is valid.
@@ -736,8 +720,7 @@ impl<T: Clone + Ord> Table<T> {
                     depth,
                     key,
                     c,
-                    assigned[above],
-                    effective_sets[above].unwrap(),
+                    assigned[above].as_ref(),
                     child_covering[c / 2].as_ref(),
                     mode,
                     sets,
@@ -750,49 +733,52 @@ impl<T: Clone + Ord> Table<T> {
 
     /// Assign a value to every bit of `node`, top-down, editing entries as it goes.
     ///
-    /// Returns the value assigned per bit (borrowed from the candidate sets), the set applied at
-    /// each bit (`effective_sets`, which the child slots below still need), and the count delta.
-    /// `effective_sets[b]` is the stored change-set at `b` if there is one, else the set carried
-    /// down from `b`'s parent.
+    /// Returns the value assigned per bit and the count delta. Stored change-sets are popped off the
+    /// back of `sets`: Walk A appended them in descending position order, so this loop (bits `0..31`,
+    /// ascending) finds bit `b`'s set on top exactly when `b` is a stored position, and bit 0 is
+    /// always stored. A bit that is *not* stored has the same set as its in-node parent, so it always
+    /// inherits the parent's assigned value; only its (possibly present) entry has to be dropped.
+    ///
+    /// The assigned values are owned: they are cloned out of the candidate sets so that Walk B can
+    /// keep popping `sets` as it descends. For a `Copy` `T` this is essentially free; for an
+    /// expensive `T` it is the price of not holding references into `sets`.
     ///
     /// # Safety
     /// `loc` must be valid and `node` must be its live snapshot.
-    unsafe fn assign_nodes<'x, R: Key>(
+    unsafe fn assign_nodes<R: Key>(
         &mut self,
         node: &MultiBitNode,
         loc: Loc,
         depth: u32,
         key: R,
-        assigned_from_above: Option<&'x T>,
-        set_from_above: &'x CandidateSet<T>,
-        sets: &'x ChangeSets<R, T>,
-    ) -> (
-        [Option<&'x T>; NUM_DATA],               // assigned
-        [Option<&'x CandidateSet<T>>; NUM_DATA], // effective_sets
-        i64,                                     // delta
-    ) {
-        let mut assigned: [Option<&'x T>; NUM_DATA] = [None; NUM_DATA];
-        let mut effective_sets: [Option<&'x CandidateSet<T>>; NUM_DATA] = [None; NUM_DATA];
+        assigned_from_above: Option<&T>,
+        sets: &mut ChangeSets<R, T>,
+    ) -> ([Option<T>; NUM_DATA], i64) {
+        let mut assigned: [Option<T>; NUM_DATA] = std::array::from_fn(|_| None);
         let mut delta = 0;
         for b in 0..NUM_DATA {
             let parent_assigned = if b == 0 {
                 assigned_from_above
             } else {
-                assigned[(b - 1) / 2]
+                assigned[(b - 1) / 2].as_ref()
             };
-            let parent_set = if b == 0 {
-                set_from_above
+            if sets.last().is_some_and(|(pos, _)| *pos == (key, depth, b as u32)) {
+                let (_, set) = sets.pop().unwrap();
+                // SAFETY: `loc` is valid and `node` is its snapshot.
+                let (value, d) =
+                    unsafe { self.rewrite_bit(node, loc, depth, b, parent_assigned, set) };
+                assigned[b] = value;
+                delta += d;
             } else {
-                effective_sets[(b - 1) / 2].unwrap()
-            };
-            let set = sets.get(&(key, depth, b as u32)).unwrap_or(parent_set);
-            effective_sets[b] = Some(set);
-            // SAFETY: `loc` is valid and `node` is its snapshot.
-            let (value, d) = unsafe { self.rewrite_bit(node, loc, depth, b, parent_assigned, set) };
-            assigned[b] = value;
-            delta += d;
+                // Not stored: this bit's set equals its in-node parent's, so it inherits. Drop any
+                // entry sitting here. (Bit 0 is always stored, so `b != 0` here.)
+                let present = node.has_data_bit(b as u32);
+                // SAFETY: `loc` is valid and `node` is its snapshot.
+                delta += unsafe { self.rewrite_bit_remove(loc, depth, b, present) };
+                assigned[b] = parent_assigned.cloned();
+            }
         }
-        (assigned, effective_sets, delta)
+        (assigned, delta)
     }
 
     /// Assign heap bit `b` and edit its entry. Returns `(assigned_value, count_delta)`, the assigned
@@ -800,15 +786,15 @@ impl<T: Clone + Ord> Table<T> {
     ///
     /// # Safety
     /// `loc` must be valid and `node` must be its live snapshot.
-    unsafe fn rewrite_bit<'x>(
+    unsafe fn rewrite_bit(
         &mut self,
         node: &MultiBitNode,
         loc: Loc,
         depth: u32,
         b: usize,
-        parent_assigned: Option<&'x T>,
-        set: &'x CandidateSet<T>,
-    ) -> (Option<&'x T>, i64) {
+        parent_assigned: Option<&T>,
+        set: CandidateSet<T>,
+    ) -> (Option<T>, i64) {
         let present = node.has_data_bit(b as u32);
         match set {
             // A hole is never covered, so no entry can sit here.
@@ -818,21 +804,22 @@ impl<T: Clone + Ord> Table<T> {
             }
 
             // Inherit: the covering ancestor already forwards a value in the set; drop any entry.
-            CandidateSet::One(s) if parent_assigned.is_some_and(|v| v == s) => {
-                (parent_assigned, unsafe {
+            CandidateSet::One(s) if parent_assigned == Some(&s) => {
+                (parent_assigned.cloned(), unsafe {
                     self.rewrite_bit_remove(loc, depth, b, present)
                 })
             }
             CandidateSet::Values(s) if parent_assigned.is_some_and(|v| s.contains(v)) => {
-                (parent_assigned, unsafe {
+                (parent_assigned.cloned(), unsafe {
                     self.rewrite_bit_remove(loc, depth, b, present)
                 })
             }
 
-            // Otherwise emit `min(s)` here, overwriting or inserting (the one clone into the trie).
+            // Otherwise emit `min(s)` here, moving it into the assignment (the one clone goes to the
+            // trie).
             CandidateSet::One(winner) => self.rewrite_bit_insert(loc, depth, b, present, winner),
             CandidateSet::Values(s) => {
-                let winner = s.iter().next().expect("Values holds a non-empty set");
+                let winner = s.into_iter().next().expect("Values holds a non-empty set");
                 self.rewrite_bit_insert(loc, depth, b, present, winner)
             }
         }
@@ -867,14 +854,14 @@ impl<T: Clone + Ord> Table<T> {
     /// # Safety
     /// `loc` must be valid and `node` must be its live snapshot.
     #[inline]
-    unsafe fn rewrite_bit_insert<'x>(
+    unsafe fn rewrite_bit_insert(
         &mut self,
         loc: Loc,
         depth: u32,
         b: usize,
         present: bool,
-        winner: &'x T,
-    ) -> (Option<&'x T>, i64) {
+        winner: T,
+    ) -> (Option<T>, i64) {
         if present {
             // SAFETY: bit `b` is set; `resolve_mut` re-reads the live bitmap.
             unsafe {
@@ -907,17 +894,16 @@ impl<T: Clone + Ord> Table<T> {
     /// # Safety
     /// `loc` must be valid.
     #[allow(clippy::too_many_arguments)]
-    unsafe fn rewrite_child<'x, R, F>(
+    unsafe fn rewrite_child<R, F>(
         &mut self,
         loc: Loc,
         depth: u32,
         key: R,
         c: usize,
-        assigned_above: Option<&'x T>,
-        set_above: &'x CandidateSet<T>,
+        assigned_above: Option<&T>,
         covering: Option<&T>,
         mode: Aggregation<F>,
-        sets: &'x ChangeSets<R, T>,
+        sets: &mut ChangeSets<R, T>,
     ) -> i64
     where
         R: Key,
@@ -933,7 +919,6 @@ impl<T: Clone + Ord> Table<T> {
                     depth + K,
                     child_key,
                     assigned_above,
-                    set_above,
                     covering,
                     mode,
                     sets,
