@@ -52,6 +52,7 @@ num-traits = "0.2.14"
 serde = { version = "1", optional = true}
 either = "1"
 array-const-fn-init = "0.1.1"
+smallvec = "1.15.2"
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]

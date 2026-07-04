@@ -21,7 +21,9 @@
 //! of an adjacent pair can never fabricate a bit outside the pair); push-down **does** need one,
 //! since its global `<<` would otherwise drag deeper levels up into the target range.
 
-use std::collections::BTreeSet;
+use std::cmp::Ordering;
+
+use smallvec::{smallvec, SmallVec};
 
 use crate::{
     allocator::Loc,
@@ -484,48 +486,89 @@ impl<T: Clone + Eq> Table<T> {
 // ORTC: value-aware `aggregate` and `aggregate_ortc`.
 // ===========================================================================
 
+/// A sorted, deduplicated candidate value set. Up to `INLINE` values live inline (no allocation);
+/// larger sets spill to the heap.
+const INLINE: usize = 4;
+type Values<T> = SmallVec<[T; INLINE]>;
+
+/// Intersection of two sorted, deduplicated slices, itself sorted and deduplicated.
+fn intersect_sorted<T: Ord + Clone>(l: &[T], r: &[T]) -> Values<T> {
+    let mut out = Values::new();
+    let (mut i, mut j) = (0, 0);
+    while i < l.len() && j < r.len() {
+        match l[i].cmp(&r[j]) {
+            Ordering::Less => i += 1,
+            Ordering::Greater => j += 1,
+            Ordering::Equal => {
+                out.push(l[i].clone());
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Union of two sorted, deduplicated slices, itself sorted and deduplicated.
+fn union_sorted<T: Ord + Clone>(l: &[T], r: &[T]) -> Values<T> {
+    let mut out = Values::new();
+    let (mut i, mut j) = (0, 0);
+    while i < l.len() && j < r.len() {
+        match l[i].cmp(&r[j]) {
+            Ordering::Less => {
+                out.push(l[i].clone());
+                i += 1;
+            }
+            Ordering::Greater => {
+                out.push(r[j].clone());
+                j += 1;
+            }
+            Ordering::Equal => {
+                out.push(l[i].clone());
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    out.extend(l[i..].iter().cloned());
+    out.extend(r[j..].iter().cloned());
+    out
+}
+
 /// A position's ORTC candidate set.
 ///
 /// `ContainsHole` is absorbing under [`CandidateSet::combine`]: once a region contains uncovered
 /// space, no single covering value may represent it. This is exactly what lets `aggregate` never
 /// cover a hole (a flat set of `Option<T>` would drop the hole on an intersection).
+///
+/// `Covered` holds the candidate values sorted, deduplicated, and (for small sets) inline, so a
+/// single-value position needs no allocation and `min(S)` is just the first element.
 #[derive(Clone, PartialEq, Eq)]
 enum CandidateSet<T> {
     /// The region contains uncovered space; no covering entry may be placed at or above it.
     ContainsHole,
-    /// The region is fully covered with a single value.
-    One(T),
-    /// The region is fully covered; these are the candidate values.
-    Values(BTreeSet<T>),
+    /// The region is fully covered; these are the candidate values (sorted, non-empty).
+    Covered(Values<T>),
 }
 
 impl<T: Clone + Ord> CandidateSet<T> {
+    /// A candidate set covering a single value.
+    fn one(value: T) -> Self {
+        Self::Covered(smallvec![value])
+    }
+
     /// The candidate set of the parent of two positions: `l ∩ r` if non-empty, else `l ∪ r`; a hole
     /// in either child poisons the result.
     fn combine(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::ContainsHole, _) | (_, Self::ContainsHole) => Self::ContainsHole,
-            (Self::One(l), Self::One(r)) if l == r => Self::One(l.clone()),
-            (Self::One(l), Self::One(r)) => {
-                Self::Values([l.clone(), r.clone()].into_iter().collect())
-            }
-            (Self::One(s), Self::Values(m)) | (Self::Values(m), Self::One(s)) if m.contains(s) => {
-                Self::One(s.clone())
-            }
-            (Self::One(s), Self::Values(m)) | (Self::Values(m), Self::One(s)) => {
-                let mut m = m.clone();
-                m.insert(s.clone());
-                Self::Values(m)
-            }
-            (Self::Values(l), Self::Values(r)) => {
-                let intersection: BTreeSet<T> = l.intersection(r).cloned().collect();
-                if intersection.is_empty() {
-                    Self::Values(l.union(r).cloned().collect())
-                } else if intersection.len() == 1 {
-                    Self::One(intersection.into_iter().next().unwrap())
+            (Self::Covered(l), Self::Covered(r)) => {
+                let intersection = intersect_sorted(l, r);
+                Self::Covered(if intersection.is_empty() {
+                    union_sorted(l, r)
                 } else {
-                    Self::Values(intersection)
-                }
+                    intersection
+                })
             }
         }
     }
@@ -546,9 +589,9 @@ impl<T: Clone + Ord, F: Fn() -> T + Copy> Aggregation<F> {
     /// The candidate set of a leaf whose covering value from above is `covering`.
     fn leaf_set(self, covering: Option<&T>) -> CandidateSet<T> {
         match (covering, self) {
-            (Some(v), _) => CandidateSet::One(v.clone()),
+            (Some(v), _) => CandidateSet::one(v.clone()),
             (None, Aggregation::Drop) => CandidateSet::ContainsHole,
-            (None, Aggregation::Fill(f)) => CandidateSet::One(f()),
+            (None, Aggregation::Fill(f)) => CandidateSet::one(f()),
         }
     }
 
@@ -685,7 +728,10 @@ impl<T: Clone + Ord> Table<T> {
         // emitted. Walk B pops `sets` from the back, which visits the positions in ascending order.
         // SAFETY: the root exists; `sets` describes the same trie we are about to edit.
         let delta = unsafe { self.rewrite(Loc::root(), 0, R::zero(), None, None, mode, &mut sets) };
-        debug_assert!(sets.is_empty(), "every stored change-set must be consumed exactly once");
+        debug_assert!(
+            sets.is_empty(),
+            "every stored change-set must be consumed exactly once"
+        );
         delta
     }
 
@@ -884,22 +930,16 @@ impl<T: Clone + Ord> Table<T> {
             }
 
             // Inherit: the covering ancestor already forwards a value in the set; drop any entry.
-            CandidateSet::One(s) if parent_assigned == Some(&s) => {
-                (parent_assigned.cloned(), unsafe {
-                    self.rewrite_bit_remove(loc, depth, b, present)
-                })
-            }
-            CandidateSet::Values(s) if parent_assigned.is_some_and(|v| s.contains(v)) => {
+            CandidateSet::Covered(s) if parent_assigned.is_some_and(|v| s.contains(v)) => {
                 (parent_assigned.cloned(), unsafe {
                     self.rewrite_bit_remove(loc, depth, b, present)
                 })
             }
 
-            // Otherwise emit `min(s)` here, moving it into the assignment (the one clone goes to the
-            // trie).
-            CandidateSet::One(winner) => self.rewrite_bit_insert(loc, depth, b, present, winner),
-            CandidateSet::Values(s) => {
-                let winner = s.into_iter().next().expect("Values holds a non-empty set");
+            // Otherwise emit `min(s)` (the first element of the sorted set) here, moving it into the
+            // assignment (the one clone goes to the trie).
+            CandidateSet::Covered(s) => {
+                let winner = s.into_iter().next().expect("Covered holds a non-empty set");
                 self.rewrite_bit_insert(loc, depth, b, present, winner)
             }
         }
