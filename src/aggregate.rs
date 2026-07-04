@@ -562,16 +562,98 @@ impl<T: Clone + Ord, F: Fn() -> T + Copy> Aggregation<F> {
     }
 }
 
-/// Candidate sets from Walk A, tagged with the position identity `(node_key, depth, bit)`.
+/// Candidate sets from Walk A, consumed by Walk B in reverse order.
 ///
-/// This is a plain append-only `Vec`, not a map: Walk A pushes entries in *descending* position
-/// order (it recurses children back-to-front and emits a node's bits high-to-low, bit 0 last), and
-/// Walk B reads them back-to-front, which is exactly *ascending* position order (its pre-order
-/// traversal visits `(repr, depth, bit)` monotonically). So Walk B consumes the `Vec` with a single
-/// cursor moving from the end toward the front, matching each position in O(1) with no search and no
-/// sort. The two walks are coupled by this ordering (see [`Table::collect_sets`] /
-/// [`Table::rewrite`]); the aggregation tests cover it.
-type ChangeSets<R, T> = Vec<((R, u32, u32), CandidateSet<T>)>;
+/// Two coupled append-only stacks replace what used to be a keyed map. `sets` holds one
+/// [`CandidateSet`] for every *stored* heap position; `node_masks` holds one bitmap per node marking
+/// which of its 31 heap bits were stored (bit 0 is always stored, so every node contributes exactly
+/// one mask). No position keys are needed: Walk A appends nodes in reverse pre-order (it recurses
+/// children back-to-front) and Walk B pops in pre-order, so the top of each stack is always the exact
+/// position Walk B is visiting.
+///
+/// Walk A writes a node through [`ChangeSets::node_writer`], pushing its stored bits in *descending*
+/// order and committing the mask; Walk B reads a node through [`ChangeSets::node_reader`], popping the
+/// mask on entry and then one set per stored bit in *ascending* order. The two walks are coupled by
+/// this ordering (see [`Table::collect_sets`] / [`Table::rewrite`]); the aggregation tests cover it.
+struct ChangeSets<T> {
+    /// One candidate set per stored heap position, in reverse pre-order (popped front-to-back).
+    sets: Vec<CandidateSet<T>>,
+    /// One stored-bits bitmap per node, in reverse pre-order (popped as each node is entered).
+    node_masks: Vec<u32>,
+}
+
+impl<T> ChangeSets<T> {
+    #[inline]
+    fn new() -> Self {
+        Self {
+            sets: Vec::new(),
+            node_masks: Vec::new(),
+        }
+    }
+
+    /// Whether both stacks have been fully consumed.
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.sets.is_empty() && self.node_masks.is_empty()
+    }
+
+    /// Begin writing one node's stored positions (Walk A).
+    #[inline]
+    fn node_writer(&mut self) -> NodeWriter<'_, T> {
+        NodeWriter {
+            store: self,
+            mask: 0,
+        }
+    }
+
+    /// Begin reading one node's stored positions (Walk B), popping its stored-bits mask.
+    #[inline]
+    fn node_reader(&mut self) -> NodeReader<'_, T> {
+        let mask = self.node_masks.pop().expect("one node mask per node");
+        NodeReader { store: self, mask }
+    }
+}
+
+/// Writes the stored candidate sets of a single node (Walk A), accumulating its stored-bits mask.
+struct NodeWriter<'a, T> {
+    store: &'a mut ChangeSets<T>,
+    mask: u32,
+}
+
+impl<T> NodeWriter<'_, T> {
+    /// Store the candidate set of heap bit `bit`. Bits must be pushed in *descending* order.
+    #[inline]
+    fn push(&mut self, bit: usize, set: CandidateSet<T>) {
+        self.mask |= 1 << bit;
+        self.store.sets.push(set);
+    }
+
+    /// Commit the node's stored-bits mask.
+    #[inline]
+    fn finish(self) {
+        self.store.node_masks.push(self.mask);
+    }
+}
+
+/// Reads the stored candidate sets of a single node (Walk B).
+struct NodeReader<'a, T> {
+    store: &'a mut ChangeSets<T>,
+    mask: u32,
+}
+
+impl<T> NodeReader<'_, T> {
+    /// Whether heap bit `bit` has a stored candidate set.
+    #[inline]
+    fn stored(&self, bit: usize) -> bool {
+        self.mask & (1 << bit) != 0
+    }
+
+    /// Take the candidate set of the next stored bit. Call once per stored bit, in *ascending* order.
+    #[inline]
+    fn pop(&mut self) -> CandidateSet<T> {
+        self.store.sets.pop().expect("one set per stored bit")
+    }
+}
 
 impl<T: Clone + Ord> Table<T> {
     /// Rewrite the trie into an equivalent minimal one (ORTC, Draves and King). `mode` chooses
@@ -592,11 +674,11 @@ impl<T: Clone + Ord> Table<T> {
         R: Key,
         F: Fn() -> T + Copy,
     {
-        let mut sets: ChangeSets<R, T> = ChangeSets::new();
+        let mut sets: ChangeSets<T> = ChangeSets::new();
 
         // Walk A (bottom-up): candidate set per position, appended in descending position order.
         // SAFETY: the root node always exists.
-        unsafe { self.collect_sets(Loc::root(), 0, R::zero(), None, mode, &mut sets) };
+        unsafe { self.collect_sets(Loc::root(), 0, None, mode, &mut sets) };
 
         // Walk B (top-down): assign a value to every position and edit the trie to match. The value
         // above the root is `None`, so the /0 position itself decides whether a default route is
@@ -611,17 +693,15 @@ impl<T: Clone + Ord> Table<T> {
     ///
     /// # Safety
     /// `loc` must be a valid, live node location.
-    unsafe fn collect_sets<R, F>(
+    unsafe fn collect_sets<F>(
         &self,
         loc: Loc,
         depth: u32,
-        key: R,
         covering_inherited: Option<&T>,
         mode: Aggregation<F>,
-        sets: &mut ChangeSets<R, T>,
+        sets: &mut ChangeSets<T>,
     ) -> CandidateSet<T>
     where
-        R: Key,
         F: Fn() -> T + Copy,
     {
         let node = *self.node(loc);
@@ -637,8 +717,7 @@ impl<T: Clone + Ord> Table<T> {
             let covering = covering_value[15 + c / 2];
             // SAFETY: `loc` is valid; the child resolves from the live, unmodified node.
             let set = if let Some(child) = unsafe { self.child(loc, c as u32) } {
-                let child_key = extend_repr(key, depth, c as u32);
-                unsafe { self.collect_sets(child, depth + K, child_key, covering, mode, sets) }
+                unsafe { self.collect_sets(child, depth + K, covering, mode, sets) }
             } else {
                 mode.leaf_set(covering)
             };
@@ -666,14 +745,15 @@ impl<T: Clone + Ord> Table<T> {
         // descending order: the internal bits `30..1` that differ from their in-node parent, then
         // bit 0 unconditionally (bit 0 has no in-node parent, so every node stores its own root set;
         // Walk B always finds it and never needs a set carried across the node boundary).
+        let mut writer = sets.node_writer();
         for b in (1..NUM_DATA).rev() {
             if node_sets[b] != node_sets[(b - 1) / 2] {
-                let set = node_sets[b].take().unwrap();
-                sets.push(((key, depth, b as u32), set));
+                writer.push(b, node_sets[b].take().unwrap());
             }
         }
         let root_set = node_sets[0].take().unwrap();
-        sets.push(((key, depth, 0), root_set.clone()));
+        writer.push(0, root_set.clone());
+        writer.finish();
         root_set
     }
 
@@ -691,7 +771,7 @@ impl<T: Clone + Ord> Table<T> {
         assigned_from_above: Option<&T>,
         covering_inherited: Option<&T>,
         mode: Aggregation<F>,
-        sets: &mut ChangeSets<R, T>,
+        sets: &mut ChangeSets<T>,
     ) -> i64
     where
         R: Key,
@@ -708,7 +788,7 @@ impl<T: Clone + Ord> Table<T> {
         // Walk the heap top-down: assign every bit and edit its entry.
         // SAFETY: `loc` is valid and `node` is its snapshot.
         let (assigned, mut delta) =
-            unsafe { self.assign_nodes(&node, loc, depth, key, assigned_from_above, sets) };
+            unsafe { self.assign_nodes(&node, loc, depth, assigned_from_above, sets) };
 
         // Recurse into each child slot, inheriting the assignment of the level-4 bit above it.
         for c in 0..NUM_CHILDREN {
@@ -733,37 +813,37 @@ impl<T: Clone + Ord> Table<T> {
 
     /// Assign a value to every bit of `node`, top-down, editing entries as it goes.
     ///
-    /// Returns the value assigned per bit and the count delta. Stored change-sets are popped off the
-    /// back of `sets`: Walk A appended them in descending position order, so this loop (bits `0..31`,
-    /// ascending) finds bit `b`'s set on top exactly when `b` is a stored position, and bit 0 is
-    /// always stored. A bit that is *not* stored has the same set as its in-node parent, so it always
-    /// inherits the parent's assigned value; only its (possibly present) entry has to be dropped.
+    /// Returns the value assigned per bit and the count delta. The node's [`NodeReader`] yields its
+    /// stored-bits mask up front; this loop (bits `0..31`, ascending) pops one set from the reader for
+    /// each stored bit, in the order Walk A pushed them, and bit 0 is always stored. A bit that is
+    /// *not* stored has the same set as its in-node parent, so it always inherits the parent's
+    /// assigned value; only its (possibly present) entry has to be dropped.
     ///
     /// The assigned values are owned: they are cloned out of the candidate sets so that Walk B can
-    /// keep popping `sets` as it descends. For a `Copy` `T` this is essentially free; for an
+    /// keep consuming `sets` as it descends. For a `Copy` `T` this is essentially free; for an
     /// expensive `T` it is the price of not holding references into `sets`.
     ///
     /// # Safety
     /// `loc` must be valid and `node` must be its live snapshot.
-    unsafe fn assign_nodes<R: Key>(
+    unsafe fn assign_nodes(
         &mut self,
         node: &MultiBitNode,
         loc: Loc,
         depth: u32,
-        key: R,
         assigned_from_above: Option<&T>,
-        sets: &mut ChangeSets<R, T>,
+        sets: &mut ChangeSets<T>,
     ) -> ([Option<T>; NUM_DATA], i64) {
         let mut assigned: [Option<T>; NUM_DATA] = std::array::from_fn(|_| None);
         let mut delta = 0;
+        let mut reader = sets.node_reader();
         for b in 0..NUM_DATA {
             let parent_assigned = if b == 0 {
                 assigned_from_above
             } else {
                 assigned[(b - 1) / 2].as_ref()
             };
-            if sets.last().is_some_and(|(pos, _)| *pos == (key, depth, b as u32)) {
-                let (_, set) = sets.pop().unwrap();
+            if reader.stored(b) {
+                let set = reader.pop();
                 // SAFETY: `loc` is valid and `node` is its snapshot.
                 let (value, d) =
                     unsafe { self.rewrite_bit(node, loc, depth, b, parent_assigned, set) };
@@ -903,7 +983,7 @@ impl<T: Clone + Ord> Table<T> {
         assigned_above: Option<&T>,
         covering: Option<&T>,
         mode: Aggregation<F>,
-        sets: &mut ChangeSets<R, T>,
+        sets: &mut ChangeSets<T>,
     ) -> i64
     where
         R: Key,
