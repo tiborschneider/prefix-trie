@@ -1104,17 +1104,12 @@ impl<T: Clone + Ord> Table<T> {
             if Some(&value) == assigned_above {
                 return 0;
             }
-            let child_key = extend_repr(key, depth, c as u32);
-            match self.find_or_insert_mut(child_key, depth + K) {
-                Ok(present) => {
-                    present.replace(value);
-                    0
-                }
-                Err(empty) => {
-                    empty.insert(value);
-                    1
-                }
-            }
+            // The slot has no node, so nothing can already be here: create the child node directly at
+            // slot `c` (we already hold `loc`) and pin its root with `value`. This avoids the
+            // root-to-`loc` re-descent that `find_or_insert_mut` would do.
+            // SAFETY: `loc` is valid and slot `c` is absent (the `if let Some(child)` above was None).
+            unsafe { self.insert_child_root(loc, c as u32, depth, value) };
+            1
         } else {
             0
         }

@@ -413,6 +413,25 @@ impl<T> Table<T> {
         }
     }
 
+    /// Create the child node at `child_bit` of `parent_loc` and store `value` at its root (bit 0, the
+    /// `/(parent_depth + K)` prefix). The slot must currently be absent. Use this when the caller
+    /// already holds the parent location, to attach a fresh child directly instead of re-descending
+    /// from the root as [`Self::find_or_insert_mut`] would.
+    ///
+    /// # Safety
+    /// `parent_loc` must be a valid, live node location and `child_bit` must be absent.
+    #[inline(always)]
+    pub(crate) unsafe fn insert_child_root(&mut self, parent_loc: Loc, child_bit: u32, parent_depth: u32, value: T) {
+        let child = self.nodes.insert_new_bit(parent_loc, child_bit);
+        EmptyMut {
+            table: self,
+            node: child,
+            data_bit: 0,
+            depth: parent_depth + K,
+        }
+        .insert(value);
+    }
+
     /// Remove a child from a parent node and compact the children allocation.
     ///
     /// After insertion, each child occupies physical slot `compute_slot(child_bitmap, bit)`.
