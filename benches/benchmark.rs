@@ -277,7 +277,27 @@ impl criterion::profiler::Profiler for MyProfiler {
 
     fn stop_profiling(&mut self, _: &str, benchmark_dir: &std::path::Path) {
         if let Some(profile) = self.active_profiler.take() {
-            let report = profile.report().build().unwrap();
+            let report = profile
+                .report()
+                // remove simple recursions: f -> f -> f -> g ==> f -> g
+                .frames_post_processor(|frames: &mut pprof::Frames| {
+                    frames
+                        .frames
+                        .dedup_by(|a, b| a.iter().map(|s| s.name()).eq(b.iter().map(|s| s.name())))
+                })
+                // remove indirect recursion: f -> g -> f -> g -> h ==> f -> g -> h
+                .frames_post_processor(|frames: &mut pprof::Frames| {
+                    let mut seen = std::collections::HashSet::new();
+                    // frames are leaf -> root; flip so "first occurrence" means closest to root
+                    frames.frames.reverse();
+                    frames.frames.retain(|syms| {
+                        let key: Vec<String> = syms.iter().map(|s| s.name()).collect();
+                        seen.insert(key)
+                    });
+                    frames.frames.reverse();
+                })
+                .build()
+                .unwrap();
             std::fs::create_dir_all(benchmark_dir).unwrap();
             let benchmark_file = benchmark_dir.join("flamegraph.svg");
             let writer = std::fs::File::create(&benchmark_file)

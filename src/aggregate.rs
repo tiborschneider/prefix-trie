@@ -491,50 +491,6 @@ impl<T: Clone + Eq> Table<T> {
 const INLINE: usize = 4;
 type Values<T> = SmallVec<[T; INLINE]>;
 
-/// Intersection of two sorted, deduplicated slices, itself sorted and deduplicated.
-fn intersect_sorted<T: Ord + Clone>(l: &[T], r: &[T]) -> Values<T> {
-    let mut out = Values::new();
-    let (mut i, mut j) = (0, 0);
-    while i < l.len() && j < r.len() {
-        match l[i].cmp(&r[j]) {
-            Ordering::Less => i += 1,
-            Ordering::Greater => j += 1,
-            Ordering::Equal => {
-                out.push(l[i].clone());
-                i += 1;
-                j += 1;
-            }
-        }
-    }
-    out
-}
-
-/// Union of two sorted, deduplicated slices, itself sorted and deduplicated.
-fn union_sorted<T: Ord + Clone>(l: &[T], r: &[T]) -> Values<T> {
-    let mut out = Values::new();
-    let (mut i, mut j) = (0, 0);
-    while i < l.len() && j < r.len() {
-        match l[i].cmp(&r[j]) {
-            Ordering::Less => {
-                out.push(l[i].clone());
-                i += 1;
-            }
-            Ordering::Greater => {
-                out.push(r[j].clone());
-                j += 1;
-            }
-            Ordering::Equal => {
-                out.push(l[i].clone());
-                i += 1;
-                j += 1;
-            }
-        }
-    }
-    out.extend(l[i..].iter().cloned());
-    out.extend(r[j..].iter().cloned());
-    out
-}
-
 /// A position's ORTC candidate set.
 ///
 /// `ContainsHole` is absorbing under [`CandidateSet::combine`]: once a region contains uncovered
@@ -551,24 +507,85 @@ enum CandidateSet<T> {
     Covered(Values<T>),
 }
 
+/// The outcome of combining two sibling candidate sets into their parent ([`CandidateSet::combine`]).
+///
+/// When the parent equals one (or both) of the inputs, that input is transparent (Walk B inherits it,
+/// so it need not be stored) and the caller reuses the existing input as the parent, so those variants
+/// carry nothing. Only a genuinely new parent (a proper intersection or a disjoint union) is carried,
+/// in [`Combined::New`].
+enum Combined<T> {
+    /// The parent differs from both inputs; both are boundaries and must be stored.
+    New(CandidateSet<T>),
+    /// The parent equals the left input (transparent); only the right input is a boundary.
+    EqualsLeft,
+    /// The parent equals the right input (transparent); only the left input is a boundary.
+    EqualsRight,
+    /// The parent equals both inputs; both are transparent.
+    EqualsBoth,
+}
+
 impl<T: Clone + Ord> CandidateSet<T> {
     /// A candidate set covering a single value.
     fn one(value: T) -> Self {
         Self::Covered(smallvec![value])
     }
 
-    /// The candidate set of the parent of two positions: `l ∩ r` if non-empty, else `l ∪ r`; a hole
-    /// in either child poisons the result.
-    fn combine(&self, other: &Self) -> Self {
+    /// Combine two sibling positions into their parent: `l ∩ r` if non-empty, else `l ∪ r`; a hole in
+    /// either input poisons the parent.
+    ///
+    /// A **single merge pass** over the two sorted slices builds the intersection and the union at
+    /// once and counts the matches, so the parent and the equality of each input to it
+    /// (`l ⊆ r ⟺ |l ∩ r| == |l|`) are all known when the pass ends. If an input equals the parent it
+    /// is transparent and the caller reuses it, so nothing is returned; otherwise the freshly built
+    /// intersection (or, when the inputs are disjoint, the union) is returned as [`Combined::New`].
+    fn combine(&self, other: &Self) -> Combined<T> {
         match (self, other) {
-            (Self::ContainsHole, _) | (_, Self::ContainsHole) => Self::ContainsHole,
+            (Self::ContainsHole, Self::ContainsHole) => Combined::EqualsBoth,
+            // A hole poisons the parent; the hole input equals it, the covered input does not.
+            (Self::ContainsHole, Self::Covered(_)) => Combined::EqualsLeft,
+            (Self::Covered(_), Self::ContainsHole) => Combined::EqualsRight,
             (Self::Covered(l), Self::Covered(r)) => {
-                let intersection = intersect_sorted(l, r);
-                Self::Covered(if intersection.is_empty() {
-                    union_sorted(l, r)
+                let mut intersection = Values::new();
+                // The union is needed only when the inputs turn out disjoint; while the intersection
+                // is still empty we keep building it (its final size is exactly `l + r`), and we stop
+                // the moment the first match appears, since a non-empty intersection is the parent.
+                let mut union = Values::with_capacity(l.len() + r.len());
+                let (mut i, mut j) = (0, 0);
+                while i < l.len() && j < r.len() {
+                    match l[i].cmp(&r[j]) {
+                        Ordering::Less => {
+                            if intersection.is_empty() {
+                                union.push(l[i].clone());
+                            }
+                            i += 1;
+                        }
+                        Ordering::Greater => {
+                            if intersection.is_empty() {
+                                union.push(r[j].clone());
+                            }
+                            j += 1;
+                        }
+                        Ordering::Equal => {
+                            intersection.push(l[i].clone());
+                            i += 1;
+                            j += 1;
+                        }
+                    }
+                }
+                if intersection.is_empty() {
+                    // Disjoint: the parent is the union, which equals neither non-empty input.
+                    union.extend(l[i..].iter().cloned());
+                    union.extend(r[j..].iter().cloned());
+                    Combined::New(Self::Covered(union))
                 } else {
-                    intersection
-                })
+                    // The parent is the intersection; an input equals it iff it is a subset of the other.
+                    match (intersection.len() == l.len(), intersection.len() == r.len()) {
+                        (true, true) => Combined::EqualsBoth,
+                        (true, false) => Combined::EqualsLeft,
+                        (false, true) => Combined::EqualsRight,
+                        (false, false) => Combined::New(Self::Covered(intersection)),
+                    }
+                }
             }
         }
     }
@@ -770,30 +787,61 @@ impl<T: Clone + Ord> Table<T> {
             child_sets[c] = Some(set);
         }
 
-        // Fold the 31-bit internal nodes: level-4 bits from child-slot pairs, then the rest bottom-up.
+        // Fold the 31-bit heap bottom-up. Level-4 bits (15..30) come from child-slot pairs; the child
+        // slots are not stored in this node, so their transparency is irrelevant here. When the parent
+        // equals a child, that child is reused (moved up) rather than rebuilt.
         let mut node_sets: [Option<CandidateSet<T>>; NUM_DATA] = std::array::from_fn(|_| None);
         for j in 0..16 {
-            let merged = child_sets[2 * j]
+            let (lo, hi) = (2 * j, 2 * j + 1);
+            let parent = match child_sets[lo]
                 .as_ref()
                 .unwrap()
-                .combine(child_sets[2 * j + 1].as_ref().unwrap());
-            node_sets[15 + j] = Some(merged);
+                .combine(child_sets[hi].as_ref().unwrap())
+            {
+                Combined::New(parent) => parent,
+                Combined::EqualsLeft | Combined::EqualsBoth => child_sets[lo].take().unwrap(),
+                Combined::EqualsRight => child_sets[hi].take().unwrap(),
+            };
+            node_sets[15 + j] = Some(parent);
         }
+
+        // Combine the internal heap parents, recording in `transparent` which child bits already equal
+        // their parent (so Walk B inherits them). This falls out of `combine` directly, replacing the
+        // equal-to-parent comparison the push loop used to make. A transparent child is reused (moved)
+        // as the parent instead of being rebuilt.
+        let mut transparent = 0u32;
         for b in (0..15).rev() {
-            let merged = node_sets[2 * b + 1]
+            let (lo, hi) = (2 * b + 1, 2 * b + 2);
+            let parent = match node_sets[lo]
                 .as_ref()
                 .unwrap()
-                .combine(node_sets[2 * b + 2].as_ref().unwrap());
-            node_sets[b] = Some(merged);
+                .combine(node_sets[hi].as_ref().unwrap())
+            {
+                Combined::New(parent) => parent,
+                Combined::EqualsLeft => {
+                    transparent |= 1 << lo;
+                    node_sets[lo].take().unwrap()
+                }
+                Combined::EqualsRight => {
+                    transparent |= 1 << hi;
+                    node_sets[hi].take().unwrap()
+                }
+                Combined::EqualsBoth => {
+                    transparent |= (1 << lo) | (1 << hi);
+                    node_sets[lo].take().unwrap()
+                }
+            };
+            node_sets[b] = Some(parent);
         }
 
         // Append this node's positions after its children (so its bits sort after them), in
-        // descending order: the internal bits `30..1` that differ from their in-node parent, then
-        // bit 0 unconditionally (bit 0 has no in-node parent, so every node stores its own root set;
-        // Walk B always finds it and never needs a set carried across the node boundary).
+        // descending order: the internal bits `30..1` that are *not* transparent (differ from their
+        // in-node parent), then bit 0 unconditionally (bit 0 has no in-node parent, so every node
+        // stores its own root set; Walk B always finds it and never needs a set carried across the
+        // node boundary).
         let mut writer = sets.node_writer();
         for b in (1..NUM_DATA).rev() {
-            if node_sets[b] != node_sets[(b - 1) / 2] {
+            if transparent & (1 << b) == 0 {
                 writer.push(b, node_sets[b].take().unwrap());
             }
         }
