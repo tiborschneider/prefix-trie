@@ -291,58 +291,11 @@ impl<P: Prefix> PrefixSet<P> {
     }
 
     /// Modifies the prefix set by removing entries that are already covered by another one with a
-    /// shorter prefix length, and by (recursively) merging adjacent prefixes.
-    ///
-    /// **Invariant**: for any *address* `a` (a host prefix of maximal length),
-    /// `before.get_lpm(a).is_some() == after.get_lpm(a).is_some()`. That is, the covered address
-    /// space is preserved exactly. This does **not** extend to shorter prefixes: merging siblings
-    /// can make `get_lpm` return `Some` for a prefix that previously matched nothing. For example,
-    /// two `/24`s merge into a `/23`, so `get_lpm` of that `/23` flips from `None` to `Some`. If you
-    /// need the invariant to hold for every prefix, use [`PrefixSet::aggregate_consistent`], which
-    /// only drops redundant entries and never merges.
-    ///
-    /// Aggregation is also **not** stable under later modification: because merging discards the
-    /// original prefix boundaries, re-aggregating after a change differs in general from aggregating
-    /// the change applied to the original set, i.e. `aggregate(remove(aggregate(x)))` is not equal
-    /// to `aggregate(remove(x))`. For instance, removing a prefix that was merged away is a no-op on
-    /// the aggregated set, yet uncovers address space in the original.
-    ///
-    /// ```
-    /// use prefix_trie::PrefixSet;
-    ///
-    /// # #[cfg(feature = "ipnet")]
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
-    /// set.insert("10.0.0.0/24".parse()?);
-    /// set.insert("10.0.1.0/24".parse()?);   // adjacent sibling of 10.0.0.0/24
-    /// set.insert("10.0.0.128/25".parse()?); // covered by 10.0.0.0/24
-    /// set.aggregate();
-    /// // The two /24 siblings are merged into a single /23.
-    /// assert_eq!(
-    ///     set.iter().collect::<Vec<_>>(),
-    ///     vec![
-    ///         "10.0.0.0/23".parse()?,
-    ///     ]
-    /// );
-    /// # Ok(())
-    /// # }
-    /// # #[cfg(not(feature = "ipnet"))]
-    /// # fn main() {}
-    /// ```
-    pub fn aggregate(&mut self) {
-        // SAFETY: `Loc::root()` is always a valid, live node location.
-        let (_, count_delta) = unsafe { self.0.table_mut().aggregate_set(Loc::root(), 0) };
-        self.0.count = (self.0.count as i64 + count_delta) as usize;
-    }
-
-    /// Modifies the prefix set by removing entries that are already covered by another one with a
     /// shorter prefix length, **without** merging adjacent prefixes.
     ///
-    /// This is the drop-only counterpart to [`PrefixSet::aggregate`]. It preserves a stronger
-    /// invariant: for *any* prefix `p` (not just host addresses),
-    /// `before.get_lpm(p).is_some() == after.get_lpm(p).is_some()` — a removed entry is always still
-    /// covered by the shorter prefix that made it redundant. Because it never introduces new
-    /// prefixes, it also commutes with subsequent insertions.
+    /// **Invariant**: for *any* prefix `p`, `before.get_lpm(p).is_some()` and
+    /// `after.get_lpm(p).is_some()` return the same value (while the matched prefix may become less
+    /// specific).
     ///
     /// ```
     /// use prefix_trie::PrefixSet;
@@ -370,6 +323,45 @@ impl<P: Prefix> PrefixSet<P> {
     pub fn aggregate_consistent(&mut self) {
         // SAFETY: `Loc::root()` is always a valid, live node location.
         let count_delta = unsafe { self.0.table_mut().aggregate_consistent_set(Loc::root(), 0) };
+        self.0.count = (self.0.count as i64 + count_delta) as usize;
+    }
+
+    /// Modifies the prefix set by removing entries that are already covered by another one with a
+    /// shorter prefix length, and by (recursively) merging adjacent prefixes.
+    ///
+    /// **Invariant**: for any *address* `a` (a host prefix of maximal length),
+    /// `before.get_lpm(a).is_some() == after.get_lpm(a).is_some()`. That is, the covered address
+    /// space is preserved exactly. This does **not** extend to shorter prefixes: merging siblings
+    /// can make `get_lpm` return `Some` for a prefix that previously matched nothing. For example,
+    /// two `/24`s merge into a `/23`, so `get_lpm` of that `/23` flips from `None` to `Some`. If you
+    /// need the invariant to hold for every prefix, use [`PrefixSet::aggregate_consistent`], which
+    /// only drops redundant entries and never merges.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// set.insert("10.0.0.0/24".parse()?);
+    /// set.insert("10.0.1.0/24".parse()?);   // adjacent sibling of 10.0.0.0/24
+    /// set.insert("10.0.0.128/25".parse()?); // covered by 10.0.0.0/24
+    /// set.aggregate();
+    /// // The two /24 siblings are merged into a single /23.
+    /// assert_eq!(
+    ///     set.iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         "10.0.0.0/23".parse()?,
+    ///     ]
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn aggregate(&mut self) {
+        // SAFETY: `Loc::root()` is always a valid, live node location.
+        let (_, count_delta) = unsafe { self.0.table_mut().aggregate_set(Loc::root(), 0) };
         self.0.count = (self.0.count as i64 + count_delta) as usize;
     }
 

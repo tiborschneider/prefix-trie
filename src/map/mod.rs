@@ -675,15 +675,10 @@ where
     }
 
     /// Removes every entry whose nearest covering ancestor (a less specific prefix) maps to the
-    /// **same value**, without merging anything.
+    /// **same value**, without merging adjacent prefixes.
     ///
     /// **Invariant**: for *any* prefix `p`, `before.get_lpm(p)` and `after.get_lpm(p)` return the
-    /// same value (the matched prefix may become less specific). A dropped entry is always still
-    /// covered by the ancestor that made it redundant, so longest-prefix-match results are
-    /// unchanged. Because it never introduces new prefixes, it also commutes with later insertions.
-    ///
-    /// The same map is used in the examples of [`aggregate`](Self::aggregate) and
-    /// [`aggregate_fill`](Self::aggregate_fill) to contrast the three behaviours.
+    /// same value (the matched prefix may become less specific).
     ///
     /// ```
     /// use prefix_trie::PrefixMap;
@@ -721,12 +716,14 @@ where
     /// Reduce the map to the fewest entries that keep every lookup unchanged.
     ///
     /// For any address `a` (a host prefix, i.e. one of maximum length), `self.get_lpm(&a)` resolves
-    /// to the same value as before, and to `None` exactly when it did before (only the matched prefix
-    /// may differ). Among all maps with that property this keeps the fewest entries.
+    /// to the same value as before (only the matched prefix may differ). Holes remain uncovered.
+    /// Among all maps with that property this keeps the fewest entries. For prefixes, this may not
+    /// be the case; When two siblings with the same value get merged, the the parent prefix holds a
+    /// value after aggregation.
     ///
-    /// The guarantee is per address, not per prefix: entries may be merged or moved, so which entry a
-    /// prefix matches can change. Use [`aggregate_consistent`](Self::aggregate_consistent) instead to
-    /// keep every prefix matching the same entry.
+    /// The guarantee is per address, not per prefix: entries may be merged or moved. Use
+    /// [`aggregate_consistent`](Self::aggregate_consistent) instead to keep every prefix matching the
+    /// same entry.
     ///
     /// ```
     /// use prefix_trie::PrefixMap;
@@ -762,16 +759,15 @@ where
         self.count = (self.count as i64 + delta) as usize;
     }
 
-    /// Reduce the map to the fewest entries, sending otherwise-uncovered addresses to `default`.
+    /// Reduce the map to the fewest entries, inserting otherwise-uncovered addresses to `default`.
     ///
-    /// For any address `a` (a host prefix, i.e. one of maximum length), the value of
-    /// `self.get_lpm(&a)` under `.unwrap_or_else(default)` is unchanged: covered addresses keep their
-    /// value, and uncovered addresses now resolve to `default()`. Among all maps with that property
-    /// this keeps the fewest entries.
+    /// For any address `a` (a host prefix, i.e. one of maximum length), `self.get_lpm(&a)` under
+    /// `.unwrap_or_else(default)` remains unchanged: covered addresses keep their value, and
+    /// uncovered addresses now resolve to `default()`. Among all maps with that property this
+    /// keeps the fewest entries.
     ///
-    /// Because no address is left uncovered, the result is always **total**: it contains a default
-    /// route (the root prefix, e.g. `0.0.0.0/0`), so [`get_lpm`](Self::get_lpm) returns `Some` for
-    /// every address. This is the one entry [`aggregate`](Self::aggregate) never adds.
+    /// Because no address is left uncovered, the result is always **total**: the root of the tree
+    /// (e.g., 0.0.0.0/0) will contain a value, so [`get_lpm`](Self::get_lpm) always returns `Some`.
     ///
     /// The guarantee is per address, not per prefix: entries may be merged or moved. Use
     /// [`aggregate_consistent`](Self::aggregate_consistent) instead to keep every prefix matching the
