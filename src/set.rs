@@ -314,16 +314,14 @@ impl<P: Prefix> PrefixSet<P> {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// set.insert("10.0.0.0/24".parse()?);
-    /// set.insert("10.0.1.0/24".parse()?); // merges with 10.0.0.0/24 into 10.0.0.0/23
-    /// set.insert("10.0.2.0/23".parse()?); // merges with 10.0.0.0/23 into 10.0.0.0/22
-    /// set.insert("10.0.4.0/23".parse()?);
-    /// set.insert("10.0.5.0/24".parse()?); // covered by 10.0.4.0/23
+    /// set.insert("10.0.1.0/24".parse()?);   // adjacent sibling of 10.0.0.0/24
+    /// set.insert("10.0.0.128/25".parse()?); // covered by 10.0.0.0/24
     /// set.aggregate();
+    /// // The two /24 siblings are merged into a single /23.
     /// assert_eq!(
     ///     set.iter().collect::<Vec<_>>(),
     ///     vec![
-    ///         "10.0.0.0/22".parse()?,
-    ///         "10.0.4.0/23".parse()?,
+    ///         "10.0.0.0/23".parse()?,
     ///     ]
     /// );
     /// # Ok(())
@@ -352,15 +350,16 @@ impl<P: Prefix> PrefixSet<P> {
     /// # #[cfg(feature = "ipnet")]
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
-    /// set.insert("10.0.0.0/16".parse()?);
-    /// set.insert("10.0.1.0/24".parse()?); // covered by 10.0.0.0/16 -> dropped
-    /// set.insert("10.1.0.0/24".parse()?); // not covered -> kept
+    /// set.insert("10.0.0.0/24".parse()?);
+    /// set.insert("10.0.1.0/24".parse()?);   // adjacent sibling of 10.0.0.0/24
+    /// set.insert("10.0.0.128/25".parse()?); // covered by 10.0.0.0/24
     /// set.aggregate_consistent();
+    /// // Only the covered /25 is dropped; the two /24 siblings are *not* merged.
     /// assert_eq!(
     ///     set.iter().collect::<Vec<_>>(),
     ///     vec![
-    ///         "10.0.0.0/16".parse()?,
-    ///         "10.1.0.0/24".parse()?,
+    ///         "10.0.0.0/24".parse()?,
+    ///         "10.0.1.0/24".parse()?,
     ///     ]
     /// );
     /// # Ok(())
