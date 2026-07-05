@@ -518,8 +518,7 @@ mod t {
     #[test]
     fn map_aggregate_fill_collapses_when_default_matches<P: Prefix + Copy + PartialEq>() {
         // The default equals every covered value, so the whole space becomes one default route.
-        let mut map =
-            Map::<P>::from_iter([(ip("10.0.0.0/8"), 1u32), (ip("192.168.0.0/16"), 1)]);
+        let mut map = Map::<P>::from_iter([(ip("10.0.0.0/8"), 1u32), (ip("192.168.0.0/16"), 1)]);
         map.aggregate_fill(|| 1);
         assert_eq!(
             Vec::from_iter(map.iter().map(|(p, v)| (p, *v))),

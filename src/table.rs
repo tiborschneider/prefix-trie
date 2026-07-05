@@ -421,7 +421,13 @@ impl<T> Table<T> {
     /// # Safety
     /// `parent_loc` must be a valid, live node location and `child_bit` must be absent.
     #[inline(always)]
-    pub(crate) unsafe fn insert_child_root(&mut self, parent_loc: Loc, child_bit: u32, parent_depth: u32, value: T) {
+    pub(crate) unsafe fn insert_child_root(
+        &mut self,
+        parent_loc: Loc,
+        child_bit: u32,
+        parent_depth: u32,
+        value: T,
+    ) {
         let child = self.nodes.insert_new_bit(parent_loc, child_bit);
         EmptyMut {
             table: self,

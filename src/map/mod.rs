@@ -714,8 +714,7 @@ where
         T: Clone + Eq,
     {
         // SAFETY: `Loc::root()` is always a valid, live node location.
-        let (_, count_delta) =
-            unsafe { self.table.aggregate_consistent_map(Loc::root(), 0, None) };
+        let (_, count_delta) = unsafe { self.table.aggregate_consistent_map(Loc::root(), 0, None) };
         self.count = (self.count as i64 + count_delta) as usize;
     }
 
@@ -757,7 +756,9 @@ where
     where
         T: Clone + Ord,
     {
-        let delta = self.table.aggregate_map::<P::R, fn() -> T>(Aggregation::Drop);
+        let delta = self
+            .table
+            .aggregate_map::<P::R, fn() -> T>(Aggregation::Drop);
         self.count = (self.count as i64 + delta) as usize;
     }
 
@@ -804,7 +805,9 @@ where
         T: Clone + Ord,
         F: Fn() -> T + Copy,
     {
-        let delta = self.table.aggregate_map::<P::R, F>(Aggregation::Fill(default));
+        let delta = self
+            .table
+            .aggregate_map::<P::R, F>(Aggregation::Fill(default));
         self.count = (self.count as i64 + delta) as usize;
     }
 
