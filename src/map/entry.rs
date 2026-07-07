@@ -108,6 +108,10 @@ impl<P: Prefix, T> Entry<'_, P, T> {
 
     /// get the key of the current entry
     ///
+    /// **Note**: For an occupied entry, this is the canonical stored prefix (host bits masked
+    /// out). For a vacant entry, the prefix is returned exactly as it was passed to
+    /// [`PrefixMap::entry`](crate::PrefixMap::entry), including any host bits.
+    ///
     /// ```
     /// # use prefix_trie::*;
     /// # #[cfg(feature = "ipnet")]
@@ -530,6 +534,10 @@ impl<'a, P, T> OccupiedEntry<'a, P, T> {
 
 impl<P, T> VacantEntry<'_, P, T> {
     /// Gets a reference to the key in the entry.
+    ///
+    /// **Note**: The prefix is returned exactly as it was passed to
+    /// [`PrefixMap::entry`](crate::PrefixMap::entry); host bits are not masked. This differs
+    /// from [`OccupiedEntry::key`], which returns the canonical stored prefix.
     ///
     /// ```
     /// # use prefix_trie::*;

@@ -1272,6 +1272,12 @@ where
     pub fn check_memory_alloc(&self) -> bool {
         self.table.check_memory_alloc()
     }
+
+    /// Count the live nodes reachable from the root, including the root itself.
+    #[cfg(test)]
+    pub(crate) fn num_nodes(&self) -> usize {
+        self.table.num_nodes()
+    }
 }
 
 #[cfg(test)]

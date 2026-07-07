@@ -201,6 +201,14 @@ pub trait TrieView<'a>: Sized {
     ///
     /// A shallow bitmap check: `true` means data or children exist worth exploring.
     /// `false` means the sub-trie is definitely empty.
+    ///
+    /// **Note**: Composed views may over-approximate their bitmaps. For example,
+    /// [`DifferenceView`] and [`CoveringDifferenceView`] always expose all of the left side's
+    /// children, since some of their subtrees may be absent from the right side. For such views,
+    /// `true` may be returned even though iterating the view yields no entries. `false` is
+    /// always exact. To check emptiness exactly, iterate:
+    /// `view.iter().next().is_none()`. Note that [`iter`][Self::iter] takes the view by value;
+    /// clone it first if you still need it afterwards.
     #[inline]
     fn is_non_empty(&self) -> bool {
         self.data_bitmap() != 0 || self.child_bitmap() != 0
@@ -353,6 +361,13 @@ pub trait TrieView<'a>: Sized {
     }
 
     /// Navigate to `prefix` and return the view if the sub-trie is non-empty.
+    ///
+    /// The emptiness check uses [`is_non_empty`][Self::is_non_empty], which may over-approximate
+    /// on composed views (e.g., [`DifferenceView`]): the returned view may yield no entries when
+    /// iterated. `None`, however, always means that the view contains nothing at or below
+    /// `prefix`. To check exactly whether the sub-trie contains an entry, iterate the returned
+    /// view: `view.iter().next().is_none()`. Note that [`iter`][Self::iter] takes the view by
+    /// value; clone it first if you still need it afterwards.
     ///
     /// ```
     /// # use prefix_trie::{PrefixMap, AsView, TrieView};
@@ -1025,6 +1040,13 @@ pub trait AsView<'a> {
     fn view(self) -> Self::View;
 
     /// Get a view rooted at `prefix`, or `None` if the sub-trie is empty.
+    ///
+    /// The emptiness check may over-approximate on composed views (see
+    /// [`TrieView::is_non_empty`]): the returned view may yield no entries when iterated.
+    /// `None` always means that the view contains nothing at or below `prefix`. To check
+    /// exactly whether the sub-trie contains an entry, iterate the returned view:
+    /// `view.iter().next().is_none()`. Note that [`TrieView::iter`] takes the view by value;
+    /// clone it first if you still need it afterwards.
     fn view_at(self, prefix: &Self::P) -> Option<Self::View>
     where
         Self: Sized,
