@@ -99,6 +99,59 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.mem_size()
     }
 
+    /// Count the number of unique addresses covered by all prefixes in the set.
+    ///
+    /// The set is first aggregated (using [`aggregate_consistent`](Self::aggregate_consistent)),
+    /// so overlapping prefixes are counted only once. Returns `None` if the entire
+    /// address space is covered (e.g., `::/0` for IPv6), since 2<sup>num_bits</sup>
+    /// cannot be represented in a `u128`.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// set.insert("192.0.2.0/24".parse()?);
+    /// set.insert("198.51.100.0/24".parse()?);
+    /// assert_eq!(set.address_count(), Some(512));
+    ///
+    /// // Full IPv4 space (2^32 fits in u128)
+    /// let mut full: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// full.insert("0.0.0.0/0".parse()?);
+    /// assert_eq!(full.address_count(), Some(1u128 << 32));
+    ///
+    /// // Full IPv6 space (2^128 overflows u128)
+    /// let mut full6: PrefixSet<ipnet::Ipv6Net> = PrefixSet::new();
+    /// full6.insert("::/0".parse()?);
+    /// assert_eq!(full6.address_count(), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn address_count(&self) -> Option<u128> {
+        // Count addresses covered by any prefix, skipping those already covered by a
+        // strictly shorter prefix (via shortest-prefix match).
+        let mut count: u128 = 0;
+        for prefix in self.iter() {
+            if let Some(spm) = self.get_spm(&prefix) {
+                if spm.prefix_len() < prefix.prefix_len() {
+                    continue;
+                }
+            }
+            let host_bits = P::num_bits() - prefix.prefix_len() as u32;
+            match 1u128
+                .checked_shl(host_bits)
+                .and_then(|c| count.checked_add(c))
+            {
+                Some(v) => count = v,
+                None => return None,
+            }
+        }
+        Some(count)
+    }
+
     /// Check whether `prefix` is present in the set using exact prefix matching.
     ///
     /// ```

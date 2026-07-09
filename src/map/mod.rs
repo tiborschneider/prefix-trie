@@ -65,6 +65,61 @@ where
         self.table.mem_size() + std::mem::size_of::<Self>()
     }
 
+    /// Count the number of unique addresses covered by all prefixes in the map.
+    ///
+    /// The map is first aggregated (using [`aggregate_consistent`](Self::aggregate_consistent)),
+    /// so overlapping prefixes are counted only once. Returns `None` if the entire
+    /// address space is covered (e.g., `::/0` for IPv6), since 2<sup>num_bits</sup>
+    /// cannot be represented in a `u128`.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixMap;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, u32> = PrefixMap::new();
+    /// pm.insert("192.0.2.0/24".parse()?, 1);
+    /// pm.insert("192.0.2.128/25".parse()?, 2); // overlaps, counted once
+    /// pm.insert("198.51.100.0/24".parse()?, 3);
+    /// assert_eq!(pm.address_count(), Some(512));
+    ///
+    /// // Full IPv4 space (2^32 fits in u128)
+    /// let mut full: PrefixMap<ipnet::Ipv4Net, u32> = PrefixMap::new();
+    /// full.insert("0.0.0.0/0".parse()?, 1);
+    /// assert_eq!(full.address_count(), Some(1u128 << 32));
+    ///
+    /// // Full IPv6 space (2^128 overflows u128)
+    /// let mut full6: PrefixMap<ipnet::Ipv6Net, u32> = PrefixMap::new();
+    /// full6.insert("::/0".parse()?, 1);
+    /// assert_eq!(full6.address_count(), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn address_count(&self) -> Option<u128> {
+        // Count addresses covered by any prefix, skipping those already covered by a
+        // strictly shorter prefix (via shortest-prefix match).  This avoids cloning or
+        // mutating the map while correctly deduplicating overlapping prefixes.
+        let mut count: u128 = 0;
+        for (prefix, _) in self.iter() {
+            if let Some((spm, _)) = self.get_spm(&prefix) {
+                if spm.prefix_len() < prefix.prefix_len() {
+                    continue;
+                }
+            }
+            let host_bits = P::num_bits() - prefix.prefix_len() as u32;
+            match 1u128
+                .checked_shl(host_bits)
+                .and_then(|c| count.checked_add(c))
+            {
+                Some(v) => count = v,
+                None => return None,
+            }
+        }
+        Some(count)
+    }
+
     /// Return a reference to the underlying table (crate-internal use only).
     #[inline(always)]
     pub(crate) fn table(&self) -> &Table<T> {

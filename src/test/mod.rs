@@ -2,6 +2,7 @@ use ipnet::Ipv4Net;
 use num_traits::NumCast;
 
 use super::*;
+mod address_count;
 mod aggregate;
 
 type Map<P> = PrefixMap<P, u32>;

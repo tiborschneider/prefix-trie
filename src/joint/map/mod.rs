@@ -91,6 +91,46 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         self.len() == 0
     }
 
+    /// Count the number of unique addresses covered by all prefixes, split by address family.
+    ///
+    /// Each table is first aggregated, so overlapping prefixes are counted only once.
+    /// Returns `None` for an address family if its entire space is covered
+    /// (e.g., `::/0` for IPv6), since 2<sup>num_bits</sup>
+    /// cannot be represented in a `u128`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
+    /// pm.insert("192.0.2.0/24".parse()?, 1);
+    /// pm.insert("2001:db8::/48".parse()?, 2);
+    /// let count = pm.address_count();
+    /// assert_eq!(count.0, Some(256));
+    /// assert_eq!(count.1, Some(1u128 << 80));
+    ///
+    /// // Full IPv4 space (2^32 fits in u128)
+    /// let mut full: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
+    /// full.insert("0.0.0.0/0".parse()?, 1);
+    /// let count = full.address_count();
+    /// assert_eq!(count.0, Some(1u128 << 32));
+    /// assert_eq!(count.1, Some(0));
+    ///
+    /// // Full IPv6 space (2^128 overflows u128)
+    /// let mut full6: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
+    /// full6.insert("::/0".parse()?, 1);
+    /// let count = full6.address_count();
+    /// assert_eq!(count.0, Some(0));
+    /// assert_eq!(count.1, None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn address_count(&self) -> (Option<u128>, Option<u128>) {
+        (self.t1.address_count(), self.t2.address_count())
+    }
+
     /// Get the value of an element by matching exactly on the prefix.
     ///
     /// ```
