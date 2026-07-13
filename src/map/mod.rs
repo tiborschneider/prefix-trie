@@ -67,8 +67,8 @@ where
 
     /// Count the number of unique addresses covered by all prefixes in the map.
     ///
-    /// The map is first aggregated (using [`aggregate_consistent`](Self::aggregate_consistent)),
-    /// so overlapping prefixes are counted only once. Returns `None` if the entire
+    /// A read-only trie traversal skips prefixes covered by a shorter stored prefix, so
+    /// overlapping prefixes are counted only once. Returns `None` if the entire
     /// address space is covered (e.g., `::/0` for IPv6), since 2<sup>num_bits</sup>
     /// cannot be represented in a `u128`.
     ///
@@ -98,26 +98,7 @@ where
     /// # fn main() {}
     /// ```
     pub fn address_count(&self) -> Option<u128> {
-        // Count addresses covered by any prefix, skipping those already covered by a
-        // strictly shorter prefix (via shortest-prefix match).  This avoids cloning or
-        // mutating the map while correctly deduplicating overlapping prefixes.
-        let mut count: u128 = 0;
-        for (prefix, _) in self.iter() {
-            if let Some((spm, _)) = self.get_spm(&prefix) {
-                if spm.prefix_len() < prefix.prefix_len() {
-                    continue;
-                }
-            }
-            let host_bits = P::num_bits() - prefix.prefix_len() as u32;
-            match 1u128
-                .checked_shl(host_bits)
-                .and_then(|c| count.checked_add(c))
-            {
-                Some(v) => count = v,
-                None => return None,
-            }
-        }
-        Some(count)
+        self.table.address_count::<P>()
     }
 
     /// Return a reference to the underlying table (crate-internal use only).

@@ -4,7 +4,7 @@ mod t {
 
     /// Helper: expected address count for a prefix of given length in a `P::num_bits()`-bit space.
     fn expected_count<P: Prefix>(prefix_len: u8) -> u128 {
-        let host_bits = P::num_bits() as u32 - prefix_len as u32;
+        let host_bits = P::num_bits() - prefix_len as u32;
         1u128 << host_bits
     }
 
@@ -193,7 +193,7 @@ mod t {
 #[cfg(feature = "ipnet")]
 #[cfg(test)]
 mod joint {
-    use crate::joint::JointPrefixMap;
+    use crate::joint::{JointPrefixMap, JointPrefixSet};
 
     #[test]
     fn joint_map_address_count_basic() {
@@ -203,6 +203,15 @@ mod joint {
         let count = pm.address_count();
         assert_eq!(count.0, Some(256));
         assert_eq!(count.1, Some(1u128 << 80));
+    }
+
+    #[test]
+    fn joint_set_address_count_basic() {
+        let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+        set.insert("192.0.2.0/24".parse().unwrap());
+        set.insert("192.0.2.128/25".parse().unwrap());
+        set.insert("2001:db8::/48".parse().unwrap());
+        assert_eq!(set.address_count(), (Some(256), Some(1u128 << 80)));
     }
 
     #[test]

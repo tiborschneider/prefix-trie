@@ -101,8 +101,8 @@ impl<P: Prefix> PrefixSet<P> {
 
     /// Count the number of unique addresses covered by all prefixes in the set.
     ///
-    /// The set is first aggregated (using [`aggregate_consistent`](Self::aggregate_consistent)),
-    /// so overlapping prefixes are counted only once. Returns `None` if the entire
+    /// A read-only trie traversal skips prefixes covered by a shorter stored prefix, so
+    /// overlapping prefixes are counted only once. Returns `None` if the entire
     /// address space is covered (e.g., `::/0` for IPv6), since 2<sup>num_bits</sup>
     /// cannot be represented in a `u128`.
     ///
@@ -131,25 +131,7 @@ impl<P: Prefix> PrefixSet<P> {
     /// # fn main() {}
     /// ```
     pub fn address_count(&self) -> Option<u128> {
-        // Count addresses covered by any prefix, skipping those already covered by a
-        // strictly shorter prefix (via shortest-prefix match).
-        let mut count: u128 = 0;
-        for prefix in self.iter() {
-            if let Some(spm) = self.get_spm(&prefix) {
-                if spm.prefix_len() < prefix.prefix_len() {
-                    continue;
-                }
-            }
-            let host_bits = P::num_bits() - prefix.prefix_len() as u32;
-            match 1u128
-                .checked_shl(host_bits)
-                .and_then(|c| count.checked_add(c))
-            {
-                Some(v) => count = v,
-                None => return None,
-            }
-        }
-        Some(count)
+        self.0.address_count()
     }
 
     /// Check whether `prefix` is present in the set using exact prefix matching.

@@ -79,6 +79,28 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         self.len() == 0
     }
 
+    /// Count the number of unique addresses covered by all prefixes, split by address family.
+    ///
+    /// Returns `None` for an address family if its entire space is covered (e.g., `::/0` for
+    /// IPv6), since 2<sup>num_bits</sup> cannot be represented in a `u128`.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+    /// set.insert("192.0.2.0/24".parse()?);
+    /// set.insert("2001:db8::/48".parse()?);
+    /// assert_eq!(set.address_count(), (Some(256), Some(1u128 << 80)));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn address_count(&self) -> (Option<u128>, Option<u128>) {
+        (self.t1.address_count(), self.t2.address_count())
+    }
+
     /// Check whether some prefix is present in the set, without using longest prefix match.
     ///
     /// ```
