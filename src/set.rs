@@ -102,9 +102,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// Count the number of unique addresses covered by all prefixes in the set.
     ///
     /// A read-only trie traversal skips prefixes covered by a shorter stored prefix, so
-    /// overlapping prefixes are counted only once. Returns `None` if the entire
-    /// address space is covered (e.g., `::/0` for IPv6), since 2<sup>num_bits</sup>
-    /// cannot be represented in a `u128`.
+    /// overlapping prefixes are counted only once. Returns `None` if the count cannot be
+    /// represented in the prefix's address representation, such as a fully covered address space.
     ///
     /// ```
     /// use prefix_trie::PrefixSet;
@@ -116,12 +115,11 @@ impl<P: Prefix> PrefixSet<P> {
     /// set.insert("198.51.100.0/24".parse()?);
     /// assert_eq!(set.address_count(), Some(512));
     ///
-    /// // Full IPv4 space (2^32 fits in u128)
+    /// // Full address spaces cannot be represented in their address type.
     /// let mut full: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
     /// full.insert("0.0.0.0/0".parse()?);
-    /// assert_eq!(full.address_count(), Some(1u128 << 32));
+    /// assert_eq!(full.address_count(), None);
     ///
-    /// // Full IPv6 space (2^128 overflows u128)
     /// let mut full6: PrefixSet<ipnet::Ipv6Net> = PrefixSet::new();
     /// full6.insert("::/0".parse()?);
     /// assert_eq!(full6.address_count(), None);
@@ -130,7 +128,7 @@ impl<P: Prefix> PrefixSet<P> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn address_count(&self) -> Option<u128> {
+    pub fn address_count(&self) -> Option<P::R> {
         self.0.address_count()
     }
 

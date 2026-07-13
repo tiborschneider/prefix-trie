@@ -3,9 +3,9 @@ mod t {
     use super::super::*;
 
     /// Helper: expected address count for a prefix of given length in a `P::num_bits()`-bit space.
-    fn expected_count<P: Prefix>(prefix_len: u8) -> u128 {
+    fn expected_count<P: Prefix>(prefix_len: u8) -> P::R {
         let host_bits = P::num_bits() - prefix_len as u32;
-        1u128 << host_bits
+        P::R::one() << host_bits as usize
     }
 
     // ── PrefixMap ──────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@ mod t {
     fn map_address_count_single_prefix<P: Prefix>() {
         let mut pm = Map::<P>::new();
         pm.insert(ip("10.0.0.0/24"), 1);
-        assert_eq!(pm.address_count(), Some(expected_count::<P>(24)));
+        assert!(pm.address_count() == Some(expected_count::<P>(24)));
     }
 
     #[test]
@@ -22,7 +22,7 @@ mod t {
         let mut pm = Map::<P>::new();
         pm.insert(ip("10.0.0.0/24"), 1);
         pm.insert(ip("10.0.1.0/24"), 2);
-        assert_eq!(pm.address_count(), Some(2 * expected_count::<P>(24)));
+        assert!(pm.address_count() == Some(expected_count::<P>(24) + expected_count::<P>(24)));
     }
 
     #[test]
@@ -31,7 +31,7 @@ mod t {
         let mut pm = Map::<P>::new();
         pm.insert(ip("10.0.0.0/24"), 1);
         pm.insert(ip("10.0.0.128/25"), 2);
-        assert_eq!(pm.address_count(), Some(expected_count::<P>(24)));
+        assert!(pm.address_count() == Some(expected_count::<P>(24)));
     }
 
     #[test]
@@ -39,39 +39,30 @@ mod t {
         let mut pm = Map::<P>::new();
         pm.insert(ip("10.0.0.0/24"), 1);
         pm.insert(ip("10.0.0.0/24"), 2);
-        assert_eq!(pm.address_count(), Some(expected_count::<P>(24)));
+        assert!(pm.address_count() == Some(expected_count::<P>(24)));
     }
 
     #[test]
     fn map_address_count_empty<P: Prefix>() {
         let pm = Map::<P>::new();
-        assert_eq!(pm.address_count(), Some(0));
+        assert!(pm.address_count() == Some(P::R::zero()));
     }
 
     #[test]
     fn map_address_count_full_space<P: Prefix>() {
-        // /0 covers the entire address space: 2^num_bits addresses
+        // /0 covers the entire address space, which does not fit in P::R.
         let mut pm = Map::<P>::new();
         pm.insert(ip("0.0.0.0/0"), 1);
-        if P::num_bits() >= 128 {
-            // 2^128 overflows u128
-            assert_eq!(pm.address_count(), None);
-        } else {
-            assert_eq!(pm.address_count(), Some(1u128 << P::num_bits()));
-        }
+        assert!(pm.address_count().is_none());
     }
 
     #[test]
     fn map_address_count_two_halves<P: Prefix>() {
-        // Two /1 prefixes cover the full space: 2^(n-1) + 2^(n-1) = 2^n
+        // Two /1 prefixes cover the full space, which does not fit in P::R.
         let mut pm = Map::<P>::new();
         pm.insert(ip("0.0.0.0/1"), 1);
         pm.insert(ip("128.0.0.0/1"), 2);
-        if P::num_bits() >= 128 {
-            assert_eq!(pm.address_count(), None);
-        } else {
-            assert_eq!(pm.address_count(), Some(1u128 << P::num_bits()));
-        }
+        assert!(pm.address_count().is_none());
     }
 
     #[test]
@@ -82,7 +73,7 @@ mod t {
         pm.insert(ip("10.0.0.0/16"), 1);
         pm.insert(ip("10.0.0.0/24"), 2);
         pm.insert(ip("10.0.1.0/24"), 3);
-        assert_eq!(pm.address_count(), Some(expected_count::<P>(16)));
+        assert!(pm.address_count() == Some(expected_count::<P>(16)));
     }
 
     #[test]
@@ -92,10 +83,7 @@ mod t {
         pm.insert(ip("10.0.0.0/16"), 1);
         pm.insert(ip("10.0.0.0/24"), 2); // inside /16
         pm.insert(ip("11.0.0.0/24"), 3); // outside /16
-        assert_eq!(
-            pm.address_count(),
-            Some(expected_count::<P>(16) + expected_count::<P>(24))
-        );
+        assert!(pm.address_count() == Some(expected_count::<P>(16) + expected_count::<P>(24)));
     }
 
     // ── PrefixSet ──────────────────────────────────────────────────────────
@@ -103,45 +91,37 @@ mod t {
     #[test]
     fn set_address_count_single_prefix<P: Prefix + Copy + PartialEq>() {
         let set = PrefixSet::<P>::from_iter([ip("10.0.0.0/24")]);
-        assert_eq!(set.address_count(), Some(expected_count::<P>(24)));
+        assert!(set.address_count() == Some(expected_count::<P>(24)));
     }
 
     #[test]
     fn set_address_count_overlapping<P: Prefix + Copy + PartialEq>() {
         let set = PrefixSet::<P>::from_iter([ip("10.0.0.0/24"), ip("10.0.0.128/25")]);
-        assert_eq!(set.address_count(), Some(expected_count::<P>(24)));
+        assert!(set.address_count() == Some(expected_count::<P>(24)));
     }
 
     #[test]
     fn set_address_count_empty<P: Prefix + Copy + PartialEq>() {
         let set = PrefixSet::<P>::new();
-        assert_eq!(set.address_count(), Some(0));
+        assert!(set.address_count() == Some(P::R::zero()));
     }
 
     #[test]
     fn set_address_count_full_space<P: Prefix + Copy + PartialEq>() {
         let set = PrefixSet::<P>::from_iter([ip("0.0.0.0/0")]);
-        if P::num_bits() >= 128 {
-            assert_eq!(set.address_count(), None);
-        } else {
-            assert_eq!(set.address_count(), Some(1u128 << P::num_bits()));
-        }
+        assert!(set.address_count().is_none());
     }
 
     #[test]
     fn set_address_count_non_overlapping<P: Prefix + Copy + PartialEq>() {
         let set = PrefixSet::<P>::from_iter([ip("10.0.0.0/24"), ip("10.0.1.0/24")]);
-        assert_eq!(set.address_count(), Some(2 * expected_count::<P>(24)));
+        assert!(set.address_count() == Some(expected_count::<P>(24) + expected_count::<P>(24)));
     }
 
     #[test]
     fn set_address_count_two_halves<P: Prefix + Copy + PartialEq>() {
         let set = PrefixSet::<P>::from_iter([ip("0.0.0.0/1"), ip("128.0.0.0/1")]);
-        if P::num_bits() >= 128 {
-            assert_eq!(set.address_count(), None);
-        } else {
-            assert_eq!(set.address_count(), Some(1u128 << P::num_bits()));
-        }
+        assert!(set.address_count().is_none());
     }
 
     // ── Instantiations ─────────────────────────────────────────────────────
@@ -227,8 +207,8 @@ mod joint {
         let mut pm: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
         pm.insert("0.0.0.0/0".parse().unwrap(), 1);
         let count = pm.address_count();
-        // 2^32 fits in u128
-        assert_eq!(count.0, Some(1u128 << 32));
+        // 2^32 does not fit in u32.
+        assert_eq!(count.0, None);
         assert_eq!(count.1, Some(0));
     }
 
@@ -238,7 +218,7 @@ mod joint {
         pm.insert("::/0".parse().unwrap(), 1);
         let count = pm.address_count();
         assert_eq!(count.0, Some(0));
-        assert_eq!(count.1, None); // 2^128 overflows u128
+        assert_eq!(count.1, None); // 2^128 does not fit in u128
     }
 
     #[test]
@@ -247,7 +227,7 @@ mod joint {
         pm.insert("0.0.0.0/0".parse().unwrap(), 1);
         pm.insert("::/0".parse().unwrap(), 2);
         let count = pm.address_count();
-        assert_eq!(count.0, Some(1u128 << 32));
+        assert_eq!(count.0, None);
         assert_eq!(count.1, None);
     }
 

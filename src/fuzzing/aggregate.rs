@@ -93,6 +93,7 @@ fn _aggregate_set(prefixes: Vec<TestPrefix>) -> bool {
     // The covered address space must be preserved exactly, and the cached `len()` must stay in sync
     // with the actual element count (it is maintained manually via the aggregation's count delta).
     original_space == aggregated_space
+        && original.address_count() == aggregated.address_count()
         && aggregated.len() == aggregated.iter().count()
         && aggregated.0.check_memory_alloc()
         && aggregated == double_agg
@@ -165,6 +166,7 @@ fn _aggregate_consistent_map(entries: Vec<(TestPrefix, u8)>) -> bool {
 
     // `get_lpm` is identical for every address, and `aggregate_consistent` is idempotent.
     original_lpm == aggregated_lpm
+        && original.address_count() == aggregated.address_count()
         && is_subset
         && aggregated.len() == aggregated.iter().count()
         && aggregated.check_memory_alloc()
@@ -195,6 +197,7 @@ fn _aggregate_consistent_set(prefixes: Vec<TestPrefix>) -> bool {
         .all(|p| original.get_lpm(p).is_some() == aggregated.get_lpm(p).is_some());
 
     original_space == aggregated_space
+        && original.address_count() == aggregated.address_count()
         && is_subset
         && lpm_presence_preserved
         && aggregated.len() == aggregated.iter().count()
@@ -219,6 +222,7 @@ fn _aggregate_map(entries: Vec<(TestPrefix, u8)>) -> bool {
     // Equal range-maps mean `get_lpm` matches for every address, covered set included: a newly
     // covered hole would appear as an extra range and fail the comparison.
     original_lpm == aggregated_lpm
+        && original.address_count() == aggregated.address_count()
         && aggregated.len() == aggregated.iter().count()
         && aggregated.check_memory_alloc()
         && aggregated == twice

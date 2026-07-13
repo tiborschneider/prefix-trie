@@ -1,7 +1,7 @@
 //! Module that defines the JointPrefixMap
 
 use super::JointPrefix;
-use crate::{AsView, PrefixMap, TrieView};
+use crate::{AsView, Prefix, PrefixMap, TrieView};
 #[cfg(test)]
 #[cfg(feature = "ipnet")]
 mod test;
@@ -93,10 +93,9 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
 
     /// Count the number of unique addresses covered by all prefixes, split by address family.
     ///
-    /// Each table is first aggregated, so overlapping prefixes are counted only once.
-    /// Returns `None` for an address family if its entire space is covered
-    /// (e.g., `::/0` for IPv6), since 2<sup>num_bits</sup>
-    /// cannot be represented in a `u128`.
+    /// Each table is traversed without mutation, so overlapping prefixes are counted only once.
+    /// Returns `None` for an address family if its count cannot be represented in that family's
+    /// address representation, such as a fully covered address space.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -109,14 +108,13 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// assert_eq!(count.0, Some(256));
     /// assert_eq!(count.1, Some(1u128 << 80));
     ///
-    /// // Full IPv4 space (2^32 fits in u128)
+    /// // Full address spaces cannot be represented in their address type.
     /// let mut full: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
     /// full.insert("0.0.0.0/0".parse()?, 1);
     /// let count = full.address_count();
-    /// assert_eq!(count.0, Some(1u128 << 32));
+    /// assert_eq!(count.0, None);
     /// assert_eq!(count.1, Some(0));
     ///
-    /// // Full IPv6 space (2^128 overflows u128)
     /// let mut full6: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
     /// full6.insert("::/0".parse()?, 1);
     /// let count = full6.address_count();
@@ -127,7 +125,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn address_count(&self) -> (Option<u128>, Option<u128>) {
+    #[allow(clippy::type_complexity)]
+    pub fn address_count(&self) -> (Option<<P::P1 as Prefix>::R>, Option<<P::P2 as Prefix>::R>) {
         (self.t1.address_count(), self.t2.address_count())
     }
 

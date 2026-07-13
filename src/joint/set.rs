@@ -2,7 +2,7 @@
 //! [`super::JointPrefixMap`].
 
 use crate::PrefixSet;
-use crate::{AsView, TrieView};
+use crate::{AsView, Prefix, TrieView};
 use either::{Left, Right};
 
 use super::{map::CoverKeys, JointPrefix};
@@ -81,8 +81,8 @@ impl<P: JointPrefix> JointPrefixSet<P> {
 
     /// Count the number of unique addresses covered by all prefixes, split by address family.
     ///
-    /// Returns `None` for an address family if its entire space is covered (e.g., `::/0` for
-    /// IPv6), since 2<sup>num_bits</sup> cannot be represented in a `u128`.
+    /// Returns `None` for an address family if its count cannot be represented in that family's
+    /// address representation, such as a fully covered address space.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -97,7 +97,8 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     /// # #[cfg(not(feature = "ipnet"))]
     /// # fn main() {}
     /// ```
-    pub fn address_count(&self) -> (Option<u128>, Option<u128>) {
+    #[allow(clippy::type_complexity)]
+    pub fn address_count(&self) -> (Option<<P::P1 as Prefix>::R>, Option<<P::P2 as Prefix>::R>) {
         (self.t1.address_count(), self.t2.address_count())
     }
 

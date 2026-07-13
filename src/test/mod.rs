@@ -1,5 +1,5 @@
 use ipnet::Ipv4Net;
-use num_traits::NumCast;
+use num_traits::{NumCast, One, Zero};
 
 use super::*;
 mod address_count;
