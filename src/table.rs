@@ -460,6 +460,9 @@ impl<T> Table<T> {
     /// Count addresses covered by stored prefixes without descending into sub-tries covered by an
     /// ancestor prefix.
     pub(crate) fn address_count<P: Prefix>(&self) -> Option<P::R> {
+        if self.node(Loc::root()).has_data_bit(0) {
+            return None;
+        }
         self.address_count_at::<P>(Loc::root(), 0)
     }
 
@@ -475,9 +478,6 @@ impl<T> Table<T> {
             }
             let prefix_len = depth + DATA_BIT_TO_PREFIX[bit as usize].1 as u32;
             let host_bits = P::num_bits() - prefix_len;
-            if host_bits == P::num_bits() {
-                return None;
-            }
             let addresses = P::R::one() << host_bits as usize;
             count = count.checked_add(&addresses)?;
         }
