@@ -79,10 +79,12 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         self.len() == 0
     }
 
-    /// Count the number of unique addresses covered by all prefixes, split by address family.
+    /// Count the number of unique addresses covered by all prefixes, split by address family. The
+    /// function returns `None` for a table if it is fully covered. Overlapping prefixes are not
+    /// double-counted.
     ///
-    /// Returns `None` for an address family if its count cannot be represented in that family's
-    /// address representation, such as a fully covered address space.
+    /// To avoid double-counting, the function traverses both trees tree once, skipping nodes that
+    /// are already covered.
     ///
     /// ```
     /// # use prefix_trie::joint::*;

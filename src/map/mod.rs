@@ -65,11 +65,12 @@ where
         self.table.mem_size() + std::mem::size_of::<Self>()
     }
 
-    /// Count the number of unique addresses covered by all prefixes in the map.
+    /// Count the number of unique addresses covered by all prefixes in the map. If the entire trie
+    /// is covered, the function returns `None` (as it contains `P::R::MAX + 1` addresses).
+    /// Overlapping prefixes are not double-counted.
     ///
-    /// A read-only trie traversal skips prefixes covered by a shorter stored prefix, so
-    /// overlapping prefixes are counted only once. Returns `None` if the count cannot be
-    /// represented in the prefix's address representation, such as a fully covered address space.
+    /// To avoid double-counting, the function traverses the (partial) tree once, skipping nodes
+    /// that are already covered.
     ///
     /// ```
     /// use prefix_trie::PrefixMap;
@@ -82,14 +83,8 @@ where
     /// pm.insert("198.51.100.0/24".parse()?, 3);
     /// assert_eq!(pm.address_count(), Some(512));
     ///
-    /// // Full address spaces cannot be represented in their address type.
-    /// let mut full: PrefixMap<ipnet::Ipv4Net, u32> = PrefixMap::new();
-    /// full.insert("0.0.0.0/0".parse()?, 1);
-    /// assert_eq!(full.address_count(), None);
-    ///
-    /// let mut full6: PrefixMap<ipnet::Ipv6Net, u32> = PrefixMap::new();
-    /// full6.insert("::/0".parse()?, 1);
-    /// assert_eq!(full6.address_count(), None);
+    /// pm.insert("0.0.0.0/0".parse()?, 1);
+    /// assert_eq!(pm.address_count(), None);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]

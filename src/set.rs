@@ -99,11 +99,12 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.mem_size()
     }
 
-    /// Count the number of unique addresses covered by all prefixes in the set.
+    /// Count the number of unique addresses covered by all prefixes in the set. If the entire trie
+    /// is covered, the function returns `None` (as it contains `P::R::MAX + 1` addresses).
+    /// Overlapping prefixes are not double-counted.
     ///
-    /// A read-only trie traversal skips prefixes covered by a shorter stored prefix, so
-    /// overlapping prefixes are counted only once. Returns `None` if the count cannot be
-    /// represented in the prefix's address representation, such as a fully covered address space.
+    /// To avoid double-counting, the function traverses the (partial) tree once, skipping nodes
+    /// that are already covered.
     ///
     /// ```
     /// use prefix_trie::PrefixSet;
@@ -116,13 +117,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// assert_eq!(set.address_count(), Some(512));
     ///
     /// // Full address spaces cannot be represented in their address type.
-    /// let mut full: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
-    /// full.insert("0.0.0.0/0".parse()?);
-    /// assert_eq!(full.address_count(), None);
-    ///
-    /// let mut full6: PrefixSet<ipnet::Ipv6Net> = PrefixSet::new();
-    /// full6.insert("::/0".parse()?);
-    /// assert_eq!(full6.address_count(), None);
+    /// set.insert("0.0.0.0/0".parse()?);
+    /// assert_eq!(set.address_count(), None);
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]

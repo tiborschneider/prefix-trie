@@ -91,11 +91,12 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         self.len() == 0
     }
 
-    /// Count the number of unique addresses covered by all prefixes, split by address family.
+    /// Count the number of unique addresses covered by all prefixes, split by address family. The
+    /// function returns `None` for a table if it is fully covered. Overlapping prefixes are not
+    /// double-counted.
     ///
-    /// Each table is traversed without mutation, so overlapping prefixes are counted only once.
-    /// Returns `None` for an address family if its count cannot be represented in that family's
-    /// address representation, such as a fully covered address space.
+    /// To avoid double-counting, the function traverses both trees tree once, skipping nodes that
+    /// are already covered.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -104,22 +105,16 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     /// let mut pm: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
     /// pm.insert("192.0.2.0/24".parse()?, 1);
     /// pm.insert("2001:db8::/48".parse()?, 2);
-    /// let count = pm.address_count();
-    /// assert_eq!(count.0, Some(256));
-    /// assert_eq!(count.1, Some(1u128 << 80));
+    /// assert_eq!(pm.address_count(), (Some(256), Some(1u128 << 80)));
     ///
     /// // Full address spaces cannot be represented in their address type.
     /// let mut full: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
     /// full.insert("0.0.0.0/0".parse()?, 1);
-    /// let count = full.address_count();
-    /// assert_eq!(count.0, None);
-    /// assert_eq!(count.1, Some(0));
+    /// assert_eq!(full.address_count(), (None, Some(0)));
     ///
     /// let mut full6: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
     /// full6.insert("::/0".parse()?, 1);
-    /// let count = full6.address_count();
-    /// assert_eq!(count.0, Some(0));
-    /// assert_eq!(count.1, None);
+    /// assert_eq!(full6.address_count(), (Some(0), None));
     /// # Ok(())
     /// # }
     /// # #[cfg(not(feature = "ipnet"))]
