@@ -538,7 +538,8 @@ where
     }
 
     /// Remove all entries that are contained within `prefix`. This will change the tree
-    /// structure. This operation is `O(n)`, as the entries must be freed up one-by-one.
+    /// structure. This operation is `O(n)`, as the entries must be freed up one-by-one. Like
+    /// [`Self::remove`], this prunes trie nodes that become empty.
     ///
     /// ```
     /// # use prefix_trie::*; use prefix_trie::*;
@@ -574,63 +575,70 @@ where
             return self.clear();
         }
 
-        let loc_mut = self.table.find_mut(key, prefix_len);
-        if matches!(loc_mut, super::table::Location::NoNode(_)) {
+        let Some((loc_mut, mut path)) = self.table.find_mut_with_path(key, prefix_len) else {
             return;
-        }
+        };
         let node = loc_mut.node_loc();
         let depth = loc_mut.depth();
 
         // fast-track delete this index if it covers the entire node
         if prefix_len % K == 0 {
-            // SAFETY: `node` came from `find_mut` with no subsequent structural mutations.
+            // SAFETY: `node` came from `find_mut_with_path` with no subsequent structural
+            // mutations.
             self.count -= unsafe { self.table.clear_node_and_children(node) };
-            return;
-        }
+        } else {
+            // Collect bitmap bits of covered data elements (from current node state).
+            // SAFETY: `node` came from `find_mut_with_path`; no structural mutations have
+            // occurred yet.
+            let covered_bits: Vec<u32> =
+                unsafe { self.table.data_descendants(node, depth, key, prefix_len) }
+                    .map(|mp| mp.bit)
+                    .collect();
+            for bit in covered_bits {
+                let idx = super::table::DataIdx { node, bit, depth };
+                // SAFETY: We only remove data cells in this loop; the node allocator structure
+                // (MultiBitNode slots, child pointers) is not modified, so `node` remains valid.
+                // resolve_mut re-reads the current AllocIdx + bitmap bit on each call, so it
+                // correctly handles any tier downgrades that occurred on prior iterations.
+                if let Some(r) = unsafe { idx.resolve_mut(&mut self.table) } {
+                    r.take();
+                    self.count -= 1;
+                }
+            }
 
-        // Collect bitmap bits of covered data elements (from current node state).
-        // SAFETY: `node` came from `find_mut`; no structural mutations have occurred yet.
-        let covered_bits: Vec<u32> =
-            unsafe { self.table.data_descendants(node, depth, key, prefix_len) }
-                .map(|mp| mp.bit)
+            // Collect bitmap bits of covered children (from original bitmap).
+            let covered_child_bits: Vec<u32> = self
+                .table
+                .node(node)
+                .child_cover_locs(depth, key, prefix_len)
+                .map(|loc| loc.bit)
                 .collect();
-        for bit in covered_bits {
-            let idx = super::table::DataIdx { node, bit, depth };
-            // SAFETY: We only remove data cells in this loop; the node allocator structure
-            // (MultiBitNode slots, child pointers) is not modified, so `node` remains valid.
-            // resolve_mut re-reads the current AllocIdx + bitmap bit on each call, so it
-            // correctly handles any tier downgrades that occurred on prior iterations.
-            if let Some(r) = unsafe { idx.resolve_mut(&mut self.table) } {
-                r.take();
-                self.count -= 1;
+
+            // First: clear each covered child's subtree using the original Loc (parent bitmap
+            // unchanged).
+            for &child_bit in &covered_child_bits {
+                // SAFETY: `node` is still valid (data-only removals above did not affect node
+                // structure). `child_bit` is set in the child_bitmap (from `child_cover_locs`).
+                let child_loc = unsafe { self.table.child(node, child_bit) }
+                    .expect("child_bit should exist in bitmap");
+                // SAFETY: `child_loc` was just obtained from a valid `node` via `child()`.
+                self.count -= unsafe { self.table.clear_node_and_children(child_loc) };
+            }
+
+            // Then: remove covered children from parent. `remove_child_at` re-reads the current
+            // bitmap each time, so order does not matter.
+            for &child_bit in &covered_child_bits {
+                // SAFETY: `node` is still valid; each `clear_node_and_children` above only freed
+                // the *child's* allocation, not the parent's. The child_bitmap bit is still set.
+                unsafe { self.table.remove_child_at(node, child_bit) };
             }
         }
 
-        // Collect bitmap bits of covered children (from original bitmap).
-        let covered_child_bits: Vec<u32> = self
-            .table
-            .node(node)
-            .child_cover_locs(depth, key, prefix_len)
-            .map(|loc| loc.bit)
-            .collect();
-
-        // First: clear each covered child's subtree using the original Loc (parent bitmap unchanged).
-        for &child_bit in &covered_child_bits {
-            // SAFETY: `node` is still valid (data-only removals above did not affect node
-            // structure). `child_bit` is set in the child_bitmap (from `child_cover_locs`).
-            let child_loc = unsafe { self.table.child(node, child_bit) }
-                .expect("child_bit should exist in bitmap");
-            // SAFETY: `child_loc` was just obtained from a valid `node` via `child()`.
-            self.count -= unsafe { self.table.clear_node_and_children(child_loc) };
-        }
-
-        // Then: remove covered children from parent. `remove_child_at` re-reads the current
-        // bitmap each time, so order does not matter.
-        for &child_bit in &covered_child_bits {
-            // SAFETY: `node` is still valid; each `clear_node_and_children` above only freed
-            // the *child's* allocation, not the parent's. The child_bitmap bit is still set.
-            unsafe { self.table.remove_child_at(node, child_bit) };
-        }
+        // Detach `node` (and any emptied ancestors) if the removal left it empty.
+        // SAFETY: everything above only touches `node`'s data and children allocations. `node`
+        // itself and every Loc in `path` live in their parents' children blocks, which are
+        // unaffected, so all locations are still valid.
+        unsafe { self.table.cleanup_tree(node, &mut path) };
     }
 
     /// Clear the map but keep the allocated memory.
@@ -1542,6 +1550,67 @@ mod tests {
             entries,
             vec![(p(0x00000000, 11), 300), (p(0x80000000, 11), 200)],
         );
+    }
+
+    #[test]
+    fn test_remove_children_prunes_empty_node_fast_path() {
+        // /11 creates nodes at depths 0, 5, and 10. remove_children(&/5) takes the fast path
+        // (5 % K == 0) and clears the depth-5 node. The emptied node must also be detached
+        // from the root instead of remaining as an empty shell.
+        let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+        m.insert(p(0x00000000, 11), 1);
+        assert_eq!(m.num_nodes(), 3);
+
+        m.remove_children(&p(0x00000000, 5));
+        assert_eq!(m.len(), 0);
+        assert_eq!(m.num_nodes(), 1, "empty node shells left behind");
+        assert!(m.check_memory_alloc());
+    }
+
+    #[test]
+    fn test_remove_children_prunes_empty_node_slow_path() {
+        // /6 and /7 both live in the depth-5 node. remove_children(&/6) takes the slow path
+        // (6 % K != 0) and removes both entries, leaving the node empty. It must be detached.
+        let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+        m.insert(p(0x00000000, 6), 1);
+        m.insert(p(0x00000000, 7), 2);
+        assert_eq!(m.num_nodes(), 2);
+
+        m.remove_children(&p(0x00000000, 6));
+        assert_eq!(m.len(), 0);
+        assert_eq!(m.num_nodes(), 1, "empty node shells left behind");
+        assert!(m.check_memory_alloc());
+    }
+
+    #[test]
+    fn test_remove_children_prunes_empty_ancestors() {
+        // A single /16 creates nodes at depths 0, 5, 10, and 15. remove_children(&/12) frees
+        // the depth-15 child and empties the depth-10 node; pruning must cascade through the
+        // (now empty) depth-5 node all the way up to the root.
+        let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+        m.insert(p(0x00000000, 16), 1);
+        assert_eq!(m.num_nodes(), 4);
+
+        m.remove_children(&p(0x00000000, 12));
+        assert_eq!(m.len(), 0);
+        assert_eq!(m.num_nodes(), 1, "empty node shells left behind");
+        assert!(m.check_memory_alloc());
+    }
+
+    #[test]
+    fn test_remove_children_keeps_nonempty_node() {
+        // Two /6 entries share the depth-5 node, but only one is covered by the removed
+        // prefix. The node must survive with the other entry intact.
+        let mut m: PrefixMap<(u32, u8), i32> = PrefixMap::new();
+        m.insert(p(0x00000000, 6), 1);
+        m.insert(p(0x04000000, 6), 2);
+        assert_eq!(m.num_nodes(), 2);
+
+        m.remove_children(&p(0x00000000, 6));
+        assert_eq!(m.len(), 1);
+        assert_eq!(m.get(&p(0x04000000, 6)), Some(&2));
+        assert_eq!(m.num_nodes(), 2);
+        assert!(m.check_memory_alloc());
     }
 
     #[test]

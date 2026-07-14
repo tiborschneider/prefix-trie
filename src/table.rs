@@ -1140,6 +1140,18 @@ impl<T> Table<T> {
         count
     }
 
+    /// Count the live nodes reachable from the root, including the root itself.
+    #[cfg(test)]
+    pub(crate) fn num_nodes(&self) -> usize {
+        let mut stack = vec![Loc::root()];
+        let mut count = 0;
+        while let Some(loc) = stack.pop() {
+            count += 1;
+            stack.extend(self.node(loc).child_locs());
+        }
+        count
+    }
+
     /// Walk the entire trie and verify that every slot in both flat backing arrays is either:
     /// - referenced by a live node (via `data_idx` or `children_idx`), or
     /// - recorded in a free list.
