@@ -1,7 +1,7 @@
 //! Module that defines the JointPrefixMap
 
 use super::JointPrefix;
-use crate::{AsView, PrefixMap, TrieView};
+use crate::{AsView, Prefix, PrefixMap, TrieView};
 #[cfg(test)]
 #[cfg(feature = "ipnet")]
 mod test;
@@ -89,6 +89,45 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Count the number of unique addresses covered by all prefixes, split by address family.
+    ///
+    /// Each table is traversed without mutation, so overlapping prefixes are counted only once.
+    /// Returns `None` for an address family if its count cannot be represented in that family's
+    /// address representation, such as a fully covered address space.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
+    /// pm.insert("192.0.2.0/24".parse()?, 1);
+    /// pm.insert("2001:db8::/48".parse()?, 2);
+    /// let count = pm.address_count();
+    /// assert_eq!(count.0, Some(256));
+    /// assert_eq!(count.1, Some(1u128 << 80));
+    ///
+    /// // Full address spaces cannot be represented in their address type.
+    /// let mut full: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
+    /// full.insert("0.0.0.0/0".parse()?, 1);
+    /// let count = full.address_count();
+    /// assert_eq!(count.0, None);
+    /// assert_eq!(count.1, Some(0));
+    ///
+    /// let mut full6: JointPrefixMap<ipnet::IpNet, u32> = JointPrefixMap::new();
+    /// full6.insert("::/0".parse()?, 1);
+    /// let count = full6.address_count();
+    /// assert_eq!(count.0, Some(0));
+    /// assert_eq!(count.1, None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[allow(clippy::type_complexity)]
+    pub fn address_count(&self) -> (Option<<P::P1 as Prefix>::R>, Option<<P::P2 as Prefix>::R>) {
+        (self.t1.address_count(), self.t2.address_count())
     }
 
     /// Get the value of an element by matching exactly on the prefix.

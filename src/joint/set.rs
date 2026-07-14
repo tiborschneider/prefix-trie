@@ -2,7 +2,7 @@
 //! [`super::JointPrefixMap`].
 
 use crate::PrefixSet;
-use crate::{AsView, TrieView};
+use crate::{AsView, Prefix, TrieView};
 use either::{Left, Right};
 
 use super::{map::CoverKeys, JointPrefix};
@@ -77,6 +77,29 @@ impl<P: JointPrefix> JointPrefixSet<P> {
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Count the number of unique addresses covered by all prefixes, split by address family.
+    ///
+    /// Returns `None` for an address family if its count cannot be represented in that family's
+    /// address representation, such as a fully covered address space.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+    /// set.insert("192.0.2.0/24".parse()?);
+    /// set.insert("2001:db8::/48".parse()?);
+    /// assert_eq!(set.address_count(), (Some(256), Some(1u128 << 80)));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[allow(clippy::type_complexity)]
+    pub fn address_count(&self) -> (Option<<P::P1 as Prefix>::R>, Option<<P::P2 as Prefix>::R>) {
+        (self.t1.address_count(), self.t2.address_count())
     }
 
     /// Check whether some prefix is present in the set, without using longest prefix match.

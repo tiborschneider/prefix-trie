@@ -1,8 +1,9 @@
 //! The inner node implementation.
 
-use num_traits::Zero;
+use num_traits::{CheckedAdd, One, Zero};
 
 use crate::{
+    aggregate::member_coverage,
     allocator::{AllocIdx, CellAllocator, Loc, NodeAllocator, RawPtr},
     node::{
         child_bit, child_cover_mask, data_bit, data_cover_mask, extend_repr, lex_after_child,
@@ -454,6 +455,41 @@ impl<T> Table<T> {
 
     pub(crate) fn mem_size(&self) -> usize {
         self.nodes.mem_size() + self.cells.mem_size()
+    }
+
+    /// Count addresses covered by stored prefixes without descending into sub-tries covered by an
+    /// ancestor prefix.
+    pub(crate) fn address_count<P: Prefix>(&self) -> Option<P::R> {
+        if self.node(Loc::root()).has_data_bit(0) {
+            return None;
+        }
+        self.address_count_at::<P>(Loc::root(), 0)
+    }
+
+    fn address_count_at<P: Prefix>(&self, loc: Loc, depth: u32) -> Option<P::R> {
+        let node = *self.node(loc);
+        let data_bitmap = node.data_bitmap();
+        let (covered_data, covered_children) = member_coverage(data_bitmap);
+        let mut count = P::R::zero();
+
+        for bit in 0..NUM_DATA as u32 {
+            if data_bitmap & !covered_data & (1 << bit) == 0 {
+                continue;
+            }
+            let prefix_len = depth + DATA_BIT_TO_PREFIX[bit as usize].1 as u32;
+            let host_bits = P::num_bits() - prefix_len;
+            let addresses = P::R::one() << host_bits as usize;
+            count = count.checked_add(&addresses)?;
+        }
+
+        for child in node.child_locs() {
+            if covered_children & (1 << child.bit) == 0 {
+                let child_count = self.address_count_at::<P>(child, depth + K)?;
+                count = count.checked_add(&child_count)?;
+            }
+        }
+
+        Some(count)
     }
 
     fn drop_values(&mut self) {
