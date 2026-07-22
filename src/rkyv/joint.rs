@@ -5,6 +5,7 @@ use crate::{
     rkyv::{ArchivedPrefixMap, ArchivedPrefixSet, PrefixMapResolver},
     Prefix,
 };
+use either::Either::{Left, Right};
 use rkyv::{bytecheck::CheckBytes, Archive, Portable};
 
 /// Archived (immutable) version of a [`JointPrefixMap`].
@@ -59,8 +60,22 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     /// See [`JointPrefixMap::get`] for an example.
     pub fn get<'a>(&'a self, prefix: &P) -> Option<&'a T::Archived> {
         match prefix.p1_or_p2_ref() {
-            either::Either::Left(p) => self.t1.get(p),
-            either::Either::Right(p) => self.t2.get(p),
+            Left(p) => self.t1.get(p),
+            Right(p) => self.t2.get(p),
+        }
+    }
+
+    /// Get the value of an element by matching exactly on the prefix, plus the (canonical version)
+    /// of the matched prefix.
+    ///
+    /// **Warning**: The table does not store the prefix, but it is reconstructed. This means that
+    /// any bits in the host part will be truncated.
+    ///
+    /// See [`JointPrefixMap::get_key_value`] for an example.
+    pub fn get_key_value<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.get_key_value(p).map(|(p, t)| (P::from_p1(&p), t)),
+            Right(p) => self.t2.get_key_value(p).map(|(p, t)| (P::from_p2(&p), t)),
         }
     }
 }
@@ -116,8 +131,19 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
     /// See [`JointPrefixSet::contains`] for an example.
     pub fn contains(&self, prefix: &P) -> bool {
         match prefix.p1_or_p2_ref() {
-            either::Either::Left(p) => self.t1.contains(p),
-            either::Either::Right(p) => self.t2.contains(p),
+            Left(p) => self.t1.contains(p),
+            Right(p) => self.t2.contains(p),
+        }
+    }
+
+    /// Get the canonical (reconstructed) prefix by exact prefix matching.
+    ///
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits are not preserved.
+    pub fn get(&self, prefix: &P) -> Option<P> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.get(p).as_ref().map(P::from_p1),
+            Right(p) => self.t2.get(p).as_ref().map(P::from_p2),
         }
     }
 }

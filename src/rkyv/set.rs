@@ -52,4 +52,12 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     pub fn contains(&self, prefix: &P) -> bool {
         self.0.get(prefix).is_some()
     }
+
+    /// Get the canonical (reconstructed) prefix by exact prefix matching.
+    ///
+    /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
+    /// bits are not preserved.
+    pub fn get(&self, prefix: &P) -> Option<P> {
+        self.0.get_key_value(prefix).map(|(p, _)| p)
+    }
 }

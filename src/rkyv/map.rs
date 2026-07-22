@@ -22,7 +22,7 @@ use crate::{
     aggregate::member_coverage,
     allocator::compute_slot,
     node::{child_bit, data_bit, Key, DATA_BIT_TO_PREFIX},
-    table::{K, NUM_CHILDREN, NUM_DATA},
+    table::{reconstruct_prefix, K, NUM_CHILDREN, NUM_DATA},
     Prefix,
 };
 
@@ -113,6 +113,23 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         let bit = data_bit(key, prefix_len);
         let data_loc = self.nodes[loc.idx()].data_loc(bit)?;
         Some(&self.data[data_loc.idx()])
+    }
+
+    /// Get the value of an element by matching exactly on the prefix, plus the (canonical version)
+    /// of the matched prefix.
+    ///
+    /// **Warning**: The table does not store the prefix, but it is reconstructed. This means that
+    /// any bits in the host part will be truncated.
+    ///
+    /// See [`PrefixMap::get_key_value`] for an example.
+    pub fn get_key_value<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
+        let key = prefix.repr();
+        let prefix_len = prefix.prefix_len() as u32;
+        let (loc, depth) = self.find_loc(key, prefix_len)?;
+        let bit = data_bit(key, prefix_len);
+        let data_loc = self.nodes[loc.idx()].data_loc(bit)?;
+        let prefix = reconstruct_prefix(key, depth, data_loc.bit as usize);
+        Some((prefix, &self.data[data_loc.idx()]))
     }
 
     /// Traverse child pointers to the `MultiBitNode` containing `prefix_len`.

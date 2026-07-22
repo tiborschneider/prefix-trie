@@ -142,7 +142,7 @@ impl<'a, T> Present<'a, T> {
 
     /// Compute the prefix of this element.
     pub(crate) fn prefix<P: Prefix>(&self, key: P::R) -> P {
-        prefix(key, self.depth, self.data.bit as usize)
+        reconstruct_prefix(key, self.depth, self.data.bit as usize)
     }
 }
 
@@ -197,7 +197,7 @@ impl<'a, T> PresentMut<'a, T> {
 
     /// Compute the prefix of this element.
     pub(crate) fn prefix<P: Prefix>(&self, key: P::R) -> P {
-        prefix(key, self.depth, self.data.bit as usize)
+        reconstruct_prefix(key, self.depth, self.data.bit as usize)
     }
 }
 
@@ -1423,7 +1423,7 @@ impl<T: Clone> Clone for Table<T> {
     }
 }
 
-fn prefix<P: Prefix>(key: P::R, depth: u32, data_offset: usize) -> P {
+pub(crate) fn reconstruct_prefix<P: Prefix>(key: P::R, depth: u32, data_offset: usize) -> P {
     let mask = mask_from_prefix_len(depth as u8);
     let root = key & mask;
 
