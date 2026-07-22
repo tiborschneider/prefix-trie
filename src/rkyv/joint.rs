@@ -78,6 +78,16 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
             Right(p) => self.t2.get_key_value(p).map(|(p, t)| (P::from_p2(&p), t)),
         }
     }
+
+    /// Get the value of an address or prefix using longest prefix matching.
+    ///
+    /// See [`JointPrefixMap::get_lpm`] for an example.
+    pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.get_lpm(p).map(|(p, t)| (P::from_p1(&p), t)),
+            Right(p) => self.t2.get_lpm(p).map(|(p, t)| (P::from_p2(&p), t)),
+        }
+    }
 }
 
 /// Archived (immutable) version of a [`JointPrefixSet`].
@@ -144,6 +154,16 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get(p).as_ref().map(P::from_p1),
             Right(p) => self.t2.get(p).as_ref().map(P::from_p2),
+        }
+    }
+
+    /// Get the longest prefix in the set that contains `prefix`.
+    ///
+    /// See [`JointPrefixSet::get_lpm`] for an example.
+    pub fn get_lpm(&self, prefix: &P) -> Option<P> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.get_lpm(p).as_ref().map(P::from_p1),
+            Right(p) => self.t2.get_lpm(p).as_ref().map(P::from_p2),
         }
     }
 }

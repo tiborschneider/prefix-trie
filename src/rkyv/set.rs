@@ -60,4 +60,11 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     pub fn get(&self, prefix: &P) -> Option<P> {
         self.0.get_key_value(prefix).map(|(p, _)| p)
     }
+
+    /// Get the longest prefix in the set that contains `prefix`.
+    ///
+    /// See [`PrefixSet::get_lpm`] for an example.
+    pub fn get_lpm(&self, prefix: &P) -> Option<P> {
+        self.0.get_lpm(prefix).map(|(p, _)| p)
+    }
 }

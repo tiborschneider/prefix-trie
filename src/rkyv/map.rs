@@ -21,7 +21,7 @@ use rkyv::{
 use crate::{
     aggregate::member_coverage,
     allocator::compute_slot,
-    node::{child_bit, data_bit, Key, DATA_BIT_TO_PREFIX},
+    node::{child_bit, data_bit, data_lpm_mask, Key, DATA_BIT_TO_PREFIX},
     table::{reconstruct_prefix, K, NUM_CHILDREN, NUM_DATA},
     Prefix,
 };
@@ -76,33 +76,6 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         self.address_count_at(0, 0)
     }
 
-    /// recursive function to compute the address count.
-    fn address_count_at(&self, loc: u32, depth: u32) -> Option<P::R> {
-        let node = &self.nodes[loc as usize];
-        let data_bitmap = node.data_bitmap();
-        let (covered_data, covered_children) = member_coverage(data_bitmap);
-        let mut count = P::R::zero();
-
-        for bit in 0..NUM_DATA as u32 {
-            if data_bitmap & !covered_data & (1 << bit) == 0 {
-                continue;
-            }
-            let prefix_len = depth + DATA_BIT_TO_PREFIX[bit as usize].1 as u32;
-            let host_bits = P::num_bits() - prefix_len;
-            let addresses = P::R::one() << host_bits as usize;
-            count = count.checked_add(&addresses)?;
-        }
-
-        for child in node.child_locs() {
-            if covered_children & (1 << child.bit) == 0 {
-                let child_count = self.address_count_at(child.idx, depth + K)?;
-                count = count.checked_add(&child_count)?;
-            }
-        }
-
-        Some(count)
-    }
-
     /// Get the value of an element by matching exactly on the prefix.
     ///
     /// See [`PrefixMap::get`] for an example.
@@ -132,6 +105,44 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         Some((prefix, &self.data[data_loc.idx()]))
     }
 
+    /// Get the value of an address or prefix using longest prefix matching.
+    ///
+    /// See [`PrefixMap::get_lpm`] for an example.
+    pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
+        let key = prefix.repr();
+        let prefix_len = prefix.prefix_len() as u32;
+        let (data_loc, depth) = self.find_lpm(key, prefix_len)?;
+        let prefix = reconstruct_prefix(key, depth, data_loc.bit as usize);
+        Some((prefix, &self.data[data_loc.idx()]))
+    }
+
+    /// recursive function to compute the address count.
+    fn address_count_at(&self, loc: u32, depth: u32) -> Option<P::R> {
+        let node = &self.nodes[loc as usize];
+        let data_bitmap = node.data_bitmap();
+        let (covered_data, covered_children) = member_coverage(data_bitmap);
+        let mut count = P::R::zero();
+
+        for bit in 0..NUM_DATA as u32 {
+            if data_bitmap & !covered_data & (1 << bit) == 0 {
+                continue;
+            }
+            let prefix_len = depth + DATA_BIT_TO_PREFIX[bit as usize].1 as u32;
+            let host_bits = P::num_bits() - prefix_len;
+            let addresses = P::R::one() << host_bits as usize;
+            count = count.checked_add(&addresses)?;
+        }
+
+        for child in node.child_locs() {
+            if covered_children & (1 << child.bit) == 0 {
+                let child_count = self.address_count_at(child.idx, depth + K)?;
+                count = count.checked_add(&child_count)?;
+            }
+        }
+
+        Some(count)
+    }
+
     /// Traverse child pointers to the `MultiBitNode` containing `prefix_len`.
     /// Returns `(node_loc, depth)` on success, or `None` if any required child is absent.
     /// This is the shared traversal primitive used by all `find_*` methods.
@@ -145,6 +156,33 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
             depth += K;
         }
         Some((loc, depth))
+    }
+
+    /// Find the longest-prefix match and return the position of the data of the LPM match, plus the
+    /// depth of the node containing this data.
+    #[inline(always)]
+    fn find_lpm<R: Key>(&self, key: R, prefix_len: u32) -> Option<(Loc, u32)> {
+        let mut loc = Loc::root();
+        let mut depth = 0;
+        let mut lpm: Option<(Loc, u32)> = None;
+
+        loop {
+            let node = &self.nodes[loc.idx()];
+            if let Some(data_loc) = node.data_lpm_loc(depth, key, prefix_len) {
+                lpm = Some((data_loc, depth));
+            }
+            if prefix_len < depth + K {
+                return lpm;
+            }
+            let child_bit = child_bit(depth, key);
+            // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
+            // of a prior `child()` call, which always returns a valid `Loc`.
+            let Some(next) = self.nodes[loc.idx()].child_loc(child_bit) else {
+                return lpm;
+            };
+            loc = next;
+            depth += K;
+        }
     }
 }
 
@@ -237,6 +275,21 @@ impl ArchivedNodeRepr {
                 idx: offset + compute_slot(bitmap, bit),
                 bit,
             })
+    }
+
+    /// Get the data loc of the longest prefix match in this node (if it exists).
+    /// Returns Loc with bit (bitmap position) and computed slot.
+    #[inline(always)]
+    fn data_lpm_loc<R: Key>(&self, depth: u32, key: R, prefix_len: u32) -> Option<Loc> {
+        let nodes_present = self.data_bitmap & data_lpm_mask(depth, key, prefix_len);
+        if nodes_present == 0 {
+            return None;
+        }
+        let msb_bit = u32::BITS - 1 - nodes_present.leading_zeros();
+        Some(Loc {
+            idx: self.data_idx() + compute_slot(self.data_bitmap(), msb_bit),
+            bit: msb_bit,
+        })
     }
 }
 

@@ -155,6 +155,7 @@ mod map {
     rkyv_eq_test!(PrefixMap<P, i32>, address_count);
     rkyv_eq_test!(PrefixMap<P, i32>, get, P, |x| *x, |x| x.to_native());
     rkyv_eq_test!(PrefixMap<P, i32>, get_key_value, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
+    rkyv_eq_test!(PrefixMap<P, i32>, get_lpm, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
 }
 
 mod set {
@@ -186,6 +187,7 @@ mod set {
     rkyv_eq_test!(PrefixSet<P>, address_count);
     rkyv_eq_test!(PrefixSet<P>, contains, P);
     rkyv_eq_test!(PrefixSet<P>, get, P);
+    rkyv_eq_test!(PrefixSet<P>, get_lpm, P);
 }
 
 mod joint_map {
@@ -221,6 +223,7 @@ mod joint_map {
     rkyv_eq_test!(JointPrefixMap<P, i32>, address_count);
     rkyv_eq_test!(JointPrefixMap<P, i32>, get, P, |x| *x, |x| x.to_native());
     rkyv_eq_test!(JointPrefixMap<P, i32>, get_key_value, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
+    rkyv_eq_test!(JointPrefixMap<P, i32>, get_lpm, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
 }
 
 mod joint_set {
@@ -255,4 +258,5 @@ mod joint_set {
     rkyv_eq_test!(JointPrefixSet<P>, address_count);
     rkyv_eq_test!(JointPrefixSet<P>, contains, P);
     rkyv_eq_test!(JointPrefixSet<P>, get, P);
+    rkyv_eq_test!(JointPrefixSet<P>, get_lpm, P);
 }
