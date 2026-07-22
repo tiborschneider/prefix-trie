@@ -6,7 +6,7 @@ use rkyv::Archive;
 use crate::{
     allocator::compute_slot,
     node::{child_cover_mask, data_cover_mask, extend_repr},
-    rkyv::{ArchivedNodeRepr, ArchivedPrefixMap, ArchivedPrefixSet},
+    rkyv::{map::ArchivedNodeRepr, ArchivedPrefixMap, ArchivedPrefixSet},
     table::K,
     trieview::ViewIter,
     AsView, Prefix, TrieView,

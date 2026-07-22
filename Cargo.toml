@@ -76,3 +76,4 @@ rand = "0.8.5"
 rangemap = "1"
 serde_json = "1.0.140"
 bincode = { version = "2", default-features = false, features = ["std", "serde"] }
+paste = "1.0.15"

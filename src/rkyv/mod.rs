@@ -8,6 +8,7 @@
 //! root).
 
 mod deserialize;
+pub(crate) mod map;
 mod serialize;
 #[cfg(test)]
 mod test;
@@ -15,53 +16,11 @@ mod validate;
 mod view;
 
 use core::error::Error;
-use std::marker::PhantomData;
 
 use crate::joint::JointPrefix;
-use rkyv::{
-    bytecheck::CheckBytes,
-    traits::NoUndef,
-    vec::{ArchivedVec, VecResolver},
-    Archive, Portable, Serialize,
-};
+use rkyv::{bytecheck::CheckBytes, Archive, Portable};
 
-#[repr(transparent)]
-#[derive(Portable, CheckBytes)]
-#[bytecheck(crate = rkyv::bytecheck)]
-struct MyPhantomData<T>(PhantomData<T>);
-
-// Safety: PhantomData is zero-sized, so it cannot have an undefined value by definition.
-unsafe impl<T> NoUndef for MyPhantomData<T> {}
-
-/// Rkyv representation of a node with compacted indices
-#[derive(Archive, Serialize, Default)]
-#[rkyv(derive(Debug))]
-pub(crate) struct NodeRepr {
-    pub(super) data_bitmap: u32,
-    pub(super) child_bitmap: u32,
-    pub(super) data_idx: u32,
-    pub(super) children_idx: u32,
-}
-
-/// Archived (immutable) version of a [`PrefixMap`].
-///
-/// Any (verified) archived prefix map is canonical and has the following properties:
-/// - The tree is stored as BFS (ordered per level).
-/// - Data is stored contiguously without empty (uninitialized) memory in between.
-/// - The root node is always present.
-/// - No node (except the root) may be emtpy.
-///
-/// Due to these properties, assuming that T is also canonical (i.e., has only one possible
-/// representation), you can compare two `ArchivedPrefixMap`s for equality by comparing their byte
-/// string.
-#[repr(C)]
-#[derive(Portable, CheckBytes)]
-#[bytecheck(verify, crate = rkyv::bytecheck)]
-pub struct ArchivedPrefixMap<P, T: Archive> {
-    nodes: ArchivedVec<ArchivedNodeRepr>,
-    data: ArchivedVec<T::Archived>,
-    _marker: MyPhantomData<P>,
-}
+pub use map::{ArchivedPrefixMap, PrefixMapResolver};
 
 /// Archived (immutable) version of a [`PrefixSet`].
 ///
@@ -114,14 +73,6 @@ pub struct ArchivedJointPrefixSet<P: JointPrefix> {
     pub t1: ArchivedPrefixSet<P::P1>,
     /// PrefixSet that corresponds to the second prefix type
     pub t2: ArchivedPrefixSet<P::P2>,
-}
-
-/// The `rkyv` resolver for [`ArchivedPrefixMap`] and [`ArchivedPrefixSet`].
-pub struct PrefixMapResolver {
-    nodes: VecResolver,
-    nodes_len: usize,
-    data: VecResolver,
-    data_len: usize,
 }
 
 /// The `rkyv` resolver for [`ArchivedJointPrefixMap`] and [`ArchivedJointPrefixSet`].

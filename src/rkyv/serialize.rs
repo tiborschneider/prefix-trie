@@ -9,8 +9,9 @@ use crate::{
     allocator::Loc,
     joint::{JointPrefix, JointPrefixMap, JointPrefixSet},
     rkyv::{
+        map::{MyPhantomData, NodeRepr},
         ArchivedJointPrefixMap, ArchivedJointPrefixSet, ArchivedPrefixMap, ArchivedPrefixSet,
-        MyPhantomData, NodeRepr, PrefixMapResolver,
+        PrefixMapResolver,
     },
     table::Table,
     Prefix, PrefixMap, PrefixSet,
@@ -29,10 +30,10 @@ impl<P: Prefix, T: Archive> Archive for PrefixMap<P, T> {
     type Archived = ArchivedPrefixMap<P, T>;
     type Resolver = PrefixMapResolver;
     fn resolve(&self, resolver: Self::Resolver, out: Place<Self::Archived>) {
-        munge!(let ArchivedPrefixMap { nodes, data, _marker } = out);
+        munge!(let ArchivedPrefixMap { nodes, data, marker } = out);
         ArchivedVec::resolve_from_len(resolver.nodes_len, resolver.nodes, nodes);
         ArchivedVec::resolve_from_len(resolver.data_len, resolver.data, data);
-        _marker.write(MyPhantomData(PhantomData));
+        marker.write(MyPhantomData(PhantomData));
     }
 }
 
