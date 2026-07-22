@@ -19,7 +19,7 @@ use std::{
 use crate::{
     allocator::Loc,
     table::{Table, K},
-    Prefix, PrefixMap,
+    Prefix, PrefixMap, PrefixSet,
 };
 use rkyv::{
     bytecheck::{CheckBytes, Verify},
@@ -58,7 +58,7 @@ pub(crate) struct NodeRepr {
 /// - No node (except the root) may be emtpy.
 ///
 /// Due to these properties, assuming that T is also canonical (i.e., has only one possible
-/// representation), you can compare two ArchivedPrefixMaps for equality by comparing their byte
+/// representation), you can compare two `ArchivedPrefixMap`s for equality by comparing their byte
 /// string.
 #[repr(C)]
 #[derive(Portable, CheckBytes)]
@@ -270,6 +270,50 @@ const DENIED_DEPTH_MASK: [u32; K as usize] = [
     !((1u32 << 15) - 1), // m = 3: allow bits 0..=14
     !((1u32 << 31) - 1), // m = 4: allow bits 0..=30 (bit 31 denied = stray-bit check)
 ];
+
+/// Archived (immutable) version of a [`PrefixSet`].
+///
+/// Any (verified) archived prefix map is canonical and has the following properties:
+/// - The tree is stored as BFS (ordered per level).
+/// - The root node is always present.
+/// - No node (except the root) may be emtpy.
+///
+/// Due to these properties, you can compare two `ArchivedPrefixSet`s for equality by comparing
+/// their byte string.
+#[repr(transparent)]
+#[derive(Portable, CheckBytes)]
+#[bytecheck(crate = rkyv::bytecheck)]
+pub struct ArchivedPrefixSet<P>(ArchivedPrefixMap<P, ()>);
+
+impl<P: Prefix> Archive for PrefixSet<P> {
+    type Archived = ArchivedPrefixSet<P>;
+    type Resolver = PrefixMapResolver;
+    fn resolve(&self, resolver: Self::Resolver, out: Place<Self::Archived>) {
+        munge!(let ArchivedPrefixSet(out) = out);
+        self.0.resolve(resolver, out)
+    }
+}
+
+impl<P, S> Serialize<S> for PrefixSet<P>
+where
+    P: Prefix,
+    S: Fallible + Writer + Allocator + ?Sized,
+{
+    fn serialize(&self, s: &mut S) -> Result<PrefixMapResolver, S::Error> {
+        self.0.serialize(s)
+    }
+}
+
+impl<P, D> Deserialize<PrefixSet<P>, D> for ArchivedPrefixSet<P>
+where
+    P: Prefix,
+    D: Fallible + ?Sized,
+    D::Error: Source,
+{
+    fn deserialize(&self, d: &mut D) -> Result<PrefixSet<P>, D::Error> {
+        self.0.deserialize(d).map(PrefixSet)
+    }
+}
 
 #[derive(Debug)]
 pub enum ArchiveError {
