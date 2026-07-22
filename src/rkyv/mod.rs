@@ -18,6 +18,7 @@ use std::{
 
 use crate::{
     allocator::Loc,
+    joint::{JointPrefix, JointPrefixMap, JointPrefixSet},
     table::{Table, K},
     Prefix, PrefixMap, PrefixSet,
 };
@@ -312,6 +313,123 @@ where
 {
     fn deserialize(&self, d: &mut D) -> Result<PrefixSet<P>, D::Error> {
         self.0.deserialize(d).map(PrefixSet)
+    }
+}
+
+pub struct JointPrefixMapResolver {
+    t1: PrefixMapResolver,
+    t2: PrefixMapResolver,
+}
+
+/// Archived (immutable) version of a [`JointPrefixMap`].
+///
+/// Any (verified) archived prefix map is canonical and has the following properties:
+/// - The two tree are stored as BFS (ordered per level).
+/// - The root nodes are always present.
+/// - Data is stored contiguously without empty (uninitialized) memory in between.
+/// - No node (except the two roots) may be emtpy.
+///
+/// Due to these properties, you can compare two `ArchivedJointPrefixSet`s for equality by
+/// comparing their byte string.
+#[repr(C)]
+#[derive(Portable, CheckBytes)]
+#[bytecheck(crate = rkyv::bytecheck)]
+pub struct ArchivedJointPrefixMap<P: JointPrefix, T: Archive> {
+    /// PrefixMap that corresponds to the first prefix type
+    pub t1: ArchivedPrefixMap<P::P1, T>,
+    /// PrefixMap that corresponds to the second prefix type
+    pub t2: ArchivedPrefixMap<P::P2, T>,
+}
+
+impl<P: JointPrefix, T: Archive> Archive for JointPrefixMap<P, T> {
+    type Archived = ArchivedJointPrefixMap<P, T>;
+    type Resolver = JointPrefixMapResolver;
+    fn resolve(&self, resolver: Self::Resolver, out: Place<Self::Archived>) {
+        munge!(let ArchivedJointPrefixMap {t1, t2} = out);
+        self.t1.resolve(resolver.t1, t1);
+        self.t2.resolve(resolver.t2, t2);
+    }
+}
+
+impl<P, T, S> Serialize<S> for JointPrefixMap<P, T>
+where
+    P: JointPrefix,
+    T: Archive + Serialize<S>,
+    S: Fallible + Writer + Allocator + ?Sized,
+{
+    fn serialize(&self, s: &mut S) -> Result<JointPrefixMapResolver, S::Error> {
+        let t1 = self.t1.serialize(s)?;
+        let t2 = self.t2.serialize(s)?;
+        Ok(JointPrefixMapResolver { t1, t2 })
+    }
+}
+
+impl<P, T, D> Deserialize<JointPrefixMap<P, T>, D> for ArchivedJointPrefixMap<P, T>
+where
+    P: JointPrefix,
+    T: Archive,
+    T::Archived: Deserialize<T, D>,
+    D: Fallible + ?Sized,
+    D::Error: Source,
+{
+    fn deserialize(&self, d: &mut D) -> Result<JointPrefixMap<P, T>, D::Error> {
+        let t1 = self.t1.deserialize(d)?;
+        let t2 = self.t2.deserialize(d)?;
+        Ok(JointPrefixMap { t1, t2 })
+    }
+}
+
+/// Archived (immutable) version of a [`JointPrefixSet`].
+///
+/// Any (verified) archived prefix set is canonical and has the following properties:
+/// - The two tree are stored as BFS (ordered per level).
+/// - The root nodes are always present.
+/// - No node (except the two roots) may be emtpy.
+///
+/// Due to these properties, you can compare two `ArchivedJointPrefixSet`s for equality by
+/// comparing their byte string.
+#[repr(C)]
+#[derive(Portable, CheckBytes)]
+#[bytecheck(crate = rkyv::bytecheck)]
+pub struct ArchivedJointPrefixSet<P: JointPrefix> {
+    /// PrefixSet that corresponds to the first prefix type
+    pub t1: ArchivedPrefixSet<P::P1>,
+    /// PrefixSet that corresponds to the second prefix type
+    pub t2: ArchivedPrefixSet<P::P2>,
+}
+
+impl<P: JointPrefix> Archive for JointPrefixSet<P> {
+    type Archived = ArchivedJointPrefixSet<P>;
+    type Resolver = JointPrefixMapResolver;
+    fn resolve(&self, resolver: Self::Resolver, out: Place<Self::Archived>) {
+        munge!(let ArchivedJointPrefixSet {t1, t2} = out);
+        self.t1.resolve(resolver.t1, t1);
+        self.t2.resolve(resolver.t2, t2);
+    }
+}
+
+impl<P, S> Serialize<S> for JointPrefixSet<P>
+where
+    P: JointPrefix,
+    S: Fallible + Writer + Allocator + ?Sized,
+{
+    fn serialize(&self, s: &mut S) -> Result<JointPrefixMapResolver, S::Error> {
+        let t1 = self.t1.serialize(s)?;
+        let t2 = self.t2.serialize(s)?;
+        Ok(JointPrefixMapResolver { t1, t2 })
+    }
+}
+
+impl<P, D> Deserialize<JointPrefixSet<P>, D> for ArchivedJointPrefixSet<P>
+where
+    P: JointPrefix,
+    D: Fallible + ?Sized,
+    D::Error: Source,
+{
+    fn deserialize(&self, d: &mut D) -> Result<JointPrefixSet<P>, D::Error> {
+        let t1 = self.t1.deserialize(d)?;
+        let t2 = self.t2.deserialize(d)?;
+        Ok(JointPrefixSet { t1, t2 })
     }
 }
 

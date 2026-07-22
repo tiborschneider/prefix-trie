@@ -3,7 +3,8 @@
 
 use std::fmt::Debug;
 
-use crate::*;
+use crate::{joint::JointPrefix, *};
+use either::Either;
 use quickcheck::Arbitrary;
 
 mod aggregate;
@@ -219,5 +220,70 @@ impl Prefix for TestPrefix {
     fn from_repr_len(repr: Self::R, len: u8) -> Self {
         let x = Prefix::mask(&(repr, len));
         Self(x, len)
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+pub(crate) enum JointTestPrefix {
+    V4(TestPrefix),
+    V6(TestPrefix),
+}
+
+impl Debug for JointTestPrefix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JointTestPrefix::V4(p) => write!(f, "V4:{p:?}"),
+            JointTestPrefix::V6(p) => write!(f, "V6:{p:?}"),
+        }
+    }
+}
+
+impl Arbitrary for JointTestPrefix {
+    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        #[rustfmt::skip]
+        let v4 = bool::arbitrary(g);
+        if v4 {
+            JointTestPrefix::V4(TestPrefix::arbitrary(g))
+        } else {
+            JointTestPrefix::V6(TestPrefix::arbitrary(g))
+        }
+    }
+
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        match self {
+            JointTestPrefix::V4(p) => Box::new(p.shrink().map(JointTestPrefix::V4)),
+            JointTestPrefix::V6(p) => Box::new(p.shrink().map(JointTestPrefix::V6)),
+        }
+    }
+}
+
+impl JointPrefix for JointTestPrefix {
+    type P1 = TestPrefix;
+    type P2 = TestPrefix;
+
+    /// Get either `Left(P1)` or `Right(P2)`.
+    fn p1_or_p2(self) -> Either<Self::P1, Self::P2> {
+        match self {
+            JointTestPrefix::V4(p) => Either::Left(p),
+            JointTestPrefix::V6(p) => Either::Right(p),
+        }
+    }
+
+    /// Get either `Left(P1)` or `Right(P2)`, as a reference.
+    fn p1_or_p2_ref(&self) -> Either<&Self::P1, &Self::P2> {
+        match self {
+            JointTestPrefix::V4(p) => Either::Left(p),
+            JointTestPrefix::V6(p) => Either::Right(p),
+        }
+    }
+
+    /// Construct a prefix from a reference to the first variant.
+    fn from_p1(p: &Self::P1) -> Self {
+        Self::V4(*p)
+    }
+
+    /// Construct a prefix from a reference to the second variant.
+    fn from_p2(p: &Self::P2) -> Self {
+        Self::V6(*p)
     }
 }
