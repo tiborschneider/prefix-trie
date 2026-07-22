@@ -53,6 +53,16 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     pub fn address_count(&self) -> (Option<<P::P1 as Prefix>::R>, Option<<P::P2 as Prefix>::R>) {
         (self.t1.address_count(), self.t2.address_count())
     }
+
+    /// Get the value of an element by matching exactly on the prefix.
+    ///
+    /// See [`JointPrefixMap::get`] for an example.
+    pub fn get<'a>(&'a self, prefix: &P) -> Option<&'a T::Archived> {
+        match prefix.p1_or_p2_ref() {
+            either::Either::Left(p) => self.t1.get(p),
+            either::Either::Right(p) => self.t2.get(p),
+        }
+    }
 }
 
 /// Archived (immutable) version of a [`JointPrefixSet`].
@@ -99,6 +109,16 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
     #[allow(clippy::type_complexity)]
     pub fn address_count(&self) -> (Option<<P::P1 as Prefix>::R>, Option<<P::P2 as Prefix>::R>) {
         (self.t1.address_count(), self.t2.address_count())
+    }
+
+    /// Check whether some (exact) prefix is present in the set, without using longest prefix match.
+    ///
+    /// See [`JointPrefixSet::contains`] for an example.
+    pub fn contains(&self, prefix: &P) -> bool {
+        match prefix.p1_or_p2_ref() {
+            either::Either::Left(p) => self.t1.contains(p),
+            either::Either::Right(p) => self.t2.contains(p),
+        }
     }
 }
 

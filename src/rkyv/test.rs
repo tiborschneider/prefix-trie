@@ -34,6 +34,58 @@ macro_rules! rkyv_eq_test {
             }
         }
     };
+    ($X:ident < $P:ident>, $fn:ident, $arg:ty) => {
+        paste::paste! {
+            qc!($fn, [<_ $fn>]);
+            fn [<_ $fn>]((ops, arg): (Vec<Operation<$P, ()>>, $arg)) -> bool {
+                let pset = prepare!($X<$P>, ops);
+                let a = pset.$fn(&arg);
+                let bytes = to_bytes::<Error>(&pset).unwrap();
+                let archived = access::<[<Archived $X>]::<$P>, Error>(bytes.as_slice()).unwrap();
+                let b = archived.$fn(&arg);
+                a == b
+            }
+        }
+    };
+    ($X:ident < $P:ident, i32 >, $fn:ident, $arg:ty) => {
+        paste::paste! {
+            qc!($fn, [<_ $fn>]);
+            fn [<_ $fn>]((ops, arg): (Vec<Operation<$P, i32>>, $arg)) -> bool {
+                let pmap = prepare!($X<$P, i32>, ops);
+                let a = pmap.$fn(&arg);
+                let bytes = to_bytes::<Error>(&pmap).unwrap();
+                let archived = access::<[<Archived $X>]::<$P, rkyv::rend::i32_le>, Error>(bytes.as_slice()).unwrap();
+                let b = archived.$fn(&arg);
+                a == b
+            }
+        }
+    };
+    ($X:ident < $P:ident>, $fn:ident, $arg:ty, $map_a:expr, $map_b:expr) => {
+        paste::paste! {
+            qc!($fn, [<_ $fn>]);
+            fn [<_ $fn>]((ops, arg): (Vec<Operation<$P, ()>>, $arg)) -> bool {
+                let pset = prepare!($X<$P>, ops);
+                let a = pset.$fn(&arg).map($map_a);
+                let bytes = to_bytes::<Error>(&pset).unwrap();
+                let archived = access::<[<Archived $X>]::<$P>, Error>(bytes.as_slice()).unwrap();
+                let b = archived.$fn(&arg).map($map_b);
+                a == b
+            }
+        }
+    };
+    ($X:ident < $P:ident, i32 >, $fn:ident, $arg:ty, $map_a:expr, $map_b:expr) => {
+        paste::paste! {
+            qc!($fn, [<_ $fn>]);
+            fn [<_ $fn>]((ops, arg): (Vec<Operation<$P, i32>>, $arg)) -> bool {
+                let pmap = prepare!($X<$P, i32>, ops);
+                let a = pmap.$fn(&arg).map($map_a);
+                let bytes = to_bytes::<Error>(&pmap).unwrap();
+                let archived = access::<[<Archived $X>]::<$P, rkyv::rend::i32_le>, Error>(bytes.as_slice()).unwrap();
+                let b = archived.$fn(&arg).map($map_b);
+                a == b
+            }
+        }
+    };
 }
 
 macro_rules! prepare {
@@ -101,6 +153,7 @@ mod map {
     rkyv_eq_test!(PrefixMap<TestPrefix, i32>, len);
     rkyv_eq_test!(PrefixMap<TestPrefix, i32>, is_empty);
     rkyv_eq_test!(PrefixMap<TestPrefix, i32>, address_count);
+    rkyv_eq_test!(PrefixMap<TestPrefix, i32>, get, TestPrefix, |x| *x, |x| x.to_native());
 }
 
 mod set {
@@ -129,6 +182,7 @@ mod set {
     rkyv_eq_test!(PrefixSet<TestPrefix>, len);
     rkyv_eq_test!(PrefixSet<TestPrefix>, is_empty);
     rkyv_eq_test!(PrefixSet<TestPrefix>, address_count);
+    rkyv_eq_test!(PrefixSet<TestPrefix>, contains, TestPrefix);
 }
 
 mod joint_map {
@@ -163,6 +217,7 @@ mod joint_map {
     rkyv_eq_test!(JointPrefixMap<JointTestPrefix, i32>, len);
     rkyv_eq_test!(JointPrefixMap<JointTestPrefix, i32>, is_empty);
     rkyv_eq_test!(JointPrefixMap<JointTestPrefix, i32>, address_count);
+    rkyv_eq_test!(JointPrefixMap<JointTestPrefix, i32>, get, JointTestPrefix, |x| *x, |x| x.to_native());
 }
 
 mod joint_set {
@@ -195,4 +250,5 @@ mod joint_set {
     rkyv_eq_test!(JointPrefixSet<JointTestPrefix>, len);
     rkyv_eq_test!(JointPrefixSet<JointTestPrefix>, is_empty);
     rkyv_eq_test!(JointPrefixSet<JointTestPrefix>, address_count);
+    rkyv_eq_test!(JointPrefixSet<JointTestPrefix>, contains, JointTestPrefix);
 }

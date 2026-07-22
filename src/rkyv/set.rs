@@ -45,4 +45,11 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     pub fn address_count(&self) -> Option<P::R> {
         self.0.address_count()
     }
+
+    /// Check whether some (exact) prefix is present in the set, without using longest prefix match.
+    ///
+    /// See [`PrefixSet::contains`] for an example.
+    pub fn contains(&self, prefix: &P) -> bool {
+        self.0.get(prefix).is_some()
+    }
 }

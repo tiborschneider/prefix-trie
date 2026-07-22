@@ -529,9 +529,9 @@ impl<T> Table<T> {
     pub(crate) fn find<R: Key>(&self, key: R, prefix_len: u32) -> Option<Present<'_, T>> {
         let (loc, depth) = self.find_loc(key, prefix_len)?;
         let node = self.node(loc);
-        let db = data_bit(key, prefix_len);
-        if node.has_data_bit(db) {
-            let data = Loc::new(node.data_idx, db, node.data_bitmap);
+        let bit = data_bit(key, prefix_len);
+        if node.has_data_bit(bit) {
+            let data = Loc::new(node.data_idx, bit, node.data_bitmap);
             Some(Present {
                 table: self,
                 data,

@@ -21,7 +21,7 @@ use rkyv::{
 use crate::{
     aggregate::member_coverage,
     allocator::compute_slot,
-    node::DATA_BIT_TO_PREFIX,
+    node::{child_bit, data_bit, Key, DATA_BIT_TO_PREFIX},
     table::{K, NUM_CHILDREN, NUM_DATA},
     Prefix,
 };
@@ -102,12 +102,39 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
 
         Some(count)
     }
+
+    /// Get the value of an element by matching exactly on the prefix.
+    ///
+    /// See [`PrefixMap::get`] for an example.
+    pub fn get<'a>(&'a self, prefix: &P) -> Option<&'a T::Archived> {
+        let key = prefix.repr();
+        let prefix_len = prefix.prefix_len() as u32;
+        let (loc, _) = self.find_loc(key, prefix_len)?;
+        let bit = data_bit(key, prefix_len);
+        let data_loc = self.nodes[loc.idx()].data_loc(bit)?;
+        Some(&self.data[data_loc.idx()])
+    }
+
+    /// Traverse child pointers to the `MultiBitNode` containing `prefix_len`.
+    /// Returns `(node_loc, depth)` on success, or `None` if any required child is absent.
+    /// This is the shared traversal primitive used by all `find_*` methods.
+    #[inline(always)]
+    fn find_loc<R: Key>(&self, key: R, prefix_len: u32) -> Option<(Loc, u32)> {
+        let mut loc = Loc::root();
+        let mut depth = 0u32;
+        while prefix_len >= depth + K {
+            let cb = child_bit(depth, key);
+            loc = self.nodes[loc.idx()].child_loc(cb)?;
+            depth += K;
+        }
+        Some((loc, depth))
+    }
 }
 
 /// Rkyv representation of a node with compacted indices
 #[derive(Archive, Serialize, Default)]
 #[rkyv(derive(Debug))]
-pub(crate) struct NodeRepr {
+pub(super) struct NodeRepr {
     pub(super) data_bitmap: u32,
     pub(super) child_bitmap: u32,
     pub(super) data_idx: u32,
@@ -116,20 +143,37 @@ pub(crate) struct NodeRepr {
 
 impl ArchivedNodeRepr {
     #[inline(always)]
-    pub(crate) fn data_bitmap(&self) -> u32 {
+    pub(super) fn data_idx(&self) -> u32 {
+        self.data_idx.to_native()
+    }
+
+    #[inline(always)]
+    pub(super) fn data_bitmap(&self) -> u32 {
         self.data_bitmap.to_native()
     }
 
     #[inline(always)]
-    pub(crate) fn has_data_bit(&self, bit: u32) -> bool {
+    pub(super) fn has_data_bit(&self, bit: u32) -> bool {
         self.data_bitmap() & (1 << bit) != 0
+    }
+
+    /// Get the location of the given data bit (only if it is set)
+    pub(super) fn data_loc(&self, bit: u32) -> Option<Loc> {
+        if self.has_data_bit(bit) {
+            Some(Loc {
+                idx: self.data_idx() + compute_slot(self.data_bitmap(), bit),
+                bit,
+            })
+        } else {
+            None
+        }
     }
 
     /// Get an iterator over all indices of data.
     #[inline(always)]
-    pub(crate) fn data_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
+    pub(super) fn data_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
         let bitmap = self.data_bitmap();
-        let offset = self.data_idx.to_native();
+        let offset = self.data_idx();
         (0..(NUM_CHILDREN as u32))
             .filter(move |&bit| bitmap & (1 << bit) != 0)
             .map(move |bit| Loc {
@@ -139,20 +183,37 @@ impl ArchivedNodeRepr {
     }
 
     #[inline(always)]
-    pub(crate) fn child_bitmap(&self) -> u32 {
+    pub(super) fn children_idx(&self) -> u32 {
+        self.children_idx.to_native()
+    }
+
+    #[inline(always)]
+    pub(super) fn child_bitmap(&self) -> u32 {
         self.child_bitmap.to_native()
     }
 
     #[inline(always)]
-    pub(crate) fn has_child_bit(&self, bit: u32) -> bool {
+    pub(super) fn has_child_bit(&self, bit: u32) -> bool {
         self.child_bitmap() & (1 << bit) != 0
+    }
+
+    /// Get the location of the given data bit (only if it is set)
+    pub(super) fn child_loc(&self, bit: u32) -> Option<Loc> {
+        if self.has_child_bit(bit) {
+            Some(Loc {
+                idx: self.children_idx() + compute_slot(self.child_bitmap(), bit),
+                bit,
+            })
+        } else {
+            None
+        }
     }
 
     /// Get an iterator over all children.
     #[inline(always)]
-    pub(crate) fn child_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
+    pub(super) fn child_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
         let bitmap = self.child_bitmap();
-        let offset = self.children_idx.to_native();
+        let offset = self.children_idx();
         (0..(NUM_CHILDREN as u32))
             .filter(move |&bit| bitmap & (1 << bit) != 0)
             .map(move |bit| Loc {
@@ -163,15 +224,25 @@ impl ArchivedNodeRepr {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Loc {
-    pub(crate) idx: u32,
-    pub(crate) bit: u32,
+pub(super) struct Loc {
+    idx: u32,
+    bit: u32,
+}
+
+impl Loc {
+    pub(super) fn root() -> Self {
+        Self { idx: 0, bit: 0 }
+    }
+
+    pub(super) fn idx(&self) -> usize {
+        self.idx as usize
+    }
 }
 
 /// The `rkyv` resolver for [`ArchivedPrefixMap`] and [`ArchivedPrefixSet`].
 pub struct PrefixMapResolver {
-    pub(crate) nodes: VecResolver,
-    pub(crate) nodes_len: usize,
-    pub(crate) data: VecResolver,
-    pub(crate) data_len: usize,
+    pub(super) nodes: VecResolver,
+    pub(super) nodes_len: usize,
+    pub(super) data: VecResolver,
+    pub(super) data_len: usize,
 }
