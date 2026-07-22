@@ -105,9 +105,11 @@ mod aggregate;
 mod allocator;
 mod fmt;
 #[cfg(test)]
-mod fuzzing;
+pub(crate) mod fuzzing;
 mod node;
 mod prefix;
+#[cfg(feature = "rkyv")]
+mod rkyv;
 #[cfg(feature = "serde")]
 mod serde;
 mod table;

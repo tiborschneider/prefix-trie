@@ -10,7 +10,7 @@ readme = "Readme.md"
 categories = ["network-programming"]
 keywords = ["IP", "prefix", "trie", "tree", "collection"]
 description = "Prefix trie (tree) datastructure (both a set and a map) that provides exact and longest-prefix matches."
-rust-version = "1.71.1"
+rust-version = "1.81"
 exclude = [
     "benches/report.py",
     "benches/data/20260511-mutations-peer-193.0.0.56AS3333.parquet",
@@ -47,6 +47,7 @@ serde = ["dep:serde", "ipnet/serde", "ipnetwork/serde", "cidr/serde"]
 ipnetwork = ["dep:ipnetwork"]
 ipnet = ["dep:ipnet"]
 cidr = ["dep:cidr"]
+rkyv = ["dep:rkyv"]
 
 [dependencies]
 ipnet = { version = "2.0.0", optional = true}
@@ -57,6 +58,7 @@ serde = { version = "1", optional = true}
 either = "1"
 array-const-fn-init = "0.1.1"
 smallvec = "1.15.2"
+rkyv = { version = "0.8", optional = true }
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]

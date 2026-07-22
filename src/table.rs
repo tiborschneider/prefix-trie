@@ -822,6 +822,18 @@ impl<T> Table<T> {
         lex
     }
 
+    /// Get a reference to the cell at `loc`.
+    ///
+    /// # Safety
+    /// `loc` must be a valid, live node location: the `AllocIdx` inside `loc` must still point
+    /// into the active node allocation (i.e. no tier upgrade/downgrade of `loc`'s parent has
+    /// occurred since `loc` was obtained).
+    #[inline(always)]
+    #[cfg(feature = "rkyv")]
+    pub(crate) unsafe fn cell(&self, loc: Loc) -> &T {
+        self.cells.get(loc)
+    }
+
     /// Iterate over all data slots in `loc`.
     ///
     /// # Safety
@@ -1296,6 +1308,73 @@ impl<T> Table<T> {
         }
 
         correct
+    }
+
+    #[cfg(feature = "rkyv")]
+    pub(crate) fn from_bfs<E: rkyv::rancor::Source>(
+        mut nodes: impl Iterator<Item = (u32, u32)>,
+        mut cells: impl Iterator<Item = Result<T, E>>,
+    ) -> Result<Self, E> {
+        use crate::rkyv::ArchiveError::*;
+        use std::collections::VecDeque;
+
+        let mut table = Self::default();
+        let mut queue = VecDeque::new();
+        queue.push_back(Loc::root());
+
+        while let Some(loc) = queue.pop_front() {
+            let (data_bitmap, child_bitmap) =
+                nodes.next().ok_or_else(|| E::new(NodeListTooShort))?;
+
+            // collect all data that we need
+            let num_cells = data_bitmap.count_ones() as usize;
+            let cell_values = cells
+                .by_ref()
+                .take(num_cells)
+                .collect::<Result<Vec<_>, _>>()?;
+            if cell_values.len() < num_cells {
+                return Err(E::new(DataListTooShort));
+            }
+            let data_idx = if !cell_values.is_empty() {
+                table.cells.alloc_insert_all(cell_values)
+            } else {
+                AllocIdx::empty()
+            };
+
+            // create the children
+            let num_children = child_bitmap.count_ones() as usize;
+            // Safety: these nodes will be overwritten once we get to them in the queue. They will
+            // all end up on the queue (see the last line in the loop)
+            let children_idx = if num_children > 0 {
+                unsafe { table.nodes.alloc(num_children) }
+            } else {
+                AllocIdx::empty()
+            };
+
+            // write into the content of this node:
+            let new_node = MultiBitNode {
+                data_bitmap,
+                child_bitmap,
+                children_idx,
+                data_idx,
+            };
+            table.nodes[loc] = new_node;
+
+            // put all these nodes on the queue to be processed once they take turn.
+            for next_loc in new_node.child_locs() {
+                queue.push_back(next_loc);
+            }
+        }
+
+        // assert that the iterators are now empty
+        if nodes.next().is_some() {
+            return Err(E::new(NodeListTooLong));
+        }
+        if cells.next().is_some() {
+            return Err(E::new(DataListTooLong));
+        }
+
+        Ok(table)
     }
 }
 

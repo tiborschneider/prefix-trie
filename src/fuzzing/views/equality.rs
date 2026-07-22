@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::*;
 
 fn expected_eq_keys(
@@ -6,10 +8,8 @@ fn expected_eq_keys(
     left_root: Option<TestPrefix>,
     right_root: Option<TestPrefix>,
 ) -> bool {
-    let left_keys: std::collections::HashSet<_> =
-        left.keys().filter(|p| in_scope(left_root, p)).collect();
-    let right_keys: std::collections::HashSet<_> =
-        right.keys().filter(|p| in_scope(right_root, p)).collect();
+    let left_keys: HashSet<_> = left.keys().filter(|p| in_scope(left_root, p)).collect();
+    let right_keys: HashSet<_> = right.keys().filter(|p| in_scope(right_root, p)).collect();
     left_keys == right_keys
 }
 
@@ -72,14 +72,12 @@ fn check_eq_keys_difference(
     let empty_b = PrefixMap::new();
     let empty_c = PrefixMap::new();
 
-    let diff_keys: std::collections::HashSet<_> =
-        expected_difference(&a_ref, &b_ref, a_root, b_root)
-            .into_iter()
-            .map(|(p, _)| p)
-            .collect();
-    let c_keys: std::collections::HashSet<_> =
-        c_ref.keys().filter(|p| in_scope(c_root, p)).collect();
-    let want = diff_keys == c_keys.into_iter().copied().collect();
+    let diff_keys: HashSet<_> = expected_difference(&a_ref, &b_ref, a_root, b_root)
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
+    let c_keys: HashSet<_> = c_ref.keys().filter(|p| in_scope(c_root, p)).collect();
+    let want = diff_keys == c_keys.into_iter().copied().collect::<HashSet<_>>();
 
     let got = view_or_empty(&a_map, &empty_a, a_root)
         .difference(view_or_empty(&b_map, &empty_b, b_root))

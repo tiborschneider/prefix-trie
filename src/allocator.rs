@@ -283,6 +283,22 @@ impl<T> CellAllocator<T> {
         }
     }
 
+    /// Allocate a new group of given capacity tier. Returns AllocIdx to the start of the group.
+    #[cfg(feature = "rkyv")]
+    pub(crate) fn alloc_insert_all(&mut self, values: Vec<T>) -> AllocIdx {
+        let count = values.len();
+        let idx = self.alloc(count);
+        if Self::IS_ZST {
+            return idx;
+        }
+        // push the data in
+        self.data.get_mut().splice(
+            idx.as_usize()..(idx.as_usize() + count),
+            values.into_iter().map(MaybeUninit::new),
+        );
+        idx
+    }
+
     /// Free a group at the given AllocIdx (which was allocated with given count).
     pub(crate) fn free(&mut self, idx: AllocIdx, count: usize) {
         debug_assert!(!idx.is_empty());

@@ -46,6 +46,16 @@ where
         Self::default()
     }
 
+    /// Create an empty prefix map.
+    #[cfg(feature = "rkyv")]
+    pub(crate) fn from_table_count(table: Table<T>, count: usize) -> Self {
+        Self {
+            table,
+            count,
+            marker: PhantomData,
+        }
+    }
+
     /// Returns the number of elements stored in `self`.
     #[inline(always)]
     pub fn len(&self) -> usize {

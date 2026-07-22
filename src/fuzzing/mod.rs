@@ -11,7 +11,7 @@ mod basic;
 mod views;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-enum Operation<P, T> {
+pub(crate) enum Operation<P, T> {
     Add(P, T),
     Remove(P),
     RemoveChildren(P),
@@ -26,7 +26,7 @@ const NUM_TESTS: usize = if cfg!(miri) {
 };
 const DEFAULT_GEN_SIZE: usize = 100;
 
-fn proptest_runner<A: Arbitrary + Debug + PartialEq, F: Fn(A) -> bool>(f: F) {
+pub(crate) fn proptest_runner<A: Arbitrary + Debug + PartialEq, F: Fn(A) -> bool>(f: F) {
     let num_tests: usize = std::env::var("QUICKCHECK_TESTS")
         .ok()
         .and_then(|x| x.parse::<usize>().ok())
