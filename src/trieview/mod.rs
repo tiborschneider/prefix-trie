@@ -341,6 +341,7 @@ pub trait TrieView<'a>: Sized {
         self.step(true)
     }
 
+    // TODO: do not expose this function in the interface.
     /// Navigate toward `(target_key, target_len)` from this view's node.
     ///
     /// Returns `None` if a required child node does not exist in [`child_bitmap`][Self::child_bitmap].

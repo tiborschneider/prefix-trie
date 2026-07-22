@@ -12,6 +12,7 @@ mod serialize;
 #[cfg(test)]
 mod test;
 mod validate;
+mod view;
 
 use core::error::Error;
 use std::marker::PhantomData;
