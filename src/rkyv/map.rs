@@ -19,11 +19,12 @@ use rkyv::{
 };
 
 use crate::{
-    aggregate::member_coverage,
+    aggregate::{fold_coverage, member_coverage},
     allocator::compute_slot,
     node::{
-        child_bit, child_cover_mask, data_bit, data_cover_mask, data_lpm_mask, extend_repr,
-        lex_after_child, lex_after_data, Key, LexElem, DATA_BIT_TO_PREFIX, LEX_ORDER,
+        child_bit, child_cover_mask, child_cover_mask_for_bit, data_bit, data_cover_mask,
+        data_lpm_mask, extend_repr, lex_after_child, lex_after_data, Key, LexElem,
+        DATA_BIT_TO_PREFIX, LEX_ORDER,
     },
     table::{reconstruct_prefix, K, NUM_CHILDREN, NUM_DATA},
     Prefix,
@@ -359,6 +360,75 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         let (data_loc, depth) = self.find_spm(key, prefix_len)?;
         let prefix = reconstruct_prefix(key, depth, data_loc.bit as usize);
         Some(prefix)
+    }
+
+    /// Check whether `prefix` is covered by the map, i.e., whether the map contains an entry at
+    /// `prefix` itself or any less-specific prefix that contains it.
+    ///
+    /// This function does not perform aggregation. That means that, even if both the left and
+    /// right children of `p` are present in the map, `is_covered(p)` may still return `false`. See
+    /// [`is_covered_in_aggregate`](Self::is_covered_in_aggregate) for that case.
+    ///
+    /// This mirrors [`PrefixMap::is_covered`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/8"), 1);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(map.is_covered(&p!("10.0.0.0/8")));
+    /// assert!(map.is_covered(&p!("10.1.2.0/24")));
+    /// assert!(!map.is_covered(&p!("11.0.0.0/8")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered(&self, prefix: &P) -> bool {
+        self.get_spm_prefix(prefix).is_some()
+    }
+
+    /// Check whether every address in `prefix` is covered by the map, i.e., whether `prefix`'s
+    /// entire range is tiled by entries in the map, even if no single entry covers `prefix` on its
+    /// own. See [`is_covered`](Self::is_covered) for the (cheaper, stricter) single-entry check.
+    ///
+    /// This mirrors [`PrefixMap::is_covered_in_aggregate`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/9"), 1);
+    /// pm.insert(p!("10.128.0.0/9"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(!map.is_covered(&p!("10.0.0.0/8")));
+    /// assert!(map.is_covered_in_aggregate(&p!("10.0.0.0/8")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
+    pub fn is_covered_in_aggregate(&self, prefix: &P) -> bool {
+        let (key, prefix_len) = key_prefix_len(prefix);
+        self.covers_in_aggregate(key, prefix_len)
     }
 
     /// An iterator visiting all key-value pairs in lexicographic order. The iterator element type
@@ -1032,6 +1102,60 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
             // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
             // of a prior `child()` call, which always returns a valid `Loc`.
             loc = self.nodes[loc.idx()].child_loc(child_bit)?;
+            depth += K;
+        }
+    }
+
+    /// Check whether `bit` of the node at `loc` has its entire range covered by the union of
+    /// members, without performing aggregation. Mirrors [`Table::bit_covered`](crate::table): a
+    /// fold's result for a given bit only depends on that bit's heap descendants, so this only
+    /// recurses into the children `bit`'s coverage actually depends on
+    /// (`child_cover_mask_for_bit`), skipping any already redundant under an ancestor member
+    /// (`children_under_member`).
+    fn bit_covered(&self, loc: Loc, bit: u32) -> bool {
+        let node = &self.nodes[loc.idx()];
+        let data_bitmap = node.data_bitmap();
+        if data_bitmap & (1 << bit) != 0 {
+            return true; // `bit` itself is a member
+        }
+
+        let mask = child_cover_mask_for_bit(bit);
+        let (_, children_under_member) = member_coverage(data_bitmap);
+        let mut child_coverage = children_under_member & mask;
+        for child in node.child_locs() {
+            let child_bit = child.bit;
+            if mask & (1 << child_bit) == 0 || children_under_member & (1 << child_bit) != 0 {
+                continue;
+            }
+            if self.bit_covered(child, 0) {
+                child_coverage |= 1 << child_bit;
+            }
+        }
+
+        fold_coverage(data_bitmap, child_coverage) & (1 << bit) != 0
+    }
+
+    /// Check whether every address in the prefix given by `key`/`prefix_len` is covered by the
+    /// union of members, without performing aggregation. A single descent: an ancestor or exact
+    /// member short-circuits to `true`; otherwise [`Self::bit_covered`] tests just the owning
+    /// node's bit for the target prefix.
+    fn covers_in_aggregate<R: Key>(&self, key: R, prefix_len: u32) -> bool {
+        let mut loc = Loc::root();
+        let mut depth = 0;
+        loop {
+            let node = &self.nodes[loc.idx()];
+            if node.data_spm_loc(depth, key, prefix_len).is_some() {
+                return true; // an ancestor or the prefix itself is a member
+            }
+            if prefix_len < depth + K {
+                let bit = data_bit(key, prefix_len);
+                return self.bit_covered(loc, bit);
+            }
+            let cb = child_bit(depth, key);
+            let Some(next) = self.nodes[loc.idx()].child_loc(cb) else {
+                return false; // owning node absent and no ancestor member => uncovered
+            };
+            loc = next;
             depth += K;
         }
     }

@@ -209,6 +209,79 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
         self.0.get_spm_prefix(prefix)
     }
 
+    /// Check whether `prefix` is covered by the set, i.e., whether the set contains `prefix` itself
+    /// or any less-specific prefix that contains it.
+    ///
+    /// This is equivalent to `self.cover(prefix).next().is_some()`, but stops at the first (shortest)
+    /// covering prefix. See [`cover`](Self::cover) to iterate over the covering prefixes themselves.
+    ///
+    /// This function does not perform aggregation. That means that, even if both the left and right
+    /// children of `p` are present in the set, `is_covered(p)` may still return `false`. See
+    /// [`is_covered_in_aggregate`](Self::is_covered_in_aggregate) for that case.
+    ///
+    /// This mirrors [`PrefixSet::is_covered`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/8"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(set.is_covered(&p!("10.0.0.0/8")));
+    /// assert!(set.is_covered(&p!("10.1.2.0/24")));
+    /// assert!(!set.is_covered(&p!("11.0.0.0/8")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered(&self, prefix: &P) -> bool {
+        self.0.is_covered(prefix)
+    }
+
+    /// Check whether every address in `prefix` is covered by the set, i.e., whether `prefix`'s
+    /// entire range is tiled by members of the set, even if no single member covers `prefix` on
+    /// its own. See [`is_covered`](Self::is_covered) for the (cheaper, stricter) single-member
+    /// check.
+    ///
+    /// This mirrors [`PrefixSet::is_covered_in_aggregate`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/9"));
+    /// ps.insert(p!("10.128.0.0/9"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(!set.is_covered(&p!("10.0.0.0/8")));
+    /// assert!(set.is_covered_in_aggregate(&p!("10.0.0.0/8")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered_in_aggregate(&self, prefix: &P) -> bool {
+        self.0.is_covered_in_aggregate(prefix)
+    }
+
     /// An iterator visiting all keys in lexicographic order. The iterator element type is
     /// reconstructed prefixes `P`.
     ///

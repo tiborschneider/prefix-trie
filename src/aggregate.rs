@@ -27,7 +27,7 @@ use smallvec::{smallvec, SmallVec};
 
 use crate::{
     allocator::Loc,
-    node::{extend_repr, Key, MultiBitNode},
+    node::{child_bit, child_cover_mask_for_bit, data_bit, extend_repr, Key, MultiBitNode},
     table::{DataIdx, EmptyMut, Table, K, NUM_CHILDREN, NUM_DATA},
 };
 
@@ -220,6 +220,62 @@ impl<T> Table<T> {
         }
         count_delta
     }
+
+    /// Check whether `bit` of the node at `loc` has its entire range covered by the union of
+    /// members, without performing aggregation. This is the read-only twin of
+    /// [`Table::aggregate_set`]'s coverage fold, restricted with `child_cover_mask_for_bit` to the
+    /// children `bit`'s own coverage actually depends on: a fold's result for a given bit only
+    /// depends on that bit's heap descendants, so children outside that mask (and any already
+    /// redundant under an ancestor member, `children_under_member`) are never recursed into.
+    fn bit_covered(&self, loc: Loc, bit: u32) -> bool {
+        let node = self.node(loc);
+        let data_bitmap = node.data_bitmap();
+        if data_bitmap & (1 << bit) != 0 {
+            return true; // `bit` itself is a member
+        }
+
+        let mask = child_cover_mask_for_bit(bit);
+        let (_, children_under_member) = member_coverage(data_bitmap);
+        let mut child_coverage = children_under_member & mask;
+        for child in node.child_locs() {
+            let child_bit = child.bit;
+            if mask & (1 << child_bit) == 0 || children_under_member & (1 << child_bit) != 0 {
+                continue;
+            }
+            if self.bit_covered(child, 0) {
+                child_coverage |= 1 << child_bit;
+            }
+        }
+
+        fold_coverage(data_bitmap, child_coverage) & (1 << bit) != 0
+    }
+
+    /// Check whether every address in the prefix given by `key`/`prefix_len` is covered by the
+    /// union of members, without performing aggregation. A single descent: an ancestor or exact
+    /// member short-circuits to `true`; otherwise [`Table::bit_covered`] tests just the owning
+    /// node's bit for the target prefix.
+    pub(crate) fn covers_in_aggregate<R: Key>(&self, key: R, prefix_len: u32) -> bool {
+        let mut loc = Loc::root();
+        let mut depth = 0;
+        loop {
+            let node = self.node(loc);
+            if node.data_spm_loc(depth, key, prefix_len).is_some() {
+                return true; // an ancestor or the prefix itself is a member
+            }
+            if prefix_len < depth + K {
+                let bit = data_bit(key, prefix_len);
+                return self.bit_covered(loc, bit);
+            }
+            let cb = child_bit(depth, key);
+            // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
+            // of a prior `child()` call, which always returns a valid `Loc`.
+            let Some(next) = (unsafe { self.child(loc, cb) }) else {
+                return false; // owning node absent and no ancestor member => uncovered
+            };
+            loc = next;
+            depth += K;
+        }
+    }
 }
 
 impl Table<()> {
@@ -227,7 +283,7 @@ impl Table<()> {
     /// prefix cover, in place.
     ///
     /// The minimal cover preserves the invariant that, for any prefix `p`,
-    /// `before.get_lpm(p).is_some() == after.get_lpm(p).is_some()`: it (1) drops any prefix covered
+    /// `before.is_covered(p) == after.is_covered(p)`: it (1) drops any prefix covered
     /// by an ancestor in the set, and (2) merges sibling pairs into their parent, cascading upward.
     ///
     /// Returns `(node_fully_covered, count_delta)`: whether this node's entire range is covered
@@ -303,7 +359,7 @@ impl Table<()> {
     /// covered by an ancestor member, without merging anything.
     ///
     /// This preserves a stronger invariant than [`Self::aggregate_set`]: for *every* prefix `p`
-    /// (not only addresses), `before.get_lpm(p).is_some() == after.get_lpm(p).is_some()` — a dropped
+    /// (not only addresses), `before.is_covered(p) == after.is_covered(p)` — a dropped
     /// member is always still covered by the ancestor that made it redundant.
     ///
     /// We only ever recurse into children that are *not* covered by a member here; a covered

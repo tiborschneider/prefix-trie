@@ -194,6 +194,63 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         fork_ref!(self, prefix as P, get_spm)
     }
 
+    /// Check whether `prefix` is covered by the set, i.e., whether the set contains `prefix` itself
+    /// or any less-specific prefix that contains it.
+    ///
+    /// This is equivalent to `self.cover(prefix).next().is_some()`, but stops at the first (shortest)
+    /// covering prefix. See [`cover`](Self::cover) to iterate over the covering prefixes themselves.
+    ///
+    /// This function does not perform aggregation. That means that, even if both the left and right
+    /// children of `p` are present in the set, `is_covered(p)` may still return `false`. See
+    /// [`is_covered_in_aggregate`](Self::is_covered_in_aggregate) for that case.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+    /// set.insert("10.0.0.0/8".parse()?);
+    /// set.insert("2001:db8::/32".parse()?);
+    /// assert!(set.is_covered(&"10.1.2.0/24".parse()?));    // covered by 10.0.0.0/8
+    /// assert!(set.is_covered(&"2001:db8:1::/48".parse()?)); // covered by 2001:db8::/32
+    /// assert!(!set.is_covered(&"11.0.0.0/8".parse()?));    // not covered
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered(&self, prefix: &P) -> bool {
+        fork_ref!(self, prefix, is_covered)
+    }
+
+    /// Check whether every address in `prefix` is covered by the set, i.e., whether `prefix`'s
+    /// entire range is tiled by members of the set, even if no single member covers `prefix` on
+    /// its own.
+    ///
+    /// This is equivalent to `{ let mut s = self.clone(); s.aggregate(); s.is_covered(prefix) }`,
+    /// but read-only and without cloning. See [`is_covered`](Self::is_covered) for the (cheaper,
+    /// stricter) single-member check.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: JointPrefixSet<ipnet::IpNet> = JointPrefixSet::new();
+    /// set.insert("10.0.0.0/9".parse()?);
+    /// set.insert("10.128.0.0/9".parse()?);
+    /// assert!(!set.is_covered(&"10.0.0.0/8".parse()?));             // no single covering member
+    /// assert!(set.is_covered_in_aggregate(&"10.0.0.0/8".parse()?)); // the two /9s tile the /8
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered_in_aggregate(&self, prefix: &P) -> bool {
+        fork_ref!(self, prefix, is_covered_in_aggregate)
+    }
+
     /// Adds a value to the set.
     ///
     /// Returns whether the value was newly inserted. That is:

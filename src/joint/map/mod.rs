@@ -325,6 +325,64 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork_ref!(self, prefix as P, get_spm_prefix)
     }
 
+    /// Check whether `prefix` is covered by the map, i.e., whether the map contains an entry at
+    /// `prefix` itself or any less-specific prefix that contains it.
+    ///
+    /// This is equivalent to `self.cover(prefix).next().is_some()`, but stops at the first
+    /// (shortest) covering prefix. See [`cover`](Self::cover) to iterate over the covering
+    /// entries themselves.
+    ///
+    /// This function does not perform aggregation. That means that, even if both the left and
+    /// right children of `p` are present in the map, `is_covered(p)` may still return `false`. See
+    /// [`is_covered_in_aggregate`](Self::is_covered_in_aggregate) for that case.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("10.0.0.0/8".parse()?, 1);
+    /// pm.insert("2001:db8::/32".parse()?, 2);
+    /// assert!(pm.is_covered(&"10.1.2.0/24".parse()?));      // covered by 10.0.0.0/8
+    /// assert!(pm.is_covered(&"2001:db8:1::/48".parse()?));  // covered by 2001:db8::/32
+    /// assert!(!pm.is_covered(&"11.0.0.0/8".parse()?));      // not covered
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered(&self, prefix: &P) -> bool {
+        fork_ref!(self, prefix, is_covered)
+    }
+
+    /// Check whether every address in `prefix` is covered by the map, i.e., whether `prefix`'s
+    /// entire range is tiled by entries in the map, even if no single entry covers `prefix` on its
+    /// own.
+    ///
+    /// This is equivalent to `{ let mut m = self.clone(); m.aggregate(); m.is_covered(prefix) }`,
+    /// but read-only and without cloning. See [`is_covered`](Self::is_covered) for the (cheaper,
+    /// stricter) single-entry check.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: JointPrefixMap<ipnet::IpNet, _> = JointPrefixMap::new();
+    /// pm.insert("10.0.0.0/9".parse()?, 1);
+    /// pm.insert("10.128.0.0/9".parse()?, 2);
+    /// assert!(!pm.is_covered(&"10.0.0.0/8".parse()?));             // no single covering entry
+    /// assert!(pm.is_covered_in_aggregate(&"10.0.0.0/8".parse()?)); // the two /9s tile the /8
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered_in_aggregate(&self, prefix: &P) -> bool {
+        fork_ref!(self, prefix, is_covered_in_aggregate)
+    }
+
     /// Insert a new item into the prefix-map. This function may return any value that existed
     /// before.
     ///

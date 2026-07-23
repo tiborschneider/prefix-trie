@@ -205,6 +205,20 @@ fn _aggregate_consistent_set(prefixes: Vec<TestPrefix>) -> bool {
         && aggregated == twice
 }
 
+qc!(is_covered_in_aggregate_set, _is_covered_in_aggregate_set);
+fn _is_covered_in_aggregate_set((prefixes, probes): (Vec<TestPrefix>, Vec<TestPrefix>)) -> bool {
+    let original = prefixes.iter().copied().collect::<PrefixSet<_>>();
+    let mut aggregated = original.clone();
+    aggregated.aggregate();
+
+    // By definition, `is_covered_in_aggregate` is what `is_covered` would return after
+    // aggregation, without actually mutating the set. `probes` are independent of `prefixes`, so
+    // this exercises prefixes never inserted into the set (ancestors, descendants, disjoint).
+    probes
+        .iter()
+        .all(|p| original.is_covered_in_aggregate(p) == aggregated.is_covered(p))
+}
+
 qc!(aggregate_map, _aggregate_map);
 fn _aggregate_map(entries: Vec<(TestPrefix, u8)>) -> bool {
     let original: PrefixMap<TestPrefix, u8> = entries.into_iter().collect();

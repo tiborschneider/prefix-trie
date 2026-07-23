@@ -207,6 +207,64 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.get_spm_prefix(prefix)
     }
 
+    /// Check whether `prefix` is covered by the set, i.e., whether the set contains `prefix` itself
+    /// or any less-specific prefix that contains it.
+    ///
+    /// This is equivalent to `self.cover(prefix).next().is_some()`, but stops at the first (shortest)
+    /// covering prefix. See [`cover`](Self::cover) to iterate over the covering prefixes themselves.
+    ///
+    /// This function does not perform aggregation. That means that, even if both the left and right
+    /// children of `p` are present in the set, `is_covered(p)` may still return `false`. See
+    /// [`is_covered_in_aggregate`](Self::is_covered_in_aggregate) for that case.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// set.insert("10.0.0.0/8".parse()?);
+    /// assert!(set.is_covered(&"10.0.0.0/8".parse()?));  // exact member
+    /// assert!(set.is_covered(&"10.1.2.0/24".parse()?)); // covered by 10.0.0.0/8
+    /// assert!(!set.is_covered(&"11.0.0.0/8".parse()?)); // not covered
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered(&self, prefix: &P) -> bool {
+        self.0.is_covered(prefix)
+    }
+
+    /// Check whether every address in `prefix` is covered by the set, i.e., whether `prefix`'s
+    /// entire range is tiled by members of the set, even if no single member covers `prefix` on
+    /// its own.
+    ///
+    /// This is equivalent to `{ let mut s = self.clone(); s.aggregate(); s.is_covered(prefix) }`,
+    /// but read-only and without cloning. See [`is_covered`](Self::is_covered) for the (cheaper,
+    /// stricter) single-member check.
+    ///
+    /// ```
+    /// use prefix_trie::PrefixSet;
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut set: PrefixSet<ipnet::Ipv4Net> = PrefixSet::new();
+    /// set.insert("10.0.0.0/9".parse()?);
+    /// set.insert("10.128.0.0/9".parse()?);
+    /// assert!(!set.is_covered(&"10.0.0.0/8".parse()?));             // no single covering member
+    /// assert!(set.is_covered_in_aggregate(&"10.0.0.0/8".parse()?)); // the two /9s tile the /8
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered_in_aggregate(&self, prefix: &P) -> bool {
+        self.0.is_covered_in_aggregate(prefix)
+    }
+
     /// Adds a prefix to the set.
     ///
     /// Returns whether the prefix was newly inserted.
@@ -325,9 +383,8 @@ impl<P: Prefix> PrefixSet<P> {
     /// Modifies the prefix set by removing entries that are already covered by another one with a
     /// shorter prefix length, **without** merging adjacent prefixes.
     ///
-    /// **Invariant**: for *any* prefix `p`, `before.get_lpm(p).is_some()` and
-    /// `after.get_lpm(p).is_some()` return the same value (while the matched prefix may become less
-    /// specific).
+    /// **Invariant**: for *any* prefix `p`, `before.is_covered(p)` and `after.is_covered(p)` yield
+    /// the same value (while the matched prefix may become less specific).
     ///
     /// ```
     /// use prefix_trie::PrefixSet;
@@ -362,10 +419,10 @@ impl<P: Prefix> PrefixSet<P> {
     /// shorter prefix length, and by (recursively) merging adjacent prefixes.
     ///
     /// **Invariant**: for any *address* `a` (a host prefix of maximal length),
-    /// `before.get_lpm(a).is_some() == after.get_lpm(a).is_some()`. That is, the covered address
-    /// space is preserved exactly. This does **not** extend to shorter prefixes: merging siblings
-    /// can make `get_lpm` return `Some` for a prefix that previously matched nothing. For example,
-    /// two `/24`s merge into a `/23`, so `get_lpm` of that `/23` flips from `None` to `Some`. If you
+    /// `before.is_covered(a) == after.is_covered(a)`. That is, the covered address space is
+    /// preserved exactly. This does **not** extend to shorter prefixes: merging siblings can make
+    /// `get_lpm` return `Some` for a prefix that previously matched nothing. For example, two
+    /// `/24`s merge into a `/23`, so `get_lpm` of that `/23` flips from `None` to `Some`. If you
     /// need the invariant to hold for every prefix, use [`PrefixSet::aggregate_consistent`], which
     /// only drops redundant entries and never merges.
     ///

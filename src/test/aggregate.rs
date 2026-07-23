@@ -189,6 +189,32 @@ mod t {
     }
 
     #[test]
+    fn set_is_covered_in_aggregate_tiles_siblings<P: Prefix + Copy + PartialEq>() {
+        // No single member covers the /8, but the two /9s tile its entire range.
+        let set = PrefixSet::<P>::from_iter([ip("10.0.0.0/9"), ip("10.128.0.0/9")]);
+        assert!(!set.is_covered(&ip("10.0.0.0/8")));
+        assert!(set.is_covered_in_aggregate(&ip("10.0.0.0/8")));
+    }
+
+    #[test]
+    fn set_is_covered_in_aggregate_partial_tiling_is_false<P: Prefix + Copy + PartialEq>() {
+        // Only one half of the /8 is present; its range is not fully covered either way.
+        let set = PrefixSet::<P>::from_iter([ip("10.0.0.0/9")]);
+        assert!(!set.is_covered(&ip("10.0.0.0/8")));
+        assert!(!set.is_covered_in_aggregate(&ip("10.0.0.0/8")));
+    }
+
+    #[test]
+    fn set_is_covered_in_aggregate_matches_is_covered_for_ancestor_member<
+        P: Prefix + Copy + PartialEq,
+    >() {
+        // A direct covering ancestor member is caught by both, no tiling needed.
+        let set = PrefixSet::<P>::from_iter([ip("10.0.0.0/8")]);
+        assert!(set.is_covered(&ip("10.1.2.0/24")));
+        assert!(set.is_covered_in_aggregate(&ip("10.1.2.0/24")));
+    }
+
+    #[test]
     fn map_aggregate_consistent_drops_same_value_descendant<P: Prefix + Copy + PartialEq>() {
         // A more specific entry with the same value as its covering entry is redundant.
         let mut map = Map::<P>::from_iter([(ip("10.0.0.0/16"), 1), (ip("10.0.1.0/24"), 1)]);
@@ -591,6 +617,35 @@ mod t {
             vec![(ip("0.0.0.0/0"), 0), (ip("10.0.0.0/8"), 1)]
         );
         assert!(map.check_memory_alloc());
+    }
+
+    #[test]
+    fn map_is_covered_in_aggregate_tiles_siblings_regardless_of_value<
+        P: Prefix + Copy + PartialEq,
+    >() {
+        // No single entry covers the /8, but the two /9s tile its entire range. Coverage only
+        // tracks which addresses are present, not whether the values agree.
+        let map = Map::<P>::from_iter([(ip("10.0.0.0/9"), 1u32), (ip("10.128.0.0/9"), 2)]);
+        assert!(!map.is_covered(&ip("10.0.0.0/8")));
+        assert!(map.is_covered_in_aggregate(&ip("10.0.0.0/8")));
+    }
+
+    #[test]
+    fn map_is_covered_in_aggregate_partial_tiling_is_false<P: Prefix + Copy + PartialEq>() {
+        // Only one half of the /8 is present; its range is not fully covered either way.
+        let map = Map::<P>::from_iter([(ip("10.0.0.0/9"), 1u32)]);
+        assert!(!map.is_covered(&ip("10.0.0.0/8")));
+        assert!(!map.is_covered_in_aggregate(&ip("10.0.0.0/8")));
+    }
+
+    #[test]
+    fn map_is_covered_in_aggregate_matches_is_covered_for_ancestor_member<
+        P: Prefix + Copy + PartialEq,
+    >() {
+        // A direct covering ancestor entry is caught by both, no tiling needed.
+        let map = Map::<P>::from_iter([(ip("10.0.0.0/8"), 1u32)]);
+        assert!(map.is_covered(&ip("10.1.2.0/24")));
+        assert!(map.is_covered_in_aggregate(&ip("10.1.2.0/24")));
     }
 
     #[instantiate_tests(<(u32, u8)>)]

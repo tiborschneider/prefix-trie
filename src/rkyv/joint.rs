@@ -351,6 +351,82 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
+    /// Check whether `prefix` is covered by the map, i.e., whether the map contains an entry at
+    /// `prefix` itself or any less-specific prefix that contains it.
+    ///
+    /// This function does not perform aggregation. That means that, even if both the left and
+    /// right children of `p` are present in the map, `is_covered(p)` may still return `false`. See
+    /// [`is_covered_in_aggregate`](Self::is_covered_in_aggregate) for that case.
+    ///
+    /// This mirrors [`JointPrefixMap::is_covered`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/8"), 1);
+    /// pm.insert(p!("2001:db8::/32"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(map.is_covered(&p!("10.1.2.0/24")));
+    /// assert!(map.is_covered(&p!("2001:db8:1::/48")));
+    /// assert!(!map.is_covered(&p!("11.0.0.0/8")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered(&self, prefix: &P) -> bool {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.is_covered(p),
+            Right(p) => self.t2.is_covered(p),
+        }
+    }
+
+    /// Check whether every address in `prefix` is covered by the map, i.e., whether `prefix`'s
+    /// entire range is tiled by entries in the map, even if no single entry covers `prefix` on its
+    /// own. See [`is_covered`](Self::is_covered) for the (cheaper, stricter) single-entry check.
+    ///
+    /// This mirrors [`JointPrefixMap::is_covered_in_aggregate`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/9"), 1);
+    /// pm.insert(p!("10.128.0.0/9"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(!map.is_covered(&p!("10.0.0.0/8")));
+    /// assert!(map.is_covered_in_aggregate(&p!("10.0.0.0/8")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered_in_aggregate(&self, prefix: &P) -> bool {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.is_covered_in_aggregate(p),
+            Right(p) => self.t2.is_covered_in_aggregate(p),
+        }
+    }
+
     /// An iterator visiting all key-value pairs in lexicographic order. The iterator element type
     /// is `(P, &T::Archived)`, with reconstructed prefixes `P`.
     ///
@@ -971,6 +1047,86 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_spm(p).as_ref().map(P::from_p1),
             Right(p) => self.t2.get_spm(p).as_ref().map(P::from_p2),
+        }
+    }
+
+    /// Check whether `prefix` is covered by the set, i.e., whether the set contains `prefix` itself
+    /// or any less-specific prefix that contains it.
+    ///
+    /// This is equivalent to `self.cover(prefix).next().is_some()`, but stops at the first (shortest)
+    /// covering prefix. See [`cover`](Self::cover) to iterate over the covering prefixes themselves.
+    ///
+    /// This function does not perform aggregation. That means that, even if both the left and right
+    /// children of `p` are present in the set, `is_covered(p)` may still return `false`. See
+    /// [`is_covered_in_aggregate`](Self::is_covered_in_aggregate) for that case.
+    ///
+    /// This mirrors [`JointPrefixSet::is_covered`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/8"));
+    /// ps.insert(p!("2001:db8::/32"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(set.is_covered(&p!("10.1.2.0/24")));
+    /// assert!(set.is_covered(&p!("2001:db8:1::/48")));
+    /// assert!(!set.is_covered(&p!("11.0.0.0/8")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered(&self, prefix: &P) -> bool {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.is_covered(p),
+            Right(p) => self.t2.is_covered(p),
+        }
+    }
+
+    /// Check whether every address in `prefix` is covered by the set, i.e., whether `prefix`'s
+    /// entire range is tiled by members of the set, even if no single member covers `prefix` on
+    /// its own. See [`is_covered`](Self::is_covered) for the (cheaper, stricter) single-member
+    /// check.
+    ///
+    /// This mirrors [`JointPrefixSet::is_covered_in_aggregate`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/9"));
+    /// ps.insert(p!("10.128.0.0/9"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(!set.is_covered(&p!("10.0.0.0/8")));
+    /// assert!(set.is_covered_in_aggregate(&p!("10.0.0.0/8")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered_in_aggregate(&self, prefix: &P) -> bool {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.is_covered_in_aggregate(p),
+            Right(p) => self.t2.is_covered_in_aggregate(p),
         }
     }
 

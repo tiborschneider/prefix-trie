@@ -393,6 +393,64 @@ where
         self.get_spm(prefix).map(|(p, _)| p)
     }
 
+    /// Check whether `prefix` is covered by the map, i.e., whether the map contains an entry at
+    /// `prefix` itself or any less-specific prefix that contains it.
+    ///
+    /// This is equivalent to `self.cover(prefix).next().is_some()`, but stops at the first
+    /// (shortest) covering prefix. See [`cover`](Self::cover) to iterate over the covering
+    /// entries themselves.
+    ///
+    /// This function does not perform aggregation. That means that, even if both the left and
+    /// right children of `p` are present in the map, `is_covered(p)` may still return `false`. See
+    /// [`is_covered_in_aggregate`](Self::is_covered_in_aggregate) for that case.
+    ///
+    /// ```
+    /// # use prefix_trie::*; use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("10.0.0.0/8".parse()?, 1);
+    /// assert!(pm.is_covered(&"10.0.0.0/8".parse()?));  // exact member
+    /// assert!(pm.is_covered(&"10.1.2.0/24".parse()?)); // covered by 10.0.0.0/8
+    /// assert!(!pm.is_covered(&"11.0.0.0/8".parse()?)); // not covered
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    #[inline(always)]
+    pub fn is_covered(&self, prefix: &P) -> bool {
+        self.get_spm_prefix(prefix).is_some()
+    }
+
+    /// Check whether every address in `prefix` is covered by the map, i.e., whether `prefix`'s
+    /// entire range is tiled by entries in the map, even if no single entry covers `prefix` on its
+    /// own.
+    ///
+    /// This is equivalent to `{ let mut m = self.clone(); m.aggregate(); m.is_covered(prefix) }`,
+    /// but read-only and without cloning. See [`is_covered`](Self::is_covered) for the (cheaper,
+    /// stricter) single-entry check.
+    ///
+    /// ```
+    /// # use prefix_trie::*; use prefix_trie::*;
+    /// # #[cfg(feature = "ipnet")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut pm: PrefixMap<ipnet::Ipv4Net, _> = PrefixMap::new();
+    /// pm.insert("10.0.0.0/9".parse()?, 1);
+    /// pm.insert("10.128.0.0/9".parse()?, 2);
+    /// assert!(!pm.is_covered(&"10.0.0.0/8".parse()?));              // no single covering entry
+    /// assert!(pm.is_covered_in_aggregate(&"10.0.0.0/8".parse()?));  // the two /9s tile the /8
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "ipnet"))]
+    /// # fn main() {}
+    /// ```
+    pub fn is_covered_in_aggregate(&self, prefix: &P) -> bool {
+        let key = prefix.repr();
+        let prefix_len = prefix.prefix_len() as u32;
+        self.table.covers_in_aggregate(key, prefix_len)
+    }
+
     /// Insert a new item into the prefix-map. This function may return any value that existed
     /// before.
     ///
