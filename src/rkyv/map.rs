@@ -21,7 +21,10 @@ use rkyv::{
 use crate::{
     aggregate::member_coverage,
     allocator::compute_slot,
-    node::{child_bit, data_bit, data_lpm_mask, Key, DATA_BIT_TO_PREFIX},
+    node::{
+        child_bit, data_bit, data_lpm_mask, extend_repr, lex_after_child, lex_after_data, Key,
+        LexElem, DATA_BIT_TO_PREFIX, LEX_ORDER,
+    },
     table::{reconstruct_prefix, K, NUM_CHILDREN, NUM_DATA},
     Prefix,
 };
@@ -155,6 +158,47 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         Some(prefix)
     }
 
+    /// An iterator visiting all key-value pairs in lexicographic order. The iterator element type
+    /// is `(P, &T::Archived)`, with reconstructed prefixes `P`.
+    ///
+    /// See [`PrefixMap::iter`] for an example.
+    pub fn iter(&self) -> Iter<'_, P, T> {
+        Iter::new(self)
+    }
+
+    /// An iterator visiting all keys in lexicographic order. The iterator element type is
+    /// reconstructed prefixes `P`.
+    ///
+    /// See [`PrefixMap::keys`] for an example.
+    pub fn keys(&self) -> Keys<'_, P, T> {
+        Keys(Iter::new(self))
+    }
+
+    /// An iterator visiting all values in lexicographic order. The iterator element type is
+    /// `&T::Archived`.
+    ///
+    /// See [`PrefixMap::values`] for an example.
+    pub fn values(&self) -> Values<'_, P, T> {
+        Values(Iter::new(self))
+    }
+
+    /// Return an iterator starting at the given prefix in lexicographic order. This function can be
+    /// used to implement paginated access without remembering state (of the iterator position).
+    ///
+    /// - If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
+    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Prefixes that are contained
+    ///   within (are children of) `prefix` are still yielded.
+    ///
+    /// If `prefix` is not present in the map, the iterator starts at the first entry that
+    /// would come after `prefix` in lexicographic order, regardless of `inclusive`.
+    ///
+    /// See [`PrefixMap::iter_from`] for an example.
+    pub fn iter_from<'a>(&'a self, prefix: &P, inclusive: bool) -> Iter<'a, P, T> {
+        let (key, prefix_len) = key_prefix_len(prefix);
+        let stack = self.build_iter_stack_at(key, prefix_len, inclusive);
+        Iter::from_stack(self, stack)
+    }
+
     /// Iterate over all entries in the map that cover the given `prefix` (including `prefix` itself
     /// if that is present in the map). The returned iterator yields `(P, &'a T::Archived)`, with
     /// reconstructed prefixes `P`.
@@ -188,6 +232,105 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// See [`PrefixMap::cover_values`] for an example.
     pub fn cover_values<'a>(&'a self, prefix: &P) -> CoverValues<'a, P, T> {
         CoverValues(Cover::new(self, prefix))
+    }
+}
+
+/// An iterator over all entries of an [`ArchivedPrefixMap`] in lexicographic order.
+pub struct Iter<'a, P: Prefix, T: Archive> {
+    map: Option<&'a ArchivedPrefixMap<P, T>>,
+    stack: Vec<MaskedLexIter<'a, P::R>>,
+}
+
+impl<'a, P: Prefix, T: Archive> Default for Iter<'a, P, T> {
+    fn default() -> Self {
+        Self {
+            map: None,
+            stack: Vec::new(),
+        }
+    }
+}
+
+impl<'a, P: Prefix, T: Archive> Iter<'a, P, T> {
+    pub(super) fn new(map: &'a ArchivedPrefixMap<P, T>) -> Self {
+        Self::at_node(map, MaskedLexIter::root(map))
+    }
+
+    pub(super) fn at_node(map: &'a ArchivedPrefixMap<P, T>, lex: MaskedLexIter<'a, P::R>) -> Self {
+        let stack = vec![lex];
+        Self {
+            map: Some(map),
+            stack,
+        }
+    }
+
+    pub(super) fn from_stack(
+        map: &'a ArchivedPrefixMap<P, T>,
+        stack: Vec<MaskedLexIter<'a, P::R>>,
+    ) -> Self {
+        Self {
+            map: Some(map),
+            stack,
+        }
+    }
+}
+
+impl<'a, P: Prefix, T: Archive> Iterator for Iter<'a, P, T> {
+    type Item = (P, &'a T::Archived);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let map = self.map?;
+        while let Some(lex_iter) = self.stack.last_mut() {
+            let Some(next) = lex_iter.next() else {
+                self.stack.pop();
+                continue;
+            };
+
+            match next {
+                LexIterElem::Data(loc, depth) => {
+                    let p = reconstruct_prefix(lex_iter.key, depth, loc.bit as usize);
+                    return Some((p, &map.data[loc.idx()]));
+                }
+                LexIterElem::Child(next_loc, depth, next_key) => self
+                    .stack
+                    .push(MaskedLexIter::new(next_loc, depth, next_key, map)),
+            }
+        }
+        None
+    }
+}
+
+/// An iterator over all prefixes of an [`ArchivedPrefixMap`] in lexicographic order.
+pub struct Keys<'a, P: Prefix, T: Archive>(pub(super) Iter<'a, P, T>);
+
+impl<'a, P: Prefix, T: Archive> Default for Keys<'a, P, T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<'a, P: Prefix, T: Archive> Iterator for Keys<'a, P, T> {
+    type Item = P;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(p, _)| p)
+    }
+}
+
+/// An iterator over all values of an [`ArchivedPrefixMap`] in lexicographic order of their
+/// prefixes.
+pub struct Values<'a, P: Prefix, T: Archive>(Iter<'a, P, T>);
+
+impl<'a, P: Prefix, T: Archive> Default for Values<'a, P, T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<'a, P: Prefix, T: Archive> Iterator for Values<'a, P, T> {
+    type Item = &'a T::Archived;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(_, t)| t)
     }
 }
 
@@ -377,6 +520,59 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
             depth += K;
         }
     }
+
+    /// Build an iterator stack positioned at a given prefix in lex order.
+    ///
+    /// Navigates from the root toward `(key, prefix_len)`, pushing lex iterators onto the stack
+    /// with entries before the target masked out. If `inclusive` is false, the exact target
+    /// data slot is also excluded.
+    fn build_iter_stack_at(
+        &self,
+        key: P::R,
+        prefix_len: u32,
+        inclusive: bool,
+    ) -> Vec<MaskedLexIter<'_, P::R>> {
+        let mut stack = Vec::new();
+        let mut loc = Loc::root();
+        let mut depth = 0u32;
+
+        loop {
+            let mut lex = MaskedLexIter::new(loc, depth, key, self);
+
+            if prefix_len < depth + K {
+                // Target falls within this node as a data slot.
+                let data_bit = data_bit(key, prefix_len);
+                let (data_mask, child_mask) = lex_after_data(data_bit);
+                let data_mask = if inclusive {
+                    data_mask
+                } else {
+                    data_mask & !(1 << data_bit)
+                };
+                lex.apply_data_mask(data_mask);
+                lex.apply_child_mask(child_mask);
+                stack.push(lex);
+                break;
+            }
+
+            // Target is deeper; follow the child pointer.
+            let child_bit = child_bit(depth, key);
+            let (data_mask, child_mask) = lex_after_child(child_bit);
+            lex.apply_data_mask(data_mask);
+            lex.apply_child_mask(child_mask);
+            stack.push(lex);
+
+            // SAFETY: `loc` is valid (see above); `child()` returns a valid `Loc` if present.
+            match self.nodes[loc.idx()].child_loc(child_bit) {
+                Some(next) => {
+                    loc = next;
+                    depth += K;
+                }
+                None => break, // child doesn't exist; entries after it are already in the mask
+            }
+        }
+
+        stack
+    }
 }
 
 fn key_prefix_len<P: Prefix>(prefix: &P) -> (P::R, u32) {
@@ -387,7 +583,7 @@ fn key_prefix_len<P: Prefix>(prefix: &P) -> (P::R, u32) {
 
 /// Rkyv representation of a node with compacted indices
 #[derive(Archive, Serialize, Default)]
-#[rkyv(derive(Debug))]
+#[rkyv(derive(Debug, Default))]
 pub(super) struct NodeRepr {
     pub(super) data_bitmap: u32,
     pub(super) child_bitmap: u32,
@@ -414,10 +610,7 @@ impl ArchivedNodeRepr {
     /// Get the location of the given data bit (only if it is set)
     pub(super) fn data_loc(&self, bit: u32) -> Option<Loc> {
         if self.has_data_bit(bit) {
-            Some(Loc {
-                idx: self.data_idx() + compute_slot(self.data_bitmap(), bit),
-                bit,
-            })
+            Some(Loc::new(self.data_bitmap(), self.data_idx(), bit))
         } else {
             None
         }
@@ -432,10 +625,7 @@ impl ArchivedNodeRepr {
             return None;
         }
         let msb_bit = u32::BITS - 1 - nodes_present.leading_zeros();
-        Some(Loc {
-            idx: self.data_idx() + compute_slot(self.data_bitmap(), msb_bit),
-            bit: msb_bit,
-        })
+        Some(Loc::new(self.data_bitmap(), self.data_idx(), msb_bit))
     }
 
     /// Get the data loc of the shortest prefix match in this node (if it exists).
@@ -447,17 +637,7 @@ impl ArchivedNodeRepr {
             return None;
         }
         let lsb_bit = nodes_present.trailing_zeros();
-        Some(Loc {
-            idx: self.data_idx() + compute_slot(self.data_bitmap(), lsb_bit),
-            bit: lsb_bit,
-        })
-    }
-
-    /// Get an iterator over all indices of data.
-    #[inline(always)]
-    pub(super) fn data_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
-        let bitmap = self.data_bitmap();
-        bitmap_offset_locs(bitmap, bitmap, self.data_idx())
+        Some(Loc::new(self.data_bitmap(), self.data_idx(), lsb_bit))
     }
 
     /// Get an iterator over all indices of data that cover (or equal) the prefix, i.e.,
@@ -492,10 +672,7 @@ impl ArchivedNodeRepr {
     /// Get the location of the given data bit (only if it is set)
     pub(super) fn child_loc(&self, bit: u32) -> Option<Loc> {
         if self.has_child_bit(bit) {
-            Some(Loc {
-                idx: self.children_idx() + compute_slot(self.child_bitmap(), bit),
-                bit,
-            })
+            Some(Loc::new(self.child_bitmap(), self.children_idx(), bit))
         } else {
             None
         }
@@ -510,6 +687,7 @@ impl ArchivedNodeRepr {
 }
 
 /// `bitmap` is used to compute the popcount (offset), while `filter` is used for filtering.
+#[inline(always)]
 fn bitmap_offset_locs(
     bitmap: u32,
     filter: u32,
@@ -517,10 +695,7 @@ fn bitmap_offset_locs(
 ) -> impl DoubleEndedIterator<Item = Loc> + 'static {
     (0..(NUM_CHILDREN as u32))
         .filter(move |&bit| filter & (1 << bit) != 0)
-        .map(move |bit| Loc {
-            idx: offset + compute_slot(bitmap, bit),
-            bit,
-        })
+        .map(move |bit| Loc::new(bitmap, offset, bit))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -530,12 +705,109 @@ pub(super) struct Loc {
 }
 
 impl Loc {
+    #[inline(always)]
     pub(super) fn root() -> Self {
         Self { idx: 0, bit: 0 }
     }
 
+    #[inline(always)]
+    pub(super) fn new(bitmap: u32, offset: u32, bit: u32) -> Self {
+        Loc {
+            idx: offset + compute_slot(bitmap, bit),
+            bit,
+        }
+    }
+
+    #[inline(always)]
     pub(super) fn idx(&self) -> usize {
         self.idx as usize
+    }
+}
+
+pub(super) struct MaskedLexIter<'a, R> {
+    iter: std::slice::Iter<'static, LexElem>,
+    depth: u32,
+    key: R,
+    // Original (unmasked) node: kept for correct POPCNT slot computation.
+    node: &'a ArchivedNodeRepr,
+    // Separate filter fields: apply_*_mask modifies these, not the node bitmaps.
+    data_filter: u32,
+    child_filter: u32,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum LexIterElem<R> {
+    Data(Loc, u32),
+    Child(Loc, u32, R),
+}
+
+impl<'a, R> MaskedLexIter<'a, R> {
+    pub(crate) fn root<P, T>(map: &'a ArchivedPrefixMap<P, T>) -> Self
+    where
+        P: Prefix<R = R>,
+        R: Zero,
+        T: Archive,
+    {
+        Self::new(Loc::root(), 0, R::zero(), map)
+    }
+
+    pub(crate) fn new<P, T>(loc: Loc, depth: u32, key: R, map: &'a ArchivedPrefixMap<P, T>) -> Self
+    where
+        P: Prefix<R = R>,
+        T: Archive,
+    {
+        Self {
+            iter: LEX_ORDER.iter(),
+            depth,
+            key,
+            node: &map.nodes[loc.idx()],
+            data_filter: u32::MAX,
+            child_filter: u32::MAX,
+        }
+    }
+
+    pub(crate) fn apply_data_mask(&mut self, mask: u32) {
+        // Only reduce the set of offsets to yield; keep node.data_bitmap intact for POPCNT.
+        self.data_filter &= mask;
+    }
+
+    pub(crate) fn apply_child_mask(&mut self, mask: u32) {
+        self.child_filter &= mask;
+    }
+}
+
+impl<'a, R: Key> Iterator for MaskedLexIter<'a, R> {
+    type Item = LexIterElem<R>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let next = *self.iter.next()?;
+            match next.decode() {
+                Ok(data_bit) => {
+                    // Check original bitmap (for existence) AND filter (for masking).
+                    if self.data_filter & (1 << data_bit) != 0 {
+                        if let Some(loc) = self.node.data_loc(data_bit) {
+                            return Some(LexIterElem::Data(loc, self.depth));
+                        }
+                    }
+                }
+                Err(child_bit) => {
+                    if self.node.has_child_bit(child_bit)
+                        && (self.child_filter & (1 << child_bit)) != 0
+                    {
+                        return Some(LexIterElem::Child(
+                            Loc::new(
+                                self.node.child_bitmap(),
+                                self.node.children_idx(),
+                                child_bit,
+                            ),
+                            self.depth + K,
+                            extend_repr(self.key, self.depth, child_bit),
+                        ));
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -3,7 +3,10 @@
 use rkyv::{bytecheck::CheckBytes, Portable};
 
 use crate::{
-    rkyv::{map::CoverKeys, ArchivedPrefixMap},
+    rkyv::{
+        map::{CoverKeys, Keys},
+        ArchivedPrefixMap,
+    },
     Prefix,
 };
 
@@ -80,6 +83,28 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     #[inline(always)]
     pub fn get_spm(&self, prefix: &P) -> Option<P> {
         self.0.get_spm_prefix(prefix)
+    }
+
+    /// An iterator visiting all keys in lexicographic order. The iterator element type is
+    /// reconstructed prefixes `P`.
+    ///
+    /// See [`PrefixSet::iter`] for an example.
+    pub fn iter(&self) -> Keys<'_, P, ()> {
+        self.0.keys()
+    }
+
+    /// Return an iterator starting at the given prefix in lexicographic order. This function can be
+    /// used to implement paginated access without remembering state (of the iterator position).
+    ///
+    /// If `inclusive` is `true`, the iterator includes `prefix` (if present).
+    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    ///
+    /// If `prefix` is not present in the set, the iterator starts at the first prefix that
+    /// would come after it in lexicographic order, regardless of `inclusive`.
+    ///
+    /// See [`PrefixSet::iter_from`] for an example.
+    pub fn iter_from<'a>(&'a self, prefix: &P, inclusive: bool) -> Keys<'a, P, ()> {
+        Keys(self.0.iter_from(prefix, inclusive))
     }
 
     /// Iterate over all prefixes in the set that cover the given `prefix` (including `prefix` itself

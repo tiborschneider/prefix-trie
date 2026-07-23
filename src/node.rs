@@ -358,7 +358,7 @@ pub(crate) enum LexIterElem<R> {
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
-struct LexElem(u8);
+pub(crate) struct LexElem(u8);
 
 const CHILD_FLAG: u8 = 1 << 7;
 
@@ -372,7 +372,7 @@ impl LexElem {
     }
     /// Decodes the element.
     /// Returns `Ok(data_bit)` if this is a data slot, or `Err(child_bit)` if this is a child slot.
-    const fn decode(self) -> Result<u32, u32> {
+    pub(crate) const fn decode(self) -> Result<u32, u32> {
         if self.0 >= CHILD_FLAG {
             Err((self.0 - CHILD_FLAG) as u32)
         } else {
@@ -381,7 +381,8 @@ impl LexElem {
     }
 }
 
-const LEX_ORDER: [LexElem; NUM_DATA + NUM_CHILDREN] = array_const_fn_init![const_lex_iter; 63];
+pub(crate) const LEX_ORDER: [LexElem; NUM_DATA + NUM_CHILDREN] =
+    array_const_fn_init![const_lex_iter; 63];
 const fn const_lex_iter(i: usize) -> LexElem {
     let mut i = i as u32;
     let mut node: u32 = 0;

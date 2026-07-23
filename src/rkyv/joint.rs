@@ -129,6 +129,62 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
+    /// An iterator visiting all key-value pairs in lexicographic order. The iterator element type
+    /// is `(P, &T::Archived)`, with reconstructed prefixes `P`.
+    ///
+    /// See [`JointPrefixMap::iter`] for an example.
+    pub fn iter(&self) -> Iter<'_, P, T> {
+        Iter {
+            i1: self.t1.iter(),
+            i2: self.t2.iter(),
+        }
+    }
+
+    /// An iterator visiting all keys in lexicographic order. The iterator element type is
+    /// reconstructed prefixes `P`.
+    ///
+    /// See [`JointPrefixMap::keys`] for an example.
+    pub fn keys(&self) -> Keys<'_, P, T> {
+        Keys {
+            i1: self.t1.keys(),
+            i2: self.t2.keys(),
+        }
+    }
+
+    /// An iterator visiting all values in lexicographic order. The iterator element type is
+    /// `&T::Archived`.
+    ///
+    /// See [`JointPrefixMap::values`] for an example.
+    pub fn values(&self) -> Values<'_, P, T> {
+        Values {
+            i1: self.t1.values(),
+            i2: self.t2.values(),
+        }
+    }
+
+    /// Return an iterator starting at the given prefix in lexicographic order. This function can be
+    /// used to implement paginated access without remembering state (of the iterator position).
+    ///
+    /// If `inclusive` is `true`, the iterator includes `prefix` (if present).
+    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    ///
+    /// If `prefix` is not present in the map, the iterator starts at the first prefix that
+    /// would come after it in lexicographic order, regardless of `inclusive`.
+    ///
+    /// See [`JointPrefixMap::iter_from`] for an example.
+    pub fn iter_from<'a>(&'a self, prefix: &P, inclusive: bool) -> Iter<'a, P, T> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => Iter {
+                i1: self.t1.iter_from(p, inclusive),
+                i2: self.t2.iter(),
+            },
+            Right(p) => Iter {
+                i1: Default::default(),
+                i2: self.t2.iter_from(p, inclusive),
+            },
+        }
+    }
+
     /// Iterate over all entries in the map that cover the given `prefix` (including `prefix` itself
     /// if that is present in the map). The returned iterator yields `(P, &'a T::Archived)`, with
     /// reconstructed prefixes `P`.
@@ -261,6 +317,40 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         }
     }
 
+    /// An iterator visiting all keys in lexicographic order. The iterator element type is
+    /// reconstructed prefixes `P`.
+    ///
+    /// See [`JointPrefixSet::iter`] for an example.
+    pub fn iter(&self) -> Keys<'_, P, ()> {
+        Keys {
+            i1: self.t1.iter(),
+            i2: self.t2.iter(),
+        }
+    }
+
+    /// Return an iterator starting at the given prefix in lexicographic order. This function can be
+    /// used to implement paginated access without remembering state (of the iterator position).
+    ///
+    /// If `inclusive` is `true`, the iterator includes `prefix` (if present).
+    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    ///
+    /// If `prefix` is not present in the set, the iterator starts at the first prefix that
+    /// would come after it in lexicographic order, regardless of `inclusive`.
+    ///
+    /// See [`JointPrefixSet::iter_from`] for an example.
+    pub fn iter_from(&self, prefix: &P, inclusive: bool) -> Keys<'_, P, ()> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => Keys {
+                i1: self.t1.iter_from(p, inclusive),
+                i2: self.t2.iter(),
+            },
+            Right(p) => Keys {
+                i1: Default::default(),
+                i2: self.t2.iter_from(p, inclusive),
+            },
+        }
+    }
+
     /// Iterate over all prefixes in the set that cover the given `prefix` (including `prefix` itself
     /// if that is present in the map). The returned iterator yields reconstructed prefixes `P`.
     ///
@@ -273,6 +363,81 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
             Left(p) => CoverKeys::P1(self.t1.cover(p)),
             Right(p) => CoverKeys::P2(self.t2.cover(p)),
         }
+    }
+}
+
+/// An iterator over all entries of a [`JointPrefixMap`] in lexicographic order.
+pub struct Iter<'a, P: JointPrefix, T: Archive> {
+    i1: super::map::Iter<'a, P::P1, T>,
+    i2: super::map::Iter<'a, P::P2, T>,
+}
+
+impl<'a, P: JointPrefix, T: Archive> Default for Iter<'a, P, T> {
+    fn default() -> Self {
+        Self {
+            i1: Default::default(),
+            i2: Default::default(),
+        }
+    }
+}
+
+impl<'a, P: JointPrefix, T: Archive> Iterator for Iter<'a, P, T> {
+    type Item = (P, &'a T::Archived);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.i1
+            .next()
+            .map(|(p, t)| (P::from_p1(&p), t))
+            .or_else(|| self.i2.next().map(|(p, t)| (P::from_p2(&p), t)))
+    }
+}
+
+/// An iterator over all prefixes of a [`JointPrefixMap`] in lexicographic order.
+pub struct Keys<'a, P: JointPrefix, T: Archive> {
+    i1: super::map::Keys<'a, P::P1, T>,
+    i2: super::map::Keys<'a, P::P2, T>,
+}
+
+impl<'a, P: JointPrefix, T: Archive> Default for Keys<'a, P, T> {
+    fn default() -> Self {
+        Self {
+            i1: Default::default(),
+            i2: Default::default(),
+        }
+    }
+}
+
+impl<'a, P: JointPrefix, T: Archive> Iterator for Keys<'a, P, T> {
+    type Item = P;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.i1
+            .next()
+            .map(|p| P::from_p1(&p))
+            .or_else(|| self.i2.next().map(|p| P::from_p2(&p)))
+    }
+}
+
+/// An iterator over all values of a [`JointPrefixMap`] in lexicographic order.
+pub struct Values<'a, P: JointPrefix, T: Archive> {
+    i1: super::map::Values<'a, P::P1, T>,
+    i2: super::map::Values<'a, P::P2, T>,
+}
+
+impl<'a, P: JointPrefix, T: Archive> Default for Values<'a, P, T> {
+    fn default() -> Self {
+        Self {
+            i1: Default::default(),
+            i2: Default::default(),
+        }
+    }
+}
+
+impl<'a, P: JointPrefix, T: Archive> Iterator for Values<'a, P, T> {
+    type Item = &'a T::Archived;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.i1.next().or_else(|| self.i2.next())
     }
 }
 
