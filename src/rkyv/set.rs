@@ -49,14 +49,16 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     /// Check whether some (exact) prefix is present in the set, without using longest prefix match.
     ///
     /// See [`PrefixSet::contains`] for an example.
+    #[inline(always)]
     pub fn contains(&self, prefix: &P) -> bool {
-        self.0.get(prefix).is_some()
+        self.0.contains_key(prefix)
     }
 
     /// Get the canonical (reconstructed) prefix by exact prefix matching.
     ///
     /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
     /// bits are not preserved.
+    #[inline(always)]
     pub fn get(&self, prefix: &P) -> Option<P> {
         self.0.get_key_value(prefix).map(|(p, _)| p)
     }
@@ -64,7 +66,16 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     /// Get the longest prefix in the set that contains `prefix`.
     ///
     /// See [`PrefixSet::get_lpm`] for an example.
+    #[inline(always)]
     pub fn get_lpm(&self, prefix: &P) -> Option<P> {
-        self.0.get_lpm(prefix).map(|(p, _)| p)
+        self.0.get_lpm_prefix(prefix)
+    }
+
+    /// Get the shortest prefix in the set that contains `prefix`.
+    ///
+    /// See [`PrefixSet::get_spm`] for an example.
+    #[inline(always)]
+    pub fn get_spm(&self, prefix: &P) -> Option<P> {
+        self.0.get_spm_prefix(prefix)
     }
 }

@@ -65,6 +65,16 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
+    /// Check if a key is present in the datastructure
+    ///
+    /// See [`JointPrefixMap::contains_key`] for an example.
+    pub fn contains_key(&self, prefix: &P) -> bool {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.contains_key(p),
+            Right(p) => self.t2.contains_key(p),
+        }
+    }
+
     /// Get the value of an element by matching exactly on the prefix, plus the (canonical version)
     /// of the matched prefix.
     ///
@@ -86,6 +96,36 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_lpm(p).map(|(p, t)| (P::from_p1(&p), t)),
             Right(p) => self.t2.get_lpm(p).map(|(p, t)| (P::from_p2(&p), t)),
+        }
+    }
+
+    /// Get the longest prefix in the map that contains `prefix`.
+    ///
+    /// See [`JointPrefixMap::get_lpm_prefix`] for an example.
+    pub fn get_lpm_prefix(&self, prefix: &P) -> Option<P> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.get_lpm_prefix(p).map(|p| P::from_p1(&p)),
+            Right(p) => self.t2.get_lpm_prefix(p).map(|p| P::from_p2(&p)),
+        }
+    }
+
+    /// Get the value of an address or prefix using shortest prefix matching.
+    ///
+    /// See [`JointPrefixMap::get_spm`] for an example.
+    pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.get_spm(p).map(|(p, t)| (P::from_p1(&p), t)),
+            Right(p) => self.t2.get_spm(p).map(|(p, t)| (P::from_p2(&p), t)),
+        }
+    }
+
+    /// Get the shortest prefix in the map that contains `prefix`.
+    ///
+    /// See [`JointPrefixMap::get_spm_prefix`] for an example.
+    pub fn get_spm_prefix(&self, prefix: &P) -> Option<P> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.get_spm_prefix(p).map(|p| P::from_p1(&p)),
+            Right(p) => self.t2.get_spm_prefix(p).map(|p| P::from_p2(&p)),
         }
     }
 }
@@ -164,6 +204,16 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_lpm(p).as_ref().map(P::from_p1),
             Right(p) => self.t2.get_lpm(p).as_ref().map(P::from_p2),
+        }
+    }
+
+    /// Get the shortest prefix in the set that contains `prefix`.
+    ///
+    /// See [`JointPrefixSet::get_spm`] for an example.
+    pub fn get_spm(&self, prefix: &P) -> Option<P> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => self.t1.get_spm(p).as_ref().map(P::from_p1),
+            Right(p) => self.t2.get_spm(p).as_ref().map(P::from_p2),
         }
     }
 }

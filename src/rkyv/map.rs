@@ -80,12 +80,23 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     ///
     /// See [`PrefixMap::get`] for an example.
     pub fn get<'a>(&'a self, prefix: &P) -> Option<&'a T::Archived> {
-        let key = prefix.repr();
-        let prefix_len = prefix.prefix_len() as u32;
+        let (key, prefix_len) = key_prefix_len(prefix);
         let (loc, _) = self.find_loc(key, prefix_len)?;
         let bit = data_bit(key, prefix_len);
         let data_loc = self.nodes[loc.idx()].data_loc(bit)?;
         Some(&self.data[data_loc.idx()])
+    }
+
+    /// Check if a key is present in the datastructure
+    ///
+    /// See [`PrefixMap::contains`] for an example.
+    pub fn contains_key(&self, prefix: &P) -> bool {
+        let (key, prefix_len) = key_prefix_len(prefix);
+        let Some((loc, _)) = self.find_loc(key, prefix_len) else {
+            return false;
+        };
+        let bit = data_bit(key, prefix_len);
+        self.nodes[loc.idx()].data_loc(bit).is_some()
     }
 
     /// Get the value of an element by matching exactly on the prefix, plus the (canonical version)
@@ -96,8 +107,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     ///
     /// See [`PrefixMap::get_key_value`] for an example.
     pub fn get_key_value<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
-        let key = prefix.repr();
-        let prefix_len = prefix.prefix_len() as u32;
+        let (key, prefix_len) = key_prefix_len(prefix);
         let (loc, depth) = self.find_loc(key, prefix_len)?;
         let bit = data_bit(key, prefix_len);
         let data_loc = self.nodes[loc.idx()].data_loc(bit)?;
@@ -109,11 +119,40 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     ///
     /// See [`PrefixMap::get_lpm`] for an example.
     pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
-        let key = prefix.repr();
-        let prefix_len = prefix.prefix_len() as u32;
+        let (key, prefix_len) = key_prefix_len(prefix);
         let (data_loc, depth) = self.find_lpm(key, prefix_len)?;
         let prefix = reconstruct_prefix(key, depth, data_loc.bit as usize);
         Some((prefix, &self.data[data_loc.idx()]))
+    }
+
+    /// Get the longest prefix in the map that contains `prefix`.
+    ///
+    /// See [`PrefixMap::get_lpm_prefix`] for an example.
+    pub fn get_lpm_prefix(&self, prefix: &P) -> Option<P> {
+        let (key, prefix_len) = key_prefix_len(prefix);
+        let (data_loc, depth) = self.find_lpm(key, prefix_len)?;
+        let prefix = reconstruct_prefix(key, depth, data_loc.bit as usize);
+        Some(prefix)
+    }
+
+    /// Get the value of an address or prefix using shortest prefix matching.
+    ///
+    /// See [`PrefixMap::get_spm`] for an example.
+    pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
+        let (key, prefix_len) = key_prefix_len(prefix);
+        let (data_loc, depth) = self.find_spm(key, prefix_len)?;
+        let prefix = reconstruct_prefix(key, depth, data_loc.bit as usize);
+        Some((prefix, &self.data[data_loc.idx()]))
+    }
+
+    /// Get the shortest prefix in the map that contains `prefix`.
+    ///
+    /// See [`PrefixMap::get_lpm_prefix`] for an example.
+    pub fn get_spm_prefix(&self, prefix: &P) -> Option<P> {
+        let (key, prefix_len) = key_prefix_len(prefix);
+        let (data_loc, depth) = self.find_spm(key, prefix_len)?;
+        let prefix = reconstruct_prefix(key, depth, data_loc.bit as usize);
+        Some(prefix)
     }
 
     /// recursive function to compute the address count.
@@ -184,6 +223,35 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
             depth += K;
         }
     }
+
+    /// Find the shortest-prefix match and return the position of the data of the LPM match, plus the
+    /// depth of the node containing this data.
+    #[inline(always)]
+    fn find_spm<R: Key>(&self, key: R, prefix_len: u32) -> Option<(Loc, u32)> {
+        let mut loc = Loc::root();
+        let mut depth = 0;
+
+        loop {
+            let node = &self.nodes[loc.idx()];
+            if let Some(data_loc) = node.data_spm_loc(depth, key, prefix_len) {
+                return Some((data_loc, depth));
+            }
+            if prefix_len < depth + K {
+                return None;
+            }
+            let child_bit = child_bit(depth, key);
+            // SAFETY: `loc` starts as `Loc::root()` and is only updated to the result
+            // of a prior `child()` call, which always returns a valid `Loc`.
+            loc = self.nodes[loc.idx()].child_loc(child_bit)?;
+            depth += K;
+        }
+    }
+}
+
+fn key_prefix_len<P: Prefix>(prefix: &P) -> (P::R, u32) {
+    let key = prefix.repr();
+    let prefix_len = prefix.prefix_len() as u32;
+    (key, prefix_len)
 }
 
 /// Rkyv representation of a node with compacted indices
@@ -289,6 +357,21 @@ impl ArchivedNodeRepr {
         Some(Loc {
             idx: self.data_idx() + compute_slot(self.data_bitmap(), msb_bit),
             bit: msb_bit,
+        })
+    }
+
+    /// Get the data loc of the shortest prefix match in this node (if it exists).
+    /// Returns Loc with bit (bitmap position) and computed slot.
+    #[inline(always)]
+    fn data_spm_loc<R: Key>(&self, depth: u32, key: R, prefix_len: u32) -> Option<Loc> {
+        let nodes_present = self.data_bitmap & data_lpm_mask(depth, key, prefix_len);
+        if nodes_present == 0 {
+            return None;
+        }
+        let lsb_bit = nodes_present.trailing_zeros();
+        Some(Loc {
+            idx: self.data_idx() + compute_slot(self.data_bitmap(), lsb_bit),
+            bit: lsb_bit,
         })
     }
 }
