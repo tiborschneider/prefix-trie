@@ -49,7 +49,29 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     /// To avoid double-counting, the function traverses the (partial) trie once, skipping nodes
     /// that are already covered.
     ///
-    /// See [`PrefixSet::address_count`] for an example.
+    /// This mirrors [`PrefixSet::address_count`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("192.0.2.0/24"));
+    /// ps.insert(p!("198.51.100.0/24"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(set.address_count(), Some(512));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn address_count(&self) -> Option<P::R> {
         self.0.address_count()
@@ -57,7 +79,31 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
 
     /// Check whether some (exact) prefix is present in the set, without using longest prefix match.
     ///
-    /// See [`PrefixSet::contains`] for an example.
+    /// This mirrors [`PrefixSet::contains`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.1.0/24"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(set.contains(&p!("10.0.1.0/24")));
+    /// assert!(!set.contains(&p!("10.0.2.0/24")));
+    /// assert!(!set.contains(&p!("10.0.0.0/23")));
+    /// assert!(!set.contains(&p!("10.0.1.128/25")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn contains(&self, prefix: &P) -> bool {
         self.0.contains_key(prefix)
@@ -67,6 +113,30 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     ///
     /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
     /// bits are not preserved.
+    ///
+    /// This mirrors [`PrefixSet::get`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.1.0/24"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(set.get(&p!("10.0.1.0/24")), Some(p!("10.0.1.0/24")));
+    /// assert_eq!(set.get(&p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn get(&self, prefix: &P) -> Option<P> {
         self.0.get_key_value(prefix).map(|(p, _)| p)
@@ -74,7 +144,31 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
 
     /// Get the longest prefix in the set that contains `prefix`.
     ///
-    /// See [`PrefixSet::get_lpm`] for an example.
+    /// This mirrors [`PrefixSet::get_lpm`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.1.0/24"));
+    /// ps.insert(p!("10.0.0.0/23"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(set.get_lpm(&p!("10.0.1.1/32")), Some(p!("10.0.1.0/24")));
+    /// assert_eq!(set.get_lpm(&p!("10.0.0.0/24")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(set.get_lpm(&p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn get_lpm(&self, prefix: &P) -> Option<P> {
         self.0.get_lpm_prefix(prefix)
@@ -82,7 +176,31 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
 
     /// Get the shortest prefix in the set that contains `prefix`.
     ///
-    /// See [`PrefixSet::get_spm`] for an example.
+    /// This mirrors [`PrefixSet::get_spm`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.1.0/24"));
+    /// ps.insert(p!("10.0.0.0/23"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(set.get_spm(&p!("10.0.1.1/32")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(set.get_spm(&p!("10.0.0.0/23")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(set.get_spm(&p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     pub fn get_spm(&self, prefix: &P) -> Option<P> {
         self.0.get_spm_prefix(prefix)
@@ -91,7 +209,33 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     /// An iterator visiting all keys in lexicographic order. The iterator element type is
     /// reconstructed prefixes `P`.
     ///
-    /// See [`PrefixSet::iter`] for an example.
+    /// This mirrors [`PrefixSet::iter`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/23"));
+    /// ps.insert(p!("10.0.0.0/24"));
+    /// ps.insert(p!("10.0.2.0/23"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     set.iter().collect::<Vec<_>>(),
+    ///     vec![p!("10.0.0.0/23"), p!("10.0.0.0/24"), p!("10.0.2.0/23")],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn iter(&self) -> Keys<'_, P, ()> {
         self.0.keys()
     }
@@ -102,7 +246,35 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
-    /// See [`PrefixSet::children`] for an example.
+    /// This mirrors [`PrefixSet::children`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/22"));
+    /// ps.insert(p!("10.0.0.0/23"));
+    /// ps.insert(p!("10.0.2.0/23"));
+    /// ps.insert(p!("10.0.0.0/24"));
+    /// ps.insert(p!("10.0.2.0/24"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     set.children(&p!("10.0.0.0/23")).collect::<Vec<_>>(),
+    ///     vec![p!("10.0.0.0/23"), p!("10.0.0.0/24")],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn children<'a>(&'a self, prefix: &P) -> Keys<'a, P, ()> {
         Keys(self.0.children(prefix))
     }
@@ -116,7 +288,34 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     /// If `prefix` is not present in the set, the iterator starts at the first prefix that
     /// would come after it in lexicographic order, regardless of `inclusive`.
     ///
-    /// See [`PrefixSet::iter_from`] for an example.
+    /// This mirrors [`PrefixSet::iter_from`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/8"));
+    /// ps.insert(p!("10.1.0.0/16"));
+    /// ps.insert(p!("10.2.0.0/16"));
+    /// ps.insert(p!("10.3.0.0/16"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     set.iter_from(&p!("10.1.0.0/16"), false).take(2).collect::<Vec<_>>(),
+    ///     vec![p!("10.2.0.0/16"), p!("10.3.0.0/16")],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn iter_from<'a>(&'a self, prefix: &P, inclusive: bool) -> Keys<'a, P, ()> {
         Keys(self.0.iter_from(prefix, inclusive))
     }
@@ -127,7 +326,36 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
     ///
-    /// See [`PrefixSet::cover`] for an example.
+    /// This mirrors [`PrefixSet::cover`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = PrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/8"));
+    /// ps.insert(p!("10.1.0.0/16"));
+    /// ps.insert(p!("10.1.1.0/24"));
+    /// ps.insert(p!("10.1.2.0/24")); // disjoint prefixes are not covered
+    /// ps.insert(p!("10.1.1.0/25")); // more specific prefixes are not covered
+    /// ps.insert(p!("11.0.0.0/8"));  // unrelated branches are skipped
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     set.cover(&p!("10.1.1.0/24")).collect::<Vec<_>>(),
+    ///     vec![p!("10.0.0.0/8"), p!("10.1.0.0/16"), p!("10.1.1.0/24")],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn cover<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, ()> {
         self.0.cover_keys(prefix)
     }

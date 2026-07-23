@@ -72,7 +72,30 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// To avoid double-counting, the function traverses the (partial) trie once, skipping nodes
     /// that are already covered.
     ///
-    /// See [`PrefixMap::address_count`] for an example.
+    /// This mirrors [`PrefixMap::address_count`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("192.0.2.0/24"), 1);
+    /// pm.insert(p!("192.0.2.128/25"), 2);
+    /// pm.insert(p!("198.51.100.0/24"), 3);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(map.address_count(), Some(512));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn address_count(&self) -> Option<P::R> {
         // check if the trie is fully covered by a single root node
         if self.nodes[0].has_data_bit(0) {
@@ -84,7 +107,32 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
 
     /// Get the value of an element by matching exactly on the prefix.
     ///
-    /// See [`PrefixMap::get`] for an example.
+    /// This mirrors [`PrefixMap::get`], but operates on the archived map and yields a reference to
+    /// the archived value.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(map.get(&p!("10.0.1.0/24")).map(|v| v.to_native()), Some(1));
+    /// assert_eq!(map.get(&p!("10.0.2.0/24")), None);
+    /// assert_eq!(map.get(&p!("10.0.0.0/23")), None);
+    /// assert_eq!(map.get(&p!("10.0.1.128/25")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get<'a>(&'a self, prefix: &P) -> Option<&'a T::Archived> {
         let (key, prefix_len) = key_prefix_len(prefix);
         let (loc, _) = self.find_loc(key, prefix_len)?;
@@ -95,7 +143,31 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
 
     /// Check if a key is present in the datastructure
     ///
-    /// See [`PrefixMap::contains_key`] for an example.
+    /// This mirrors [`PrefixMap::contains_key`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(map.contains_key(&p!("10.0.1.0/24")));
+    /// assert!(!map.contains_key(&p!("10.0.2.0/24")));
+    /// assert!(!map.contains_key(&p!("10.0.0.0/23")));
+    /// assert!(!map.contains_key(&p!("10.0.1.128/25")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn contains_key(&self, prefix: &P) -> bool {
         let (key, prefix_len) = key_prefix_len(prefix);
         let Some((loc, _)) = self.find_loc(key, prefix_len) else {
@@ -111,7 +183,31 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// **Warning**: The table does not store the prefix, but it is reconstructed. This means that
     /// any bits in the host part will be truncated.
     ///
-    /// See [`PrefixMap::get_key_value`] for an example.
+    /// This mirrors [`PrefixMap::get_key_value`], but operates on the archived map and yields a
+    /// reference to the archived value.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let prefix = p!("10.0.1.0/24");
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(prefix, 1);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// let (key, value) = map.get_key_value(&prefix).unwrap();
+    /// assert_eq!((key, value.to_native()), (prefix, 1));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_key_value<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
         let (key, prefix_len) = key_prefix_len(prefix);
         let (loc, depth) = self.find_loc(key, prefix_len)?;
@@ -123,7 +219,34 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
 
     /// Get the value of an address or prefix using longest prefix matching.
     ///
-    /// See [`PrefixMap::get_lpm`] for an example.
+    /// This mirrors [`PrefixMap::get_lpm`], but operates on the archived map and yields a reference
+    /// to the archived value.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// let lpm = |s| map.get_lpm(&s).map(|(p, v)| (p, v.to_native()));
+    /// assert_eq!(lpm(p!("10.0.1.1/32")), Some((p!("10.0.1.0/24"), 1)));
+    /// assert_eq!(lpm(p!("10.0.1.0/24")), Some((p!("10.0.1.0/24"), 1)));
+    /// assert_eq!(lpm(p!("10.0.0.0/24")), Some((p!("10.0.0.0/23"), 2)));
+    /// assert_eq!(lpm(p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
         let (key, prefix_len) = key_prefix_len(prefix);
         let (data_loc, depth) = self.find_lpm(key, prefix_len)?;
@@ -133,7 +256,31 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
 
     /// Get the longest prefix in the map that contains `prefix`.
     ///
-    /// See [`PrefixMap::get_lpm_prefix`] for an example.
+    /// This mirrors [`PrefixMap::get_lpm_prefix`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(map.get_lpm_prefix(&p!("10.0.1.1/32")), Some(p!("10.0.1.0/24")));
+    /// assert_eq!(map.get_lpm_prefix(&p!("10.0.0.0/24")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(map.get_lpm_prefix(&p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_lpm_prefix(&self, prefix: &P) -> Option<P> {
         let (key, prefix_len) = key_prefix_len(prefix);
         let (data_loc, depth) = self.find_lpm(key, prefix_len)?;
@@ -143,7 +290,34 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
 
     /// Get the value of an address or prefix using shortest prefix matching.
     ///
-    /// See [`PrefixMap::get_spm`] for an example.
+    /// This mirrors [`PrefixMap::get_spm`], but operates on the archived map and yields a reference
+    /// to the archived value.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// let spm = |s| map.get_spm(&s).map(|(p, v)| (p, v.to_native()));
+    /// assert_eq!(spm(p!("10.0.1.1/32")), Some((p!("10.0.0.0/23"), 2)));
+    /// assert_eq!(spm(p!("10.0.1.0/24")), Some((p!("10.0.0.0/23"), 2)));
+    /// assert_eq!(spm(p!("10.0.0.0/23")), Some((p!("10.0.0.0/23"), 2)));
+    /// assert_eq!(spm(p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
         let (key, prefix_len) = key_prefix_len(prefix);
         let (data_loc, depth) = self.find_spm(key, prefix_len)?;
@@ -153,7 +327,31 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
 
     /// Get the shortest prefix in the map that contains `prefix`.
     ///
-    /// See [`PrefixMap::get_lpm_prefix`] for an example.
+    /// This mirrors [`PrefixMap::get_spm_prefix`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(map.get_spm_prefix(&p!("10.0.1.1/32")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(map.get_spm_prefix(&p!("10.0.0.0/23")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(map.get_spm_prefix(&p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_spm_prefix(&self, prefix: &P) -> Option<P> {
         let (key, prefix_len) = key_prefix_len(prefix);
         let (data_loc, depth) = self.find_spm(key, prefix_len)?;
@@ -164,7 +362,42 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// An iterator visiting all key-value pairs in lexicographic order. The iterator element type
     /// is `(P, &T::Archived)`, with reconstructed prefixes `P`.
     ///
-    /// See [`PrefixMap::iter`] for an example.
+    /// This mirrors [`PrefixMap::iter`], but operates on the archived map and yields references to
+    /// archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/22"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    /// pm.insert(p!("10.0.2.0/23"), 3);
+    /// pm.insert(p!("10.0.0.0/24"), 4);
+    /// pm.insert(p!("10.0.2.0/24"), 5);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.iter().map(|(p, v)| (p, v.to_native())).collect::<Vec<_>>(),
+    ///     vec![
+    ///         (p!("10.0.0.0/22"), 1),
+    ///         (p!("10.0.0.0/23"), 2),
+    ///         (p!("10.0.0.0/24"), 4),
+    ///         (p!("10.0.2.0/23"), 3),
+    ///         (p!("10.0.2.0/24"), 5),
+    ///     ],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn iter(&self) -> Iter<'_, P, T> {
         Iter::new(self)
     }
@@ -172,7 +405,41 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// An iterator visiting all keys in lexicographic order. The iterator element type is
     /// reconstructed prefixes `P`.
     ///
-    /// See [`PrefixMap::keys`] for an example.
+    /// This mirrors [`PrefixMap::keys`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/22"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    /// pm.insert(p!("10.0.2.0/23"), 3);
+    /// pm.insert(p!("10.0.0.0/24"), 4);
+    /// pm.insert(p!("10.0.2.0/24"), 5);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.keys().collect::<Vec<_>>(),
+    ///     vec![
+    ///         p!("10.0.0.0/22"),
+    ///         p!("10.0.0.0/23"),
+    ///         p!("10.0.0.0/24"),
+    ///         p!("10.0.2.0/23"),
+    ///         p!("10.0.2.0/24"),
+    ///     ],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn keys(&self) -> Keys<'_, P, T> {
         Keys(Iter::new(self))
     }
@@ -180,7 +447,36 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// An iterator visiting all values in lexicographic order. The iterator element type is
     /// `&T::Archived`.
     ///
-    /// See [`PrefixMap::values`] for an example.
+    /// This mirrors [`PrefixMap::values`], but operates on the archived map and yields references to
+    /// archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/22"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    /// pm.insert(p!("10.0.2.0/23"), 3);
+    /// pm.insert(p!("10.0.0.0/24"), 4);
+    /// pm.insert(p!("10.0.2.0/24"), 5);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.values().map(|v| v.to_native()).collect::<Vec<_>>(),
+    ///     vec![1, 2, 4, 3, 5],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn values(&self) -> Values<'_, P, T> {
         Values(Iter::new(self))
     }
@@ -192,7 +488,38 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
-    /// See [`PrefixMap::children`] for an example.
+    /// This mirrors [`PrefixMap::children`], but operates on the archived map and yields references
+    /// to archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/22"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    /// pm.insert(p!("10.0.2.0/23"), 3);
+    /// pm.insert(p!("10.0.0.0/24"), 4);
+    /// pm.insert(p!("10.0.2.0/24"), 5);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.children(&p!("10.0.0.0/23"))
+    ///         .map(|(p, v)| (p, v.to_native()))
+    ///         .collect::<Vec<_>>(),
+    ///     vec![(p!("10.0.0.0/23"), 2), (p!("10.0.0.0/24"), 4)],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn children<'a>(&'a self, prefix: &P) -> Iter<'a, P, T> {
         let (key, prefix_len) = key_prefix_len(prefix);
         let Some(lex) = self.build_children_lex_iter(key, prefix_len) else {
@@ -211,7 +538,56 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// If `prefix` is not present in the map, the iterator starts at the first entry that
     /// would come after `prefix` in lexicographic order, regardless of `inclusive`.
     ///
-    /// See [`PrefixMap::iter_from`] for an example.
+    /// This mirrors [`PrefixMap::iter_from`], but operates on the archived map and yields references
+    /// to archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/8"), 1);
+    /// pm.insert(p!("10.1.0.0/16"), 2);
+    /// pm.insert(p!("10.2.0.0/16"), 3);
+    /// pm.insert(p!("10.2.0.0/24"), 4);
+    /// pm.insert(p!("10.3.0.0/16"), 5);
+    /// pm.insert(p!("10.4.0.0/16"), 6);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.iter_from(&p!("10.2.0.0/16"), true)
+    ///         .take(3)
+    ///         .map(|(p, v)| (p, v.to_native()))
+    ///         .collect::<Vec<_>>(),
+    ///     vec![
+    ///         (p!("10.2.0.0/16"), 3),
+    ///         (p!("10.2.0.0/24"), 4),
+    ///         (p!("10.3.0.0/16"), 5),
+    ///     ],
+    /// );
+    ///
+    /// assert_eq!(
+    ///     map.iter_from(&p!("10.2.0.0/16"), false)
+    ///         .take(3)
+    ///         .map(|(p, v)| (p, v.to_native()))
+    ///         .collect::<Vec<_>>(),
+    ///     vec![
+    ///         (p!("10.2.0.0/24"), 4),
+    ///         (p!("10.3.0.0/16"), 5),
+    ///         (p!("10.4.0.0/16"), 6),
+    ///     ],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn iter_from<'a>(&'a self, prefix: &P, inclusive: bool) -> Iter<'a, P, T> {
         let (key, prefix_len) = key_prefix_len(prefix);
         let stack = self.build_iter_stack_at(key, prefix_len, inclusive);
@@ -225,7 +601,39 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
     ///
-    /// See [`PrefixMap::cover`] for an example.
+    /// This mirrors [`PrefixMap::cover`], but operates on the archived map and yields references to
+    /// archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/8"), 0);
+    /// pm.insert(p!("10.1.0.0/16"), 1);
+    /// pm.insert(p!("10.1.1.0/24"), 2);
+    /// pm.insert(p!("10.1.2.0/24"), 3); // disjoint prefixes are not covered
+    /// pm.insert(p!("10.1.1.0/25"), 4); // more specific prefixes are not covered
+    /// pm.insert(p!("11.0.0.0/8"), 5);  // branch points without a value are skipped
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.cover(&p!("10.1.1.0/24"))
+    ///         .map(|(p, v)| (p, v.to_native()))
+    ///         .collect::<Vec<_>>(),
+    ///     vec![(p!("10.0.0.0/8"), 0), (p!("10.1.0.0/16"), 1), (p!("10.1.1.0/24"), 2)],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn cover<'a>(&'a self, prefix: &P) -> Cover<'a, P, T> {
         Cover::new(self, prefix)
     }
@@ -236,7 +644,36 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
     ///
-    /// See [`PrefixMap::cover_keys`] for an example.
+    /// This mirrors [`PrefixMap::cover_keys`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/8"), 0);
+    /// pm.insert(p!("10.1.0.0/16"), 1);
+    /// pm.insert(p!("10.1.1.0/24"), 2);
+    /// pm.insert(p!("10.1.2.0/24"), 3); // disjoint prefixes are not covered
+    /// pm.insert(p!("10.1.1.0/25"), 4); // more specific prefixes are not covered
+    /// pm.insert(p!("11.0.0.0/8"), 5);  // branch points without a value are skipped
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.cover_keys(&p!("10.1.1.0/24")).collect::<Vec<_>>(),
+    ///     vec![p!("10.0.0.0/8"), p!("10.1.0.0/16"), p!("10.1.1.0/24")],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn cover_keys<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, T> {
         CoverKeys(Cover::new(self, prefix))
     }
@@ -248,7 +685,39 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
     ///
-    /// See [`PrefixMap::cover_values`] for an example.
+    /// This mirrors [`PrefixMap::cover_values`], but operates on the archived map and yields
+    /// references to archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::PrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::Ipv4Net;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = PrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/8"), 0);
+    /// pm.insert(p!("10.1.0.0/16"), 1);
+    /// pm.insert(p!("10.1.1.0/24"), 2);
+    /// pm.insert(p!("10.1.2.0/24"), 3); // disjoint prefixes are not covered
+    /// pm.insert(p!("10.1.1.0/25"), 4); // more specific prefixes are not covered
+    /// pm.insert(p!("11.0.0.0/8"), 5);  // branch points without a value are skipped
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.cover_values(&p!("10.1.1.0/24"))
+    ///         .map(|v| v.to_native())
+    ///         .collect::<Vec<_>>(),
+    ///     vec![0, 1, 2],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn cover_values<'a>(&'a self, prefix: &P) -> CoverValues<'a, P, T> {
         CoverValues(Cover::new(self, prefix))
     }

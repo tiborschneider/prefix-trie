@@ -69,7 +69,30 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     /// To avoid double-counting, the function traverses the (partial) trie once, skipping nodes
     /// that are already covered.
     ///
-    /// See [`JointPrefixMap::address_count`] for an example.
+    /// This mirrors [`JointPrefixMap::address_count`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("192.0.2.0/24"), 1);
+    /// pm.insert(p!("198.51.100.0/24"), 2);
+    /// pm.insert(p!("2001:db8::/96"), 3);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(map.address_count(), (Some(512), Some(0x1_0000_0000)));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     #[allow(clippy::type_complexity)]
     pub fn address_count(&self) -> (Option<<P::P1 as Prefix>::R>, Option<<P::P2 as Prefix>::R>) {
@@ -78,7 +101,33 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
 
     /// Get the value of an element by matching exactly on the prefix.
     ///
-    /// See [`JointPrefixMap::get`] for an example.
+    /// This mirrors [`JointPrefixMap::get`], but operates on the archived map and yields a reference
+    /// to the archived value.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    /// pm.insert(p!("2001:db8::/96"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(map.get(&p!("10.0.1.0/24")).map(|v| v.to_native()), Some(1));
+    /// assert_eq!(map.get(&p!("10.0.2.0/24")), None);
+    /// assert_eq!(map.get(&p!("2001:db8::/96")).map(|v| v.to_native()), Some(2));
+    /// assert_eq!(map.get(&p!("2001:db8:1::/48")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get<'a>(&'a self, prefix: &P) -> Option<&'a T::Archived> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get(p),
@@ -88,7 +137,31 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
 
     /// Check if a key is present in the datastructure
     ///
-    /// See [`JointPrefixMap::contains_key`] for an example.
+    /// This mirrors [`JointPrefixMap::contains_key`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(map.contains_key(&p!("10.0.1.0/24")));
+    /// assert!(!map.contains_key(&p!("10.0.2.0/24")));
+    /// assert!(!map.contains_key(&p!("10.0.0.0/23")));
+    /// assert!(!map.contains_key(&p!("10.0.1.128/25")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn contains_key(&self, prefix: &P) -> bool {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.contains_key(p),
@@ -102,7 +175,31 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     /// **Warning**: The table does not store the prefix, but it is reconstructed. This means that
     /// any bits in the host part will be truncated.
     ///
-    /// See [`JointPrefixMap::get_key_value`] for an example.
+    /// This mirrors [`JointPrefixMap::get_key_value`], but operates on the archived map and yields a
+    /// reference to the archived value.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let prefix = p!("10.0.1.0/24");
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(prefix, 1);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// let (key, value) = map.get_key_value(&prefix).unwrap();
+    /// assert_eq!((key, value.to_native()), (prefix, 1));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_key_value<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_key_value(p).map(|(p, t)| (P::from_p1(&p), t)),
@@ -112,7 +209,34 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
 
     /// Get the value of an address or prefix using longest prefix matching.
     ///
-    /// See [`JointPrefixMap::get_lpm`] for an example.
+    /// This mirrors [`JointPrefixMap::get_lpm`], but operates on the archived map and yields a
+    /// reference to the archived value.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// let lpm = |s| map.get_lpm(&s).map(|(p, v)| (p, v.to_native()));
+    /// assert_eq!(lpm(p!("10.0.1.1/32")), Some((p!("10.0.1.0/24"), 1)));
+    /// assert_eq!(lpm(p!("10.0.1.0/24")), Some((p!("10.0.1.0/24"), 1)));
+    /// assert_eq!(lpm(p!("10.0.0.0/24")), Some((p!("10.0.0.0/23"), 2)));
+    /// assert_eq!(lpm(p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_lpm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_lpm(p).map(|(p, t)| (P::from_p1(&p), t)),
@@ -122,7 +246,31 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
 
     /// Get the longest prefix in the map that contains `prefix`.
     ///
-    /// See [`JointPrefixMap::get_lpm_prefix`] for an example.
+    /// This mirrors [`JointPrefixMap::get_lpm_prefix`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(map.get_lpm_prefix(&p!("10.0.1.1/32")), Some(p!("10.0.1.0/24")));
+    /// assert_eq!(map.get_lpm_prefix(&p!("10.0.0.0/24")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(map.get_lpm_prefix(&p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_lpm_prefix(&self, prefix: &P) -> Option<P> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_lpm_prefix(p).map(|p| P::from_p1(&p)),
@@ -132,7 +280,34 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
 
     /// Get the value of an address or prefix using shortest prefix matching.
     ///
-    /// See [`JointPrefixMap::get_spm`] for an example.
+    /// This mirrors [`JointPrefixMap::get_spm`], but operates on the archived map and yields a
+    /// reference to the archived value.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// let spm = |s| map.get_spm(&s).map(|(p, v)| (p, v.to_native()));
+    /// assert_eq!(spm(p!("10.0.1.1/32")), Some((p!("10.0.0.0/23"), 2)));
+    /// assert_eq!(spm(p!("10.0.1.0/24")), Some((p!("10.0.0.0/23"), 2)));
+    /// assert_eq!(spm(p!("10.0.0.0/23")), Some((p!("10.0.0.0/23"), 2)));
+    /// assert_eq!(spm(p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_spm<'a>(&'a self, prefix: &P) -> Option<(P, &'a T::Archived)> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_spm(p).map(|(p, t)| (P::from_p1(&p), t)),
@@ -142,7 +317,31 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
 
     /// Get the shortest prefix in the map that contains `prefix`.
     ///
-    /// See [`JointPrefixMap::get_spm_prefix`] for an example.
+    /// This mirrors [`JointPrefixMap::get_spm_prefix`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.1.0/24"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(map.get_spm_prefix(&p!("10.0.1.1/32")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(map.get_spm_prefix(&p!("10.0.0.0/23")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(map.get_spm_prefix(&p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_spm_prefix(&self, prefix: &P) -> Option<P> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_spm_prefix(p).map(|p| P::from_p1(&p)),
@@ -153,7 +352,46 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     /// An iterator visiting all key-value pairs in lexicographic order. The iterator element type
     /// is `(P, &T::Archived)`, with reconstructed prefixes `P`.
     ///
-    /// See [`JointPrefixMap::iter`] for an example.
+    /// This mirrors [`JointPrefixMap::iter`], but operates on the archived map and yields references
+    /// to archived values. Entries of the first prefix family are yielded before the second.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/22"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    /// pm.insert(p!("10.0.2.0/23"), 3);
+    /// pm.insert(p!("10.0.0.0/24"), 4);
+    /// pm.insert(p!("10.0.2.0/24"), 5);
+    /// pm.insert(p!("2001:db8::/96"), 6);
+    /// pm.insert(p!("2001:db8::/97"), 7);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.iter().map(|(p, v)| (p, v.to_native())).collect::<Vec<_>>(),
+    ///     vec![
+    ///         (p!("10.0.0.0/22"), 1),
+    ///         (p!("10.0.0.0/23"), 2),
+    ///         (p!("10.0.0.0/24"), 4),
+    ///         (p!("10.0.2.0/23"), 3),
+    ///         (p!("10.0.2.0/24"), 5),
+    ///         (p!("2001:db8::/96"), 6),
+    ///         (p!("2001:db8::/97"), 7),
+    ///     ],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn iter(&self) -> Iter<'_, P, T> {
         Iter {
             i1: self.t1.iter(),
@@ -164,7 +402,45 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     /// An iterator visiting all keys in lexicographic order. The iterator element type is
     /// reconstructed prefixes `P`.
     ///
-    /// See [`JointPrefixMap::keys`] for an example.
+    /// This mirrors [`JointPrefixMap::keys`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/22"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    /// pm.insert(p!("10.0.2.0/23"), 3);
+    /// pm.insert(p!("10.0.0.0/24"), 4);
+    /// pm.insert(p!("10.0.2.0/24"), 5);
+    /// pm.insert(p!("2001:db8::/96"), 6);
+    /// pm.insert(p!("2001:db8::/97"), 7);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.keys().collect::<Vec<_>>(),
+    ///     vec![
+    ///         p!("10.0.0.0/22"),
+    ///         p!("10.0.0.0/23"),
+    ///         p!("10.0.0.0/24"),
+    ///         p!("10.0.2.0/23"),
+    ///         p!("10.0.2.0/24"),
+    ///         p!("2001:db8::/96"),
+    ///         p!("2001:db8::/97"),
+    ///     ],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn keys(&self) -> Keys<'_, P, T> {
         Keys {
             i1: self.t1.keys(),
@@ -175,7 +451,38 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     /// An iterator visiting all values in lexicographic order. The iterator element type is
     /// `&T::Archived`.
     ///
-    /// See [`JointPrefixMap::values`] for an example.
+    /// This mirrors [`JointPrefixMap::values`], but operates on the archived map and yields
+    /// references to archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/22"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    /// pm.insert(p!("10.0.2.0/23"), 3);
+    /// pm.insert(p!("10.0.0.0/24"), 4);
+    /// pm.insert(p!("10.0.2.0/24"), 5);
+    /// pm.insert(p!("2001:db8::/96"), 6);
+    /// pm.insert(p!("2001:db8::/97"), 7);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.values().map(|v| v.to_native()).collect::<Vec<_>>(),
+    ///     vec![1, 2, 4, 3, 5, 6, 7],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn values(&self) -> Values<'_, P, T> {
         Values {
             i1: self.t1.values(),
@@ -190,7 +497,38 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
-    /// See [`JointPrefixMap::children`] for an example.
+    /// This mirrors [`JointPrefixMap::children`], but operates on the archived map and yields
+    /// references to archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/22"), 1);
+    /// pm.insert(p!("10.0.0.0/23"), 2);
+    /// pm.insert(p!("10.0.2.0/23"), 3);
+    /// pm.insert(p!("10.0.0.0/24"), 4);
+    /// pm.insert(p!("10.0.2.0/24"), 5);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.children(&p!("10.0.0.0/23"))
+    ///         .map(|(p, v)| (p, v.to_native()))
+    ///         .collect::<Vec<_>>(),
+    ///     vec![(p!("10.0.0.0/23"), 2), (p!("10.0.0.0/24"), 4)],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn children<'a>(&'a self, prefix: &P) -> Iter<'a, P, T> {
         match prefix.p1_or_p2_ref() {
             Left(p) => Iter {
@@ -213,7 +551,37 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     /// If `prefix` is not present in the map, the iterator starts at the first prefix that
     /// would come after it in lexicographic order, regardless of `inclusive`.
     ///
-    /// See [`JointPrefixMap::iter_from`] for an example.
+    /// This mirrors [`JointPrefixMap::iter_from`], but operates on the archived map and yields
+    /// references to archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/22"), 1);
+    /// pm.insert(p!("10.0.0.0/24"), 2);
+    /// pm.insert(p!("2001:db8::/96"), 3);
+    /// pm.insert(p!("2001:db8::/97"), 4);
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.iter_from(&p!("10.0.0.0/24"), false)
+    ///         .map(|(p, v)| (p, v.to_native()))
+    ///         .collect::<Vec<_>>(),
+    ///     vec![(p!("2001:db8::/96"), 3), (p!("2001:db8::/97"), 4)],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn iter_from<'a>(&'a self, prefix: &P, inclusive: bool) -> Iter<'a, P, T> {
         match prefix.p1_or_p2_ref() {
             Left(p) => Iter {
@@ -234,7 +602,39 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
     ///
-    /// See [`JointPrefixMap::cover`] for an example.
+    /// This mirrors [`JointPrefixMap::cover`], but operates on the archived map and yields
+    /// references to archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/8"), 0);
+    /// pm.insert(p!("10.1.0.0/16"), 1);
+    /// pm.insert(p!("10.1.1.0/24"), 2);
+    /// pm.insert(p!("10.1.2.0/24"), 3); // disjoint prefixes are not covered
+    /// pm.insert(p!("10.1.1.0/25"), 4); // more specific prefixes are not covered
+    /// pm.insert(p!("11.0.0.0/8"), 5);  // branch points without a value are skipped
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.cover(&p!("10.1.1.0/24"))
+    ///         .map(|(p, v)| (p, v.to_native()))
+    ///         .collect::<Vec<_>>(),
+    ///     vec![(p!("10.0.0.0/8"), 0), (p!("10.1.0.0/16"), 1), (p!("10.1.1.0/24"), 2)],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn cover<'a>(&'a self, prefix: &P) -> Cover<'a, P, T> {
         match prefix.p1_or_p2_ref() {
             Left(p) => Cover::P1(self.t1.cover(p)),
@@ -248,7 +648,36 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
     ///
-    /// See [`JointPrefixMap::cover_keys`] for an example.
+    /// This mirrors [`JointPrefixMap::cover_keys`], but operates on the archived map.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/8"), 0);
+    /// pm.insert(p!("10.1.0.0/16"), 1);
+    /// pm.insert(p!("10.1.1.0/24"), 2);
+    /// pm.insert(p!("10.1.2.0/24"), 3); // disjoint prefixes are not covered
+    /// pm.insert(p!("10.1.1.0/25"), 4); // more specific prefixes are not covered
+    /// pm.insert(p!("11.0.0.0/8"), 5);  // branch points without a value are skipped
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.cover_keys(&p!("10.1.1.0/24")).collect::<Vec<_>>(),
+    ///     vec![p!("10.0.0.0/8"), p!("10.1.0.0/16"), p!("10.1.1.0/24")],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn cover_keys<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, T> {
         match prefix.p1_or_p2_ref() {
             Left(p) => CoverKeys::P1(self.t1.cover_keys(p)),
@@ -263,7 +692,39 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
     ///
-    /// See [`JointPrefixMap::cover_values`] for an example.
+    /// This mirrors [`JointPrefixMap::cover_values`], but operates on the archived map and yields
+    /// references to archived values.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixMap;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixMap;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut pm = JointPrefixMap::<P, i32>::new();
+    /// pm.insert(p!("10.0.0.0/8"), 0);
+    /// pm.insert(p!("10.1.0.0/16"), 1);
+    /// pm.insert(p!("10.1.1.0/24"), 2);
+    /// pm.insert(p!("10.1.2.0/24"), 3); // disjoint prefixes are not covered
+    /// pm.insert(p!("10.1.1.0/25"), 4); // more specific prefixes are not covered
+    /// pm.insert(p!("11.0.0.0/8"), 5);  // branch points without a value are skipped
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&pm)?;
+    /// let map: &ArchivedJointPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     map.cover_values(&p!("10.1.1.0/24"))
+    ///         .map(|v| v.to_native())
+    ///         .collect::<Vec<_>>(),
+    ///     vec![0, 1, 2],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn cover_values<'a>(&'a self, prefix: &P) -> CoverValues<'a, P, T> {
         match prefix.p1_or_p2_ref() {
             Left(p) => CoverValues::P1(self.t1.cover_values(p)),
@@ -339,7 +800,30 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
     /// To avoid double-counting, the function traverses the (partial) trie once, skipping nodes
     /// that are already covered.
     ///
-    /// See [`JointPrefixSet::address_count`] for an example.
+    /// This mirrors [`JointPrefixSet::address_count`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("192.0.2.0/24"));
+    /// ps.insert(p!("198.51.100.0/24"));
+    /// ps.insert(p!("2001:db8::/96"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(set.address_count(), (Some(512), Some(0x1_0000_0000)));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     #[inline(always)]
     #[allow(clippy::type_complexity)]
     pub fn address_count(&self) -> (Option<<P::P1 as Prefix>::R>, Option<<P::P2 as Prefix>::R>) {
@@ -348,7 +832,32 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
 
     /// Check whether some (exact) prefix is present in the set, without using longest prefix match.
     ///
-    /// See [`JointPrefixSet::contains`] for an example.
+    /// This mirrors [`JointPrefixSet::contains`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.1.0/24"));
+    /// ps.insert(p!("2001:db8::/96"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert!(set.contains(&p!("10.0.1.0/24")));
+    /// assert!(!set.contains(&p!("10.0.2.0/24")));
+    /// assert!(set.contains(&p!("2001:db8::/96")));
+    /// assert!(!set.contains(&p!("2001:db8:1::/48")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn contains(&self, prefix: &P) -> bool {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.contains(p),
@@ -360,6 +869,32 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
     ///
     /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
     /// bits are not preserved.
+    ///
+    /// This mirrors [`JointPrefixSet::get`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.1.0/24"));
+    /// ps.insert(p!("2001:db8::/96"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(set.get(&p!("10.0.1.0/24")), Some(p!("10.0.1.0/24")));
+    /// assert_eq!(set.get(&p!("10.0.2.0/24")), None);
+    /// assert_eq!(set.get(&p!("2001:db8::/96")), Some(p!("2001:db8::/96")));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get(&self, prefix: &P) -> Option<P> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get(p).as_ref().map(P::from_p1),
@@ -369,7 +904,31 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
 
     /// Get the longest prefix in the set that contains `prefix`.
     ///
-    /// See [`JointPrefixSet::get_lpm`] for an example.
+    /// This mirrors [`JointPrefixSet::get_lpm`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.1.0/24"));
+    /// ps.insert(p!("10.0.0.0/23"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(set.get_lpm(&p!("10.0.1.1/32")), Some(p!("10.0.1.0/24")));
+    /// assert_eq!(set.get_lpm(&p!("10.0.0.0/24")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(set.get_lpm(&p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_lpm(&self, prefix: &P) -> Option<P> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_lpm(p).as_ref().map(P::from_p1),
@@ -379,7 +938,31 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
 
     /// Get the shortest prefix in the set that contains `prefix`.
     ///
-    /// See [`JointPrefixSet::get_spm`] for an example.
+    /// This mirrors [`JointPrefixSet::get_spm`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.1.0/24"));
+    /// ps.insert(p!("10.0.0.0/23"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(set.get_spm(&p!("10.0.1.1/32")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(set.get_spm(&p!("10.0.0.0/23")), Some(p!("10.0.0.0/23")));
+    /// assert_eq!(set.get_spm(&p!("10.0.2.0/24")), None);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn get_spm(&self, prefix: &P) -> Option<P> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_spm(p).as_ref().map(P::from_p1),
@@ -390,7 +973,40 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
     /// An iterator visiting all keys in lexicographic order. The iterator element type is
     /// reconstructed prefixes `P`.
     ///
-    /// See [`JointPrefixSet::iter`] for an example.
+    /// This mirrors [`JointPrefixSet::iter`], but operates on the archived set. Prefixes of the
+    /// first family are yielded before the second.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/23"));
+    /// ps.insert(p!("10.0.0.0/24"));
+    /// ps.insert(p!("10.0.2.0/23"));
+    /// ps.insert(p!("2001:db8::/96"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     set.iter().collect::<Vec<_>>(),
+    ///     vec![
+    ///         p!("10.0.0.0/23"),
+    ///         p!("10.0.0.0/24"),
+    ///         p!("10.0.2.0/23"),
+    ///         p!("2001:db8::/96"),
+    ///     ],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn iter(&self) -> Keys<'_, P, ()> {
         Keys {
             i1: self.t1.iter(),
@@ -404,7 +1020,35 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
-    /// See [`JointPrefixSet::children`] for an example.
+    /// This mirrors [`JointPrefixSet::children`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/22"));
+    /// ps.insert(p!("10.0.0.0/23"));
+    /// ps.insert(p!("10.0.2.0/23"));
+    /// ps.insert(p!("10.0.0.0/24"));
+    /// ps.insert(p!("10.0.2.0/24"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     set.children(&p!("10.0.0.0/23")).collect::<Vec<_>>(),
+    ///     vec![p!("10.0.0.0/23"), p!("10.0.0.0/24")],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn children<'a>(&'a self, prefix: &P) -> Keys<'a, P, ()> {
         match prefix.p1_or_p2_ref() {
             Left(p) => Keys {
@@ -427,7 +1071,34 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
     /// If `prefix` is not present in the set, the iterator starts at the first prefix that
     /// would come after it in lexicographic order, regardless of `inclusive`.
     ///
-    /// See [`JointPrefixSet::iter_from`] for an example.
+    /// This mirrors [`JointPrefixSet::iter_from`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/24"));
+    /// ps.insert(p!("10.0.1.0/24"));
+    /// ps.insert(p!("10.0.2.0/24"));
+    /// ps.insert(p!("2001:db8::/96"));
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     set.iter_from(&p!("10.0.0.0/24"), false).take(2).collect::<Vec<_>>(),
+    ///     vec![p!("10.0.1.0/24"), p!("10.0.2.0/24")],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn iter_from(&self, prefix: &P, inclusive: bool) -> Keys<'_, P, ()> {
         match prefix.p1_or_p2_ref() {
             Left(p) => Keys {
@@ -447,7 +1118,36 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
     ///
-    /// See [`JointPrefixSet::cover`] for an example.
+    /// This mirrors [`JointPrefixSet::cover`], but operates on the archived set.
+    ///
+    /// ```
+    /// # use prefix_trie::joint::JointPrefixSet;
+    /// # use prefix_trie::rkyv::ArchivedJointPrefixSet;
+    /// # use rkyv::rancor::Error;
+    /// # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type P = ipnet::IpNet;
+    /// # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+    /// let mut ps = JointPrefixSet::<P>::new();
+    /// ps.insert(p!("10.0.0.0/8"));
+    /// ps.insert(p!("10.1.0.0/16"));
+    /// ps.insert(p!("10.1.1.0/24"));
+    /// ps.insert(p!("10.1.2.0/24")); // disjoint prefixes are not covered
+    /// ps.insert(p!("10.1.1.0/25")); // more specific prefixes are not covered
+    /// ps.insert(p!("11.0.0.0/8"));  // unrelated branches are skipped
+    ///
+    /// let bytes = rkyv::to_bytes::<Error>(&ps)?;
+    /// let set: &ArchivedJointPrefixSet<P> = rkyv::access::<_, Error>(&bytes)?;
+    ///
+    /// assert_eq!(
+    ///     set.cover(&p!("10.1.1.0/24")).collect::<Vec<_>>(),
+    ///     vec![p!("10.0.0.0/8"), p!("10.1.0.0/16"), p!("10.1.1.0/24")],
+    /// );
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+    /// # fn main() {}
+    /// ```
     pub fn cover<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, ()> {
         match prefix.p1_or_p2_ref() {
             Left(p) => CoverKeys::P1(self.t1.cover(p)),
