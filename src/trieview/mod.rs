@@ -316,7 +316,7 @@ pub trait TrieView<'a>: Sized {
     /// ```
     #[inline]
     fn left(self) -> Option<Self> {
-        self.step(false)
+        step(self, false)
     }
 
     /// Return a view into the right (1-bit) child sub-trie, or `None` if empty.
@@ -338,27 +338,7 @@ pub trait TrieView<'a>: Sized {
     /// ```
     #[inline]
     fn right(self) -> Option<Self> {
-        self.step(true)
-    }
-
-    // TODO: do not expose this function in the interface.
-    /// Navigate toward `(target_key, target_len)` from this view's node.
-    ///
-    /// Returns `None` if a required child node does not exist in [`child_bitmap`][Self::child_bitmap].
-    fn navigate_to(mut self, target_key: <Self::P as Prefix>::R, target_len: u32) -> Option<Self> {
-        while target_len >= self.depth() + K {
-            let child_bit = child_bit(self.depth(), target_key);
-            if (self.child_bitmap() >> child_bit) & 1 == 0 {
-                return None;
-            }
-            // SAFETY: follows a single path; each child_bit used exactly once per
-            // view instance before view is replaced by the returned child.
-            self = unsafe { self.get_child(child_bit) };
-        }
-        // SAFETY: view is replaced by the repositioned cursor; the old position is
-        // not used for data access after this point.
-        unsafe { self.reposition(target_key, target_len) }
-        Some(self)
+        step(self, true)
     }
 
     /// Navigate to `prefix` and return the view if the sub-trie is non-empty.
@@ -391,7 +371,7 @@ pub trait TrieView<'a>: Sized {
     /// ```
     #[inline]
     fn find(self, prefix: &Self::P) -> Option<Self> {
-        let view = self.navigate_to(prefix.mask(), prefix.prefix_len() as u32)?;
+        let view = navigate_to(self, prefix.mask(), prefix.prefix_len() as u32)?;
         if view.is_non_empty() {
             Some(view)
         } else {
@@ -421,7 +401,7 @@ pub trait TrieView<'a>: Sized {
     /// ```
     #[inline]
     fn find_exact(self, prefix: &Self::P) -> Option<Self> {
-        let view = self.navigate_to(prefix.mask(), prefix.prefix_len() as u32)?;
+        let view = navigate_to(self, prefix.mask(), prefix.prefix_len() as u32)?;
         let data_bit = data_bit(view.key(), view.prefix_len());
         if (view.data_bitmap() >> data_bit) & 1 == 1 {
             Some(view)
@@ -454,7 +434,7 @@ pub trait TrieView<'a>: Sized {
     /// ```
     #[inline]
     fn find_exact_value(self, prefix: &Self::P) -> Option<(Self::P, Self::T)> {
-        let view = self.navigate_to(prefix.mask(), prefix.prefix_len() as u32)?;
+        let view = navigate_to(self, prefix.mask(), prefix.prefix_len() as u32)?;
         view.prefix_value()
     }
 
@@ -947,45 +927,72 @@ pub trait TrieView<'a>: Sized {
     {
         CoveringDifferenceView::new(self, other.view())
     }
+}
 
-    // -----------------------------------------------------------------------------
-    // Private helper
-    // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Private helper
+// -----------------------------------------------------------------------------
 
-    /// Step one binary level deeper, going left (0-bit) or right (1-bit).
-    fn step(mut self, go_right: bool) -> Option<Self> {
-        let num_bits = <Self::P as Prefix>::R::zero().count_zeros();
-        // Cannot descend past the key width.
-        if self.prefix_len() >= num_bits {
+/// Step one binary level deeper, going left (0-bit) or right (1-bit).
+fn step<'a, V, P, T>(mut view: V, go_right: bool) -> Option<V>
+where
+    V: TrieView<'a, P = P, T = T>,
+    P: Prefix,
+{
+    let num_bits = P::R::zero().count_zeros();
+    // Cannot descend past the key width.
+    if view.prefix_len() >= num_bits {
+        return None;
+    }
+    let new_prefix_len = view.prefix_len() + 1;
+    let new_key = if go_right {
+        let bit_pos = num_bits - view.prefix_len() - 1;
+        view.key() | P::R::one().unsigned_shl(bit_pos)
+    } else {
+        view.key()
+    };
+
+    if new_prefix_len < view.depth() + K {
+        // Intra-node: narrow the position cursor within the same node.
+        // SAFETY: view is not used for data access after this; only `view` is used.
+        unsafe { view.reposition(new_key, new_prefix_len) };
+        if view.is_non_empty() {
+            Some(view)
+        } else {
+            None
+        }
+    } else {
+        // Cross into a child node (new_prefix_len == depth + K).
+        let child_bit = child_bit(view.depth(), new_key);
+        if (view.child_bitmap() >> child_bit) & 1 == 0 {
             return None;
         }
-        let new_prefix_len = self.prefix_len() + 1;
-        let new_key = if go_right {
-            let bit_pos = num_bits - self.prefix_len() - 1;
-            self.key() | <Self::P as Prefix>::R::one().unsigned_shl(bit_pos)
-        } else {
-            self.key()
-        };
-
-        if new_prefix_len < self.depth() + K {
-            // Intra-node: narrow the position cursor within the same node.
-            // SAFETY: self is not used for data access after this; only `view` is used.
-            unsafe { self.reposition(new_key, new_prefix_len) };
-            if self.is_non_empty() {
-                Some(self)
-            } else {
-                None
-            }
-        } else {
-            // Cross into a child node (new_prefix_len == depth + K).
-            let child_bit = child_bit(self.depth(), new_key);
-            if (self.child_bitmap() >> child_bit) & 1 == 0 {
-                return None;
-            }
-            // SAFETY: step is called for one direction at a time; child_bit is used once.
-            Some(unsafe { self.get_child(child_bit) })
-        }
+        // SAFETY: step is called for one direction at a time; child_bit is used once.
+        Some(unsafe { view.get_child(child_bit) })
     }
+}
+
+/// Navigate toward `(target_key, target_len)` from this view's node.
+///
+/// Returns `None` if a required child node does not exist in [`child_bitmap`][Self::child_bitmap].
+fn navigate_to<'a, V, P, T>(mut view: V, target_key: P::R, target_len: u32) -> Option<V>
+where
+    V: TrieView<'a, P = P, T = T>,
+    P: Prefix,
+{
+    while target_len >= view.depth() + K {
+        let child_bit = child_bit(view.depth(), target_key);
+        if (view.child_bitmap() >> child_bit) & 1 == 0 {
+            return None;
+        }
+        // SAFETY: follows a single path; each child_bit used exactly once per
+        // view instance before view is replaced by the returned child.
+        view = unsafe { view.get_child(child_bit) };
+    }
+    // SAFETY: view is replaced by the repositioned cursor; the old position is
+    // not used for data access after this point.
+    unsafe { view.reposition(target_key, target_len) }
+    Some(view)
 }
 
 fn contains_key<P: Prefix>(

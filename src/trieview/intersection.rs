@@ -9,7 +9,7 @@
 
 use std::marker::PhantomData;
 
-use crate::{prefix::mask_from_prefix_len, AsView, Prefix};
+use crate::{prefix::mask_from_prefix_len, trieview::navigate_to, AsView, Prefix};
 
 use super::{TrieView, ViewIter};
 
@@ -64,16 +64,16 @@ where
 
     // Navigate the shallower side toward the deeper one.
     if left.depth() < right.depth() {
-        let left = left.navigate_to(right.key(), right.prefix_len())?;
+        let left = navigate_to(left, right.key(), right.prefix_len())?;
         Some((left, right))
     } else if right.depth() < left.depth() {
-        let right = right.navigate_to(left.key(), left.prefix_len())?;
+        let right = navigate_to(right, left.key(), left.prefix_len())?;
         Some((left, right))
     } else if left.prefix_len() < right.prefix_len() {
-        let left = left.navigate_to(right.key(), right.prefix_len())?;
+        let left = navigate_to(left, right.key(), right.prefix_len())?;
         Some((left, right))
     } else if right.prefix_len() < left.prefix_len() {
-        let right = right.navigate_to(left.key(), left.prefix_len())?;
+        let right = navigate_to(right, left.key(), left.prefix_len())?;
         Some((left, right))
     } else {
         Some((left, right))

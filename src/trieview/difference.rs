@@ -18,6 +18,7 @@
 
 use std::marker::PhantomData;
 
+use crate::trieview::navigate_to;
 use crate::AsView;
 use crate::{node::child_bit as node_child_bit, prefix::mask_from_prefix_len, Prefix};
 
@@ -79,7 +80,7 @@ where
     match right.depth().cmp(&left.depth()) {
         std::cmp::Ordering::Less => {
             // R is shallower: navigate toward L's depth/key.
-            right.navigate_to(left.key(), left.prefix_len())
+            navigate_to(right, left.key(), left.prefix_len())
         }
         std::cmp::Ordering::Equal => {
             // Same depth
