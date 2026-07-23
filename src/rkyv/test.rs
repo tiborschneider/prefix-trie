@@ -1,193 +1,56 @@
 use crate::{
     fuzzing::*,
-    joint::{JointPrefixMap, JointPrefixSet},
-    qc,
-    rkyv::{ArchivedJointPrefixMap, ArchivedJointPrefixSet, ArchivedPrefixMap, ArchivedPrefixSet},
-    PrefixMap, PrefixSet,
+    joint::{JointPrefix, JointPrefixMap, JointPrefixSet},
+    qc, Prefix, PrefixMap, PrefixSet,
 };
-use rkyv::{access, from_bytes, rancor::Error, to_bytes};
+use rkyv::{
+    access,
+    api::high::{HighSerializer, HighValidator},
+    bytecheck::CheckBytes,
+    from_bytes,
+    rancor::Error,
+    ser::allocator::ArenaHandle,
+    to_bytes,
+    util::AlignedVec,
+};
 
 macro_rules! rkyv_eq_test {
-    ($X:ident < $P:ident>, $fn:ident ()) => {
+    ($X:ident < $P:ident $(, $T:ty)?>, $fn:ident () $(.$collect:ident())?) => {
         paste::paste! {
             qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>](ops: Vec<Operation<$P, ()>>) -> bool {
-                let pset = prepare!($X<$P>, ops);
-                let a = pset.$fn();
-                let bytes = to_bytes::<Error>(&pset).unwrap();
-                let archived = access::<[<Archived $X>]::<$P>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn();
+            #[allow(unused_parens)]
+            fn [<_ $fn>](ops: Vec<Operation<$P, ($($T)?)>>) -> bool {
+                let trie = <$X<$P $(, $T)?>>::from_ops(ops);
+                let a = trie.$fn()$(.$collect::<Vec<_>>())?.into_owned();
+                let b = rkyv_map(&trie, |x| x.$fn()$(.$collect::<Vec<_>>())?.into_native());
                 a == b
             }
         }
     };
-    ($X:ident < $P:ident, i32 >, $fn:ident ()) => {
+    ($X:ident < $P:ident $(, $T:ty)?>, $fn:ident ($arg:ty) $(.$collect:ident())?) => {
         paste::paste! {
             qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>](ops: Vec<Operation<$P, i32>>) -> bool {
-                let pmap = prepare!($X<$P, i32>, ops);
-                let a = pmap.$fn();
-                let bytes = to_bytes::<Error>(&pmap).unwrap();
-                let archived = access::<[<Archived $X>]::<$P, rkyv::rend::i32_le>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn();
+            #[allow(unused_parens)]
+            fn [<_ $fn>]((ops, arg): (Vec<Operation<$P, ($($T)?)>>, $arg)) -> bool {
+                let trie = <$X<$P $(, $T)?>>::from_ops(ops);
+                let a = trie.$fn(&arg)$(.$collect::<Vec<_>>())?.into_owned();
+                let b = rkyv_map(&trie, |x| x.$fn(&arg)$(.$collect::<Vec<_>>())?.into_native());
                 a == b
             }
         }
     };
-    ($X:ident < $P:ident>, $fn:ident ( $arg:ty )) => {
+    ($X:ident < $P:ident $(, $T:ty)?>, $fn:ident ($arg1:ty, $arg2:ty) $(.$collect:ident())?) => {
         paste::paste! {
             qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>]((ops, arg): (Vec<Operation<$P, ()>>, $arg)) -> bool {
-                let pset = prepare!($X<$P>, ops);
-                let a = pset.$fn(&arg);
-                let bytes = to_bytes::<Error>(&pset).unwrap();
-                let archived = access::<[<Archived $X>]::<$P>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn(&arg);
+            #[allow(unused_parens)]
+            fn [<_ $fn>]((ops, arg1, arg2): (Vec<Operation<$P, ($($T)?)>>, $arg1, $arg2)) -> bool {
+                let trie = <$X<$P $(, $T)?>>::from_ops(ops);
+                let a = trie.$fn(&arg1, arg2)$(.$collect::<Vec<_>>())?.into_owned();
+                let b = rkyv_map(&trie, |x| x.$fn(&arg1, arg2)$(.$collect::<Vec<_>>())?.into_native());
                 a == b
             }
         }
     };
-    ($X:ident < $P:ident, i32 >, $fn:ident ($arg:ty)) => {
-        paste::paste! {
-            qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>]((ops, arg): (Vec<Operation<$P, i32>>, $arg)) -> bool {
-                let pmap = prepare!($X<$P, i32>, ops);
-                let a = pmap.$fn(&arg);
-                let bytes = to_bytes::<Error>(&pmap).unwrap();
-                let archived = access::<[<Archived $X>]::<$P, rkyv::rend::i32_le>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn(&arg);
-                a == b
-            }
-        }
-    };
-    ($X:ident < $P:ident, i32 >, $fn:ident ( $arg:ty ); $map_a:expr, $map_b:expr) => {
-        paste::paste! {
-            qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>]((ops, arg): (Vec<Operation<$P, i32>>, $arg)) -> bool {
-                let pmap = prepare!($X<$P, i32>, ops);
-                let a = pmap.$fn(&arg).map($map_a);
-                let bytes = to_bytes::<Error>(&pmap).unwrap();
-                let archived = access::<[<Archived $X>]::<$P, rkyv::rend::i32_le>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn(&arg).map($map_b);
-                a == b
-            }
-        }
-    };
-    ($X:ident < $P:ident>, $fn:ident ().collect(); $map_a:expr, $map_b:expr) => {
-        paste::paste! {
-            qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>](ops: Vec<Operation<$P, ()>>) -> bool {
-                let pset = prepare!($X<$P>, ops);
-                let a = pset.$fn().map($map_a).collect::<Vec<_>>();
-                let bytes = to_bytes::<Error>(&pset).unwrap();
-                let archived = access::<[<Archived $X>]::<$P>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn().map($map_b).collect::<Vec<_>>();
-                a == b
-            }
-        }
-    };
-    ($X:ident < $P:ident>, $fn:ident ( $arg:ty ).collect(); $map_a:expr, $map_b:expr) => {
-        paste::paste! {
-            qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>]((ops, arg): (Vec<Operation<$P, ()>>, $arg)) -> bool {
-                let pset = prepare!($X<$P>, ops);
-                let a = pset.$fn(&arg).map($map_a).collect::<Vec<_>>();
-                let bytes = to_bytes::<Error>(&pset).unwrap();
-                let archived = access::<[<Archived $X>]::<$P>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn(&arg).map($map_b).collect::<Vec<_>>();
-                a == b
-            }
-        }
-    };
-    ($X:ident < $P:ident>, $fn:ident ( $arg1:ty, $arg2:ty ).collect(); $map_a:expr, $map_b:expr) => {
-        paste::paste! {
-            qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>]((ops, arg1, arg2): (Vec<Operation<$P, ()>>, $arg1, $arg2)) -> bool {
-                let pset = prepare!($X<$P>, ops);
-                let a = pset.$fn(&arg1, arg2).map($map_a).collect::<Vec<_>>();
-                let bytes = to_bytes::<Error>(&pset).unwrap();
-                let archived = access::<[<Archived $X>]::<$P>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn(&arg1, arg2).map($map_b).collect::<Vec<_>>();
-                a == b
-            }
-        }
-    };
-    ($X:ident < $P:ident, i32 >, $fn:ident ().collect(); $map_a:expr, $map_b:expr) => {
-        paste::paste! {
-            qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>](ops: Vec<Operation<$P, i32>>) -> bool {
-                let pmap = prepare!($X<$P, i32>, ops);
-                let a = pmap.$fn().map($map_a).collect::<Vec<_>>();
-                let bytes = to_bytes::<Error>(&pmap).unwrap();
-                let archived = access::<[<Archived $X>]::<$P, rkyv::rend::i32_le>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn().map($map_b).collect::<Vec<_>>();
-                a == b
-            }
-        }
-    };
-    ($X:ident < $P:ident, i32 >, $fn:ident ( $arg:ty ).collect(); $map_a:expr, $map_b:expr) => {
-        paste::paste! {
-            qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>]((ops, arg): (Vec<Operation<$P, i32>>, $arg)) -> bool {
-                let pmap = prepare!($X<$P, i32>, ops);
-                let a = pmap.$fn(&arg).map($map_a).collect::<Vec<_>>();
-                let bytes = to_bytes::<Error>(&pmap).unwrap();
-                let archived = access::<[<Archived $X>]::<$P, rkyv::rend::i32_le>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn(&arg).map($map_b).collect::<Vec<_>>();
-                a == b
-            }
-        }
-    };
-    ($X:ident < $P:ident, i32 >, $fn:ident ( $arg1:ty, $arg2:ty ).collect(); $map_a:expr, $map_b:expr) => {
-        paste::paste! {
-            qc!($fn, [<_ $fn>]);
-            fn [<_ $fn>]((ops, arg1, arg2): (Vec<Operation<$P, i32>>, $arg1, $arg2)) -> bool {
-                let pmap = prepare!($X<$P, i32>, ops);
-                let a = pmap.$fn(&arg1, arg2).map($map_a).collect::<Vec<_>>();
-                let bytes = to_bytes::<Error>(&pmap).unwrap();
-                let archived = access::<[<Archived $X>]::<$P, rkyv::rend::i32_le>, Error>(bytes.as_slice()).unwrap();
-                let b = archived.$fn(&arg1, arg2).map($map_b).collect::<Vec<_>>();
-                a == b
-            }
-        }
-    };
-}
-
-macro_rules! prepare {
-    ($X:ident < $P:ident>, $ops:expr) => {{
-        let mut pset = $X::<$P>::new();
-        for op in $ops {
-            match op {
-                Operation::Add(p, _) => {
-                    pset.insert(p);
-                }
-                Operation::Remove(p) => {
-                    pset.remove(&p);
-                }
-                Operation::RemoveChildren(p) => {
-                    pset.remove_children(&p);
-                }
-            }
-        }
-        pset
-    }};
-    ($X:ident < $P:ident, i32>, $ops:expr) => {{
-        let mut pmap = $X::<$P, i32>::new();
-        for op in $ops {
-            match op {
-                Operation::Add(p, t) => {
-                    pmap.insert(p, t);
-                }
-                Operation::Remove(p) => {
-                    pmap.remove(&p);
-                }
-                Operation::RemoveChildren(p) => {
-                    pmap.remove_children(&p);
-                }
-            }
-        }
-        pmap
-    }};
 }
 
 mod map {
@@ -196,42 +59,42 @@ mod map {
     type P = TestPrefix;
 
     qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
-    fn _serialize_canonical_bytes(list: Vec<Operation<P, i32>>) -> bool {
-        let pmap = prepare!(PrefixMap<P, i32>, list);
-        let fresh: PrefixMap<_, _> = pmap.iter().map(|(p, t)| (p, *t)).collect();
+    fn _serialize_canonical_bytes(ops: Vec<Operation<P, i32>>) -> bool {
+        let trie = <PrefixMap<P, i32>>::from_ops(ops);
+        let fresh: PrefixMap<_, _> = trie.iter().map(|(p, t)| (p, *t)).collect();
 
-        let pmap_bytes = to_bytes::<Error>(&pmap).unwrap();
+        let trie_bytes = to_bytes::<Error>(&trie).unwrap();
         let fresh_bytes = to_bytes::<Error>(&fresh).unwrap();
 
-        pmap_bytes.as_slice() == fresh_bytes.as_slice()
+        trie_bytes.as_slice() == fresh_bytes.as_slice()
     }
 
     qc!(deserialize_validate, _deserialize_validate);
-    fn _deserialize_validate(list: Vec<Operation<P, i32>>) -> bool {
-        let pmap = prepare!(PrefixMap<P, i32>, list);
-        let pmap_bytes = to_bytes::<Error>(&pmap).unwrap();
-        let archived = from_bytes::<PrefixMap<P, i32>, Error>(pmap_bytes.as_slice()).unwrap();
+    fn _deserialize_validate(ops: Vec<Operation<P, i32>>) -> bool {
+        let trie = <PrefixMap<P, i32>>::from_ops(ops);
+        let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+        let archived = from_bytes::<PrefixMap<P, i32>, Error>(trie_bytes.as_slice()).unwrap();
 
-        pmap == archived
+        trie == archived
     }
 
     rkyv_eq_test!(PrefixMap<P, i32>, len());
     rkyv_eq_test!(PrefixMap<P, i32>, is_empty());
     rkyv_eq_test!(PrefixMap<P, i32>, address_count());
-    rkyv_eq_test!(PrefixMap<P, i32>, get(P); |x| *x, |x| x.to_native());
+    rkyv_eq_test!(PrefixMap<P, i32>, get(P));
     rkyv_eq_test!(PrefixMap<P, i32>, contains_key(P));
-    rkyv_eq_test!(PrefixMap<P, i32>, get_key_value(P); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-    rkyv_eq_test!(PrefixMap<P, i32>, get_lpm(P); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
+    rkyv_eq_test!(PrefixMap<P, i32>, get_key_value(P));
+    rkyv_eq_test!(PrefixMap<P, i32>, get_lpm(P));
     rkyv_eq_test!(PrefixMap<P, i32>, get_lpm_prefix(P));
-    rkyv_eq_test!(PrefixMap<P, i32>, get_spm(P); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
+    rkyv_eq_test!(PrefixMap<P, i32>, get_spm(P));
     rkyv_eq_test!(PrefixMap<P, i32>, get_spm_prefix(P));
-    rkyv_eq_test!(PrefixMap<P, i32>, iter().collect(); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-    rkyv_eq_test!(PrefixMap<P, i32>, keys().collect(); |p| p, |p| p);
-    rkyv_eq_test!(PrefixMap<P, i32>, values().collect(); |t| *t, |t| t.to_native());
-    rkyv_eq_test!(PrefixMap<P, i32>, iter_from(P, bool).collect(); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-    rkyv_eq_test!(PrefixMap<P, i32>, cover(P).collect(); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-    rkyv_eq_test!(PrefixMap<P, i32>, cover_keys(P).collect(); |p| p, |p| p);
-    rkyv_eq_test!(PrefixMap<P, i32>, cover_values(P).collect(); |t| *t, |t| t.to_native());
+    rkyv_eq_test!(PrefixMap<P, i32>, iter().collect());
+    rkyv_eq_test!(PrefixMap<P, i32>, keys().collect());
+    rkyv_eq_test!(PrefixMap<P, i32>, values().collect());
+    rkyv_eq_test!(PrefixMap<P, i32>, iter_from(P, bool).collect());
+    rkyv_eq_test!(PrefixMap<P, i32>, cover(P).collect());
+    rkyv_eq_test!(PrefixMap<P, i32>, cover_keys(P).collect());
+    rkyv_eq_test!(PrefixMap<P, i32>, cover_values(P).collect());
 }
 
 mod set {
@@ -239,23 +102,23 @@ mod set {
     type P = TestPrefix;
 
     qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
-    fn _serialize_canonical_bytes(list: Vec<Operation<P, ()>>) -> bool {
-        let pset = prepare!(PrefixSet<P>, list);
-        let fresh: PrefixSet<_> = pset.iter().collect();
+    fn _serialize_canonical_bytes(ops: Vec<Operation<P, ()>>) -> bool {
+        let trie = <PrefixSet<P>>::from_ops(ops);
+        let fresh: PrefixSet<_> = trie.iter().collect();
 
-        let pmap_bytes = to_bytes::<Error>(&pset).unwrap();
+        let trie_bytes = to_bytes::<Error>(&trie).unwrap();
         let fresh_bytes = to_bytes::<Error>(&fresh).unwrap();
 
-        pmap_bytes.as_slice() == fresh_bytes.as_slice()
+        trie_bytes.as_slice() == fresh_bytes.as_slice()
     }
 
     qc!(deserialize_validate, _deserialize_validate);
-    fn _deserialize_validate(list: Vec<Operation<P, ()>>) -> bool {
-        let pset = prepare!(PrefixSet<P>, list);
-        let pmap_bytes = to_bytes::<Error>(&pset).unwrap();
-        let archived = from_bytes::<PrefixSet<P>, Error>(pmap_bytes.as_slice()).unwrap();
+    fn _deserialize_validate(ops: Vec<Operation<P, ()>>) -> bool {
+        let trie = <PrefixSet<P>>::from_ops(ops);
+        let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+        let archived = from_bytes::<PrefixSet<P>, Error>(trie_bytes.as_slice()).unwrap();
 
-        pset == archived
+        trie == archived
     }
 
     rkyv_eq_test!(PrefixSet<P>, len());
@@ -265,9 +128,9 @@ mod set {
     rkyv_eq_test!(PrefixSet<P>, get(P));
     rkyv_eq_test!(PrefixSet<P>, get_lpm(P));
     rkyv_eq_test!(PrefixSet<P>, get_spm(P));
-    rkyv_eq_test!(PrefixSet<P>, iter().collect(); |p| p, |p| p);
-    rkyv_eq_test!(PrefixSet<P>, iter_from(P, bool).collect(); |p| p, |p| p);
-    rkyv_eq_test!(PrefixSet<P>, cover(P).collect(); |p| p, |p| p);
+    rkyv_eq_test!(PrefixSet<P>, iter().collect());
+    rkyv_eq_test!(PrefixSet<P>, iter_from(P, bool).collect());
+    rkyv_eq_test!(PrefixSet<P>, cover(P).collect());
 }
 
 mod joint {
@@ -278,73 +141,73 @@ mod joint {
         use super::*;
 
         qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
-        fn _serialize_canonical_bytes(list: Vec<Operation<P, i32>>) -> bool {
-            let pmap = prepare!(JointPrefixMap<P, i32>, list);
+        fn _serialize_canonical_bytes(ops: Vec<Operation<P, i32>>) -> bool {
+            let trie = <JointPrefixMap<P, i32>>::from_ops(ops);
 
-            let t1: PrefixMap<_, _> = pmap.t1.iter().map(|(p, t)| (p, *t)).collect();
-            let t2: PrefixMap<_, _> = pmap.t2.iter().map(|(p, t)| (p, *t)).collect();
+            let t1: PrefixMap<_, _> = trie.t1.iter().map(|(p, t)| (p, *t)).collect();
+            let t2: PrefixMap<_, _> = trie.t2.iter().map(|(p, t)| (p, *t)).collect();
             let fresh = JointPrefixMap::<P, _> { t1, t2 };
 
-            let pmap_bytes = to_bytes::<Error>(&pmap).unwrap();
+            let trie_bytes = to_bytes::<Error>(&trie).unwrap();
             let fresh_bytes = to_bytes::<Error>(&fresh).unwrap();
 
-            pmap_bytes.as_slice() == fresh_bytes.as_slice()
+            trie_bytes.as_slice() == fresh_bytes.as_slice()
         }
 
         qc!(deserialize_validate, _deserialize_validate);
-        fn _deserialize_validate(list: Vec<Operation<P, i32>>) -> bool {
-            let pmap = prepare!(JointPrefixMap<P, i32>, list);
+        fn _deserialize_validate(ops: Vec<Operation<P, i32>>) -> bool {
+            let trie = <JointPrefixMap<P, i32>>::from_ops(ops);
 
-            let pmap_bytes = to_bytes::<Error>(&pmap).unwrap();
+            let trie_bytes = to_bytes::<Error>(&trie).unwrap();
             let archived =
-                from_bytes::<JointPrefixMap<P, i32>, Error>(pmap_bytes.as_slice()).unwrap();
+                from_bytes::<JointPrefixMap<P, i32>, Error>(trie_bytes.as_slice()).unwrap();
 
-            pmap == archived
+            trie == archived
         }
 
         rkyv_eq_test!(JointPrefixMap<P, i32>, len());
         rkyv_eq_test!(JointPrefixMap<P, i32>, is_empty());
         rkyv_eq_test!(JointPrefixMap<P, i32>, address_count());
-        rkyv_eq_test!(JointPrefixMap<P, i32>, get(P); |x| *x, |x| x.to_native());
+        rkyv_eq_test!(JointPrefixMap<P, i32>, get(P));
         rkyv_eq_test!(JointPrefixMap<P, i32>, contains_key(P));
-        rkyv_eq_test!(JointPrefixMap<P, i32>, get_key_value(P); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-        rkyv_eq_test!(JointPrefixMap<P, i32>, get_lpm(P); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
+        rkyv_eq_test!(JointPrefixMap<P, i32>, get_key_value(P));
+        rkyv_eq_test!(JointPrefixMap<P, i32>, get_lpm(P));
         rkyv_eq_test!(JointPrefixMap<P, i32>, get_lpm_prefix(P));
-        rkyv_eq_test!(JointPrefixMap<P, i32>, get_spm(P); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
+        rkyv_eq_test!(JointPrefixMap<P, i32>, get_spm(P));
         rkyv_eq_test!(JointPrefixMap<P, i32>, get_spm_prefix(P));
-        rkyv_eq_test!(JointPrefixMap<P, i32>, iter().collect(); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-        rkyv_eq_test!(JointPrefixMap<P, i32>, keys().collect(); |p| p, |p| p);
-        rkyv_eq_test!(JointPrefixMap<P, i32>, values().collect(); |t| *t, |t| t.to_native());
-        rkyv_eq_test!(JointPrefixMap<P, i32>, iter_from(P, bool).collect(); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-        rkyv_eq_test!(JointPrefixMap<P, i32>, cover(P).collect(); |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-        rkyv_eq_test!(JointPrefixMap<P, i32>, cover_keys(P).collect(); |p| p, |p| p);
-        rkyv_eq_test!(JointPrefixMap<P, i32>, cover_values(P).collect(); |t| *t, |t| t.to_native());
+        rkyv_eq_test!(JointPrefixMap<P, i32>, iter().collect());
+        rkyv_eq_test!(JointPrefixMap<P, i32>, keys().collect());
+        rkyv_eq_test!(JointPrefixMap<P, i32>, values().collect());
+        rkyv_eq_test!(JointPrefixMap<P, i32>, iter_from(P, bool).collect());
+        rkyv_eq_test!(JointPrefixMap<P, i32>, cover(P).collect());
+        rkyv_eq_test!(JointPrefixMap<P, i32>, cover_keys(P).collect());
+        rkyv_eq_test!(JointPrefixMap<P, i32>, cover_values(P).collect());
     }
 
     mod set {
         use super::*;
 
         qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
-        fn _serialize_canonical_bytes(list: Vec<Operation<P, ()>>) -> bool {
-            let pset = prepare!(JointPrefixSet<P>, list);
+        fn _serialize_canonical_bytes(ops: Vec<Operation<P, ()>>) -> bool {
+            let trie = <JointPrefixSet<P>>::from_ops(ops);
 
-            let t1: PrefixSet<_> = pset.t1.iter().collect();
-            let t2: PrefixSet<_> = pset.t2.iter().collect();
+            let t1: PrefixSet<_> = trie.t1.iter().collect();
+            let t2: PrefixSet<_> = trie.t2.iter().collect();
             let fresh = JointPrefixSet::<P> { t1, t2 };
 
-            let pset_bytes = to_bytes::<Error>(&pset).unwrap();
+            let trie_bytes = to_bytes::<Error>(&trie).unwrap();
             let fresh_bytes = to_bytes::<Error>(&fresh).unwrap();
 
-            pset_bytes.as_slice() == fresh_bytes.as_slice()
+            trie_bytes.as_slice() == fresh_bytes.as_slice()
         }
 
         qc!(deserialize_validate, _deserialize_validate);
-        fn _deserialize_validate(list: Vec<Operation<P, ()>>) -> bool {
-            let pset = prepare!(JointPrefixSet<P>, list);
-            let pset_bytes = to_bytes::<Error>(&pset).unwrap();
-            let archived = from_bytes::<JointPrefixSet<P>, Error>(pset_bytes.as_slice()).unwrap();
+        fn _deserialize_validate(ops: Vec<Operation<P, ()>>) -> bool {
+            let trie = <JointPrefixSet<P>>::from_ops(ops);
+            let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+            let archived = from_bytes::<JointPrefixSet<P>, Error>(trie_bytes.as_slice()).unwrap();
 
-            pset == archived
+            trie == archived
         }
 
         rkyv_eq_test!(JointPrefixSet<P>, len());
@@ -354,8 +217,155 @@ mod joint {
         rkyv_eq_test!(JointPrefixSet<P>, get(P));
         rkyv_eq_test!(JointPrefixSet<P>, get_lpm(P));
         rkyv_eq_test!(JointPrefixSet<P>, get_spm(P));
-        rkyv_eq_test!(JointPrefixSet<P>, iter().collect(); |p| p, |p| p);
-        rkyv_eq_test!(JointPrefixSet<P>, iter_from(P, bool).collect(); |p| p, |p| p);
-        rkyv_eq_test!(JointPrefixSet<P>, cover(P).collect(); |p| p, |p| p);
+        rkyv_eq_test!(JointPrefixSet<P>, iter().collect());
+        rkyv_eq_test!(JointPrefixSet<P>, iter_from(P, bool).collect());
+        rkyv_eq_test!(JointPrefixSet<P>, cover(P).collect());
     }
 }
+
+// ---------------------------------------------------------
+// Traits and functions needed for the macro to work.
+// ---------------------------------------------------------
+
+#[rustfmt::skip]
+mod helper {
+    use super::*;
+
+    pub(super) fn rkyv_map<T, R>(value: &T, f: impl FnOnce(&rkyv::Archived<T>) -> R) -> R
+    where
+        T: for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
+        rkyv::Archived<T>: for<'a> CheckBytes<HighValidator<'a, Error>>,
+    {
+        let bytes = to_bytes::<Error>(value).unwrap();
+        let archived = access::<rkyv::Archived<T>, Error>(bytes.as_slice()).unwrap();
+        f(archived)
+    }
+
+    pub(super) trait IntoNative {
+        type Native;
+        fn into_native(self) -> Self::Native;
+    }
+
+    macro_rules! impl_into_native {
+        ($T:ty) => {
+            impl IntoNative for $T {
+                type Native = $T;
+                fn into_native(self) -> $T { self }
+            }
+        };
+    }
+
+    impl_into_native!(TestPrefix);
+    impl_into_native!(JointTestPrefix);
+    impl_into_native!(usize);
+    impl_into_native!(bool);
+    impl_into_native!(u32);
+
+    impl IntoNative for &rkyv::rend::i32_le {
+        type Native = i32;
+        fn into_native(self) -> i32 { self.to_native() }
+    }
+
+    impl<A: IntoNative, B: IntoNative> IntoNative for (A, B) {
+        type Native = (A::Native, B::Native);
+        fn into_native(self) -> Self::Native { (self.0.into_native(), self.1.into_native()) }
+    }
+
+    impl<T: IntoNative> IntoNative for Option<T> {
+        type Native = Option<T::Native>;
+        fn into_native(self) -> Self::Native { self.map(|x| x.into_native()) }
+    }
+
+    impl<T: IntoNative> IntoNative for Vec<T> {
+        type Native = Vec<T::Native>;
+        fn into_native(self) -> Self::Native { self.into_iter().map(|x| x.into_native()).collect() }
+    }
+
+    pub(super) trait IntoOwned {
+        type Owned;
+        fn into_owned(self) -> Self::Owned;
+    }
+
+    macro_rules! impl_into_owned {
+        ($T:ty) => {
+            impl IntoOwned for $T {
+                type Owned = $T;
+                fn into_owned(self) -> $T { self }
+            }
+        };
+    }
+
+    impl_into_owned!(TestPrefix);
+    impl_into_owned!(JointTestPrefix);
+    impl_into_owned!(usize);
+    impl_into_owned!(bool);
+    impl_into_owned!(u32);
+
+    impl<T: Clone> IntoOwned for &T {
+        type Owned = T;
+        fn into_owned(self) -> T { self.clone() }
+    }
+
+    impl<A: IntoOwned, B: IntoOwned> IntoOwned for (A, B) {
+        type Owned = (A::Owned, B::Owned);
+        fn into_owned(self) -> Self::Owned { (self.0.into_owned(), self.1.into_owned()) }
+    }
+
+    impl<T: IntoOwned> IntoOwned for Option<T> {
+        type Owned = Option<T::Owned>;
+        fn into_owned(self) -> Self::Owned { self.map(|x| x.into_owned()) }
+    }
+
+    impl<T: IntoOwned> IntoOwned for Vec<T> {
+        type Owned = Vec<T::Owned>;
+        fn into_owned(self) -> Self::Owned { self.into_iter().map(|x| x.into_owned()).collect() }
+    }
+
+    pub(super) trait FromOps<P>: Sized {
+        type Value;
+        fn empty() -> Self;
+        fn add(&mut self, prefix: P, value: Self::Value);
+        fn del(&mut self, prefix: &P);
+        fn del_children(&mut self, prefix: &P);
+
+        fn from_ops(ops: Vec<Operation<P, Self::Value>>) -> Self {
+            let mut this = Self::empty();
+            for op in ops {
+                match op {
+                    Operation::Add(p, v) => this.add(p, v),
+                    Operation::Remove(p) => this.del(&p),
+                    Operation::RemoveChildren(p) => this.del_children(&p),
+                }
+            }
+            this
+        }
+    }
+
+    macro_rules! impl_from_ops {
+        (map, $Map:ident : $P: ident) => {
+            impl<P: $P> FromOps<P> for $Map<P, i32> {
+                type Value = i32;
+                fn empty() -> Self { Self::new() }
+                fn add(&mut self, p: P, v: i32) { self.insert(p, v); }
+                fn del(&mut self, p: &P) { self.remove(p); }
+                fn del_children(&mut self, p: &P) { self.remove_children(p); }
+            }
+        };
+        (set, $Set:ident : $P: ident) => {
+            impl<P: $P> FromOps<P> for $Set<P> {
+                type Value = ();
+                fn empty() -> Self { Self::new() }
+                fn add(&mut self, p: P, _: ()) { self.insert(p); }
+                fn del(&mut self, p: &P) { self.remove(p); }
+                fn del_children(&mut self, p: &P) { self.remove_children(p); }
+            }
+        };
+    }
+
+    impl_from_ops!(map, PrefixMap: Prefix);
+    impl_from_ops!(map, JointPrefixMap: JointPrefix);
+    impl_from_ops!(set, PrefixSet: Prefix);
+    impl_from_ops!(set, JointPrefixSet: JointPrefix);
+}
+
+use helper::*;
