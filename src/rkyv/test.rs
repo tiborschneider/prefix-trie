@@ -215,82 +215,86 @@ mod set {
     rkyv_eq_test!(PrefixSet<P>, cover, P, collect);
 }
 
-mod joint_map {
+mod joint {
     use super::*;
     type P = JointTestPrefix;
 
-    qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
-    fn _serialize_canonical_bytes(list: Vec<Operation<P, i32>>) -> bool {
-        let pmap = prepare!(JointPrefixMap<P, i32>, list);
+    mod map {
+        use super::*;
 
-        let t1: PrefixMap<_, _> = pmap.t1.iter().map(|(p, t)| (p, *t)).collect();
-        let t2: PrefixMap<_, _> = pmap.t2.iter().map(|(p, t)| (p, *t)).collect();
-        let fresh = JointPrefixMap::<P, _> { t1, t2 };
+        qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
+        fn _serialize_canonical_bytes(list: Vec<Operation<P, i32>>) -> bool {
+            let pmap = prepare!(JointPrefixMap<P, i32>, list);
 
-        let pmap_bytes = to_bytes::<Error>(&pmap).unwrap();
-        let fresh_bytes = to_bytes::<Error>(&fresh).unwrap();
+            let t1: PrefixMap<_, _> = pmap.t1.iter().map(|(p, t)| (p, *t)).collect();
+            let t2: PrefixMap<_, _> = pmap.t2.iter().map(|(p, t)| (p, *t)).collect();
+            let fresh = JointPrefixMap::<P, _> { t1, t2 };
 
-        pmap_bytes.as_slice() == fresh_bytes.as_slice()
+            let pmap_bytes = to_bytes::<Error>(&pmap).unwrap();
+            let fresh_bytes = to_bytes::<Error>(&fresh).unwrap();
+
+            pmap_bytes.as_slice() == fresh_bytes.as_slice()
+        }
+
+        qc!(deserialize_validate, _deserialize_validate);
+        fn _deserialize_validate(list: Vec<Operation<P, i32>>) -> bool {
+            let pmap = prepare!(JointPrefixMap<P, i32>, list);
+
+            let pmap_bytes = to_bytes::<Error>(&pmap).unwrap();
+            let archived =
+                from_bytes::<JointPrefixMap<P, i32>, Error>(pmap_bytes.as_slice()).unwrap();
+
+            pmap == archived
+        }
+
+        rkyv_eq_test!(JointPrefixMap<P, i32>, len);
+        rkyv_eq_test!(JointPrefixMap<P, i32>, is_empty);
+        rkyv_eq_test!(JointPrefixMap<P, i32>, address_count);
+        rkyv_eq_test!(JointPrefixMap<P, i32>, get, P, |x| *x, |x| x.to_native());
+        rkyv_eq_test!(JointPrefixMap<P, i32>, contains_key, P);
+        rkyv_eq_test!(JointPrefixMap<P, i32>, get_key_value, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
+        rkyv_eq_test!(JointPrefixMap<P, i32>, get_lpm, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
+        rkyv_eq_test!(JointPrefixMap<P, i32>, get_lpm_prefix, P);
+        rkyv_eq_test!(JointPrefixMap<P, i32>, get_spm, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
+        rkyv_eq_test!(JointPrefixMap<P, i32>, get_spm_prefix, P);
+        rkyv_eq_test!(JointPrefixMap<P, i32>, cover, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()), collect);
+        rkyv_eq_test!(JointPrefixMap<P, i32>, cover_keys, P, |p| p, |p| p, collect);
+        rkyv_eq_test!(JointPrefixMap<P, i32>, cover_values, P, |t| *t, |t| t.to_native(), collect);
     }
 
-    qc!(deserialize_validate, _deserialize_validate);
-    fn _deserialize_validate(list: Vec<Operation<P, i32>>) -> bool {
-        let pmap = prepare!(JointPrefixMap<P, i32>, list);
+    mod set {
+        use super::*;
 
-        let pmap_bytes = to_bytes::<Error>(&pmap).unwrap();
-        let archived = from_bytes::<JointPrefixMap<P, i32>, Error>(pmap_bytes.as_slice()).unwrap();
+        qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
+        fn _serialize_canonical_bytes(list: Vec<Operation<P, ()>>) -> bool {
+            let pset = prepare!(JointPrefixSet<P>, list);
 
-        pmap == archived
+            let t1: PrefixSet<_> = pset.t1.iter().collect();
+            let t2: PrefixSet<_> = pset.t2.iter().collect();
+            let fresh = JointPrefixSet::<P> { t1, t2 };
+
+            let pset_bytes = to_bytes::<Error>(&pset).unwrap();
+            let fresh_bytes = to_bytes::<Error>(&fresh).unwrap();
+
+            pset_bytes.as_slice() == fresh_bytes.as_slice()
+        }
+
+        qc!(deserialize_validate, _deserialize_validate);
+        fn _deserialize_validate(list: Vec<Operation<P, ()>>) -> bool {
+            let pset = prepare!(JointPrefixSet<P>, list);
+            let pset_bytes = to_bytes::<Error>(&pset).unwrap();
+            let archived = from_bytes::<JointPrefixSet<P>, Error>(pset_bytes.as_slice()).unwrap();
+
+            pset == archived
+        }
+
+        rkyv_eq_test!(JointPrefixSet<P>, len);
+        rkyv_eq_test!(JointPrefixSet<P>, is_empty);
+        rkyv_eq_test!(JointPrefixSet<P>, address_count);
+        rkyv_eq_test!(JointPrefixSet<P>, contains, P);
+        rkyv_eq_test!(JointPrefixSet<P>, get, P);
+        rkyv_eq_test!(JointPrefixSet<P>, get_lpm, P);
+        rkyv_eq_test!(JointPrefixSet<P>, get_spm, P);
+        rkyv_eq_test!(JointPrefixSet<P>, cover, P, collect);
     }
-
-    rkyv_eq_test!(JointPrefixMap<P, i32>, len);
-    rkyv_eq_test!(JointPrefixMap<P, i32>, is_empty);
-    rkyv_eq_test!(JointPrefixMap<P, i32>, address_count);
-    rkyv_eq_test!(JointPrefixMap<P, i32>, get, P, |x| *x, |x| x.to_native());
-    rkyv_eq_test!(JointPrefixMap<P, i32>, contains_key, P);
-    rkyv_eq_test!(JointPrefixMap<P, i32>, get_key_value, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-    rkyv_eq_test!(JointPrefixMap<P, i32>, get_lpm, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-    rkyv_eq_test!(JointPrefixMap<P, i32>, get_lpm_prefix, P);
-    rkyv_eq_test!(JointPrefixMap<P, i32>, get_spm, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()));
-    rkyv_eq_test!(JointPrefixMap<P, i32>, get_spm_prefix, P);
-    rkyv_eq_test!(JointPrefixMap<P, i32>, cover, P, |(p, t)| (p, *t), |(p, t)| (p, t.to_native()), collect);
-    rkyv_eq_test!(JointPrefixMap<P, i32>, cover_keys, P, |p| p, |p| p, collect);
-    rkyv_eq_test!(JointPrefixMap<P, i32>, cover_values, P, |t| *t, |t| t.to_native(), collect);
-}
-
-mod joint_set {
-    use super::*;
-    type P = JointTestPrefix;
-
-    qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
-    fn _serialize_canonical_bytes(list: Vec<Operation<P, ()>>) -> bool {
-        let pset = prepare!(JointPrefixSet<P>, list);
-
-        let t1: PrefixSet<_> = pset.t1.iter().collect();
-        let t2: PrefixSet<_> = pset.t2.iter().collect();
-        let fresh = JointPrefixSet::<P> { t1, t2 };
-
-        let pset_bytes = to_bytes::<Error>(&pset).unwrap();
-        let fresh_bytes = to_bytes::<Error>(&fresh).unwrap();
-
-        pset_bytes.as_slice() == fresh_bytes.as_slice()
-    }
-
-    qc!(deserialize_validate, _deserialize_validate);
-    fn _deserialize_validate(list: Vec<Operation<P, ()>>) -> bool {
-        let pset = prepare!(JointPrefixSet<P>, list);
-        let pset_bytes = to_bytes::<Error>(&pset).unwrap();
-        let archived = from_bytes::<JointPrefixSet<P>, Error>(pset_bytes.as_slice()).unwrap();
-
-        pset == archived
-    }
-
-    rkyv_eq_test!(JointPrefixSet<P>, len);
-    rkyv_eq_test!(JointPrefixSet<P>, is_empty);
-    rkyv_eq_test!(JointPrefixSet<P>, address_count);
-    rkyv_eq_test!(JointPrefixSet<P>, contains, P);
-    rkyv_eq_test!(JointPrefixSet<P>, get, P);
-    rkyv_eq_test!(JointPrefixSet<P>, get_lpm, P);
-    rkyv_eq_test!(JointPrefixSet<P>, get_spm, P);
-    rkyv_eq_test!(JointPrefixSet<P>, cover, P, collect);
 }
