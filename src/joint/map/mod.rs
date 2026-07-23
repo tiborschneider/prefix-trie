@@ -49,7 +49,10 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         }
     }
 
-    /// Returns the number of elements stored in `self`.
+    /// Returns the number of entries stored in the map.
+    ///
+    /// This is the number of stored prefixes, not the number of addresses they cover (see
+    /// [`address_count`](Self::address_count)).
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -71,7 +74,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         self.t1.len() + self.t2.len()
     }
 
-    /// Returns `true` if the map contains no elements.
+    /// Returns `true` if the map contains no entries.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -125,7 +128,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         (self.t1.address_count(), self.t2.address_count())
     }
 
-    /// Get the value of an element by matching exactly on the prefix.
+    /// Get the value stored at exactly `prefix`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -149,7 +152,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork_ref!(self, prefix, get)
     }
 
-    /// Get a mutable reference to a value of an element by matching exactly on the prefix.
+    /// Get a mutable reference to the value stored at exactly `prefix`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -170,7 +173,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork_ref!(self, prefix, get_mut)
     }
 
-    /// Get the value of an element by matching exactly on the prefix.
+    /// Get the value stored at exactly `prefix`, together with the canonical matched prefix.
     ///
     /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
     /// bits masked out by the prefix length are not preserved.
@@ -192,7 +195,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork_ref!(self, prefix as (P, T), get_key_value)
     }
 
-    /// Get a value of an element by using longest prefix matching
+    /// Get the longest prefix in the map that contains `prefix`, together with its value.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -214,7 +217,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork_ref!(self, prefix as (P, T), get_lpm)
     }
 
-    /// Get a mutable reference to a value of an element by using longest prefix matching
+    /// Get a mutable reference to the value of the longest prefix in the map that contains `prefix`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -235,7 +238,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork_ref!(self, prefix as (P, T), get_lpm_mut)
     }
 
-    /// Check if a key is present in the datastructure.
+    /// Check whether `prefix` is present in the map.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -256,7 +259,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork_ref!(self, prefix, contains_key)
     }
 
-    /// Get the longest prefix in the datastructure that matches the given `prefix`.
+    /// Get the longest prefix in the map that contains `prefix`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -278,7 +281,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork_ref!(self, prefix as P, get_lpm_prefix)
     }
 
-    /// Get a value of an element by using shortest prefix matching.
+    /// Get the shortest prefix in the map that contains `prefix`, together with its value.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -300,7 +303,7 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         fork_ref!(self, prefix as (P, T), get_spm)
     }
 
-    /// Get the shortest prefix in the datastructure that contains the given `prefix`.
+    /// Get the shortest prefix in the map that contains `prefix`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -513,9 +516,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         self.t2.retain(|p, t| f(P::from_p2(p), t));
     }
 
-    /// Iterate over all entries in the map that covers the given `prefix` (including `prefix`
-    /// itself if that is present in the map). The returned iterator yields `(P, &'a T)`, with
-    /// reconstructed prefixes `P`.
+    /// Iterate over all entries in the map that cover `prefix`, including `prefix` itself if it is
+    /// present. The returned iterator yields `(P, &'a T)`, with reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -566,9 +568,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         }
     }
 
-    /// Iterate over all keys (prefixes) in the map that covers the given `prefix` (including
-    /// `prefix` itself if that is present in the map). The returned iterator yields reconstructed
-    /// prefixes `P`.
+    /// Iterate over all prefixes in the map that cover `prefix`, including `prefix` itself if it is
+    /// present. The returned iterator yields reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -597,8 +598,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         CoverKeys(self.cover(prefix))
     }
 
-    /// Iterate over all values in the map that covers the given `prefix` (including `prefix`
-    /// itself if that is present in the map). The returned iterator yields `&'a T`.
+    /// Iterate over the values of all prefixes in the map that cover `prefix`, including `prefix`
+    /// itself if it is present. The returned iterator yields `&'a T`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -667,13 +668,16 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         self.into_iter()
     }
 
-    /// Return an iterator starting at the given prefix in lexicographic order.
+    /// Iterate over all entries starting at `prefix`, in lexicographic order.
     ///
-    /// If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
-    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    /// This enables stateless, cursor-based pagination: pass the last-seen prefix to resume.
     ///
-    /// If `prefix` is not present in the map, the iterator starts at the first entry that
-    /// would come after `prefix` in lexicographic order, regardless of `inclusive`.
+    /// - If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
+    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Entries more specific than
+    ///   `prefix` (its children) are still yielded.
+    ///
+    /// If `prefix` is not present in the map, the iterator starts at the first entry that would come
+    /// after `prefix` in lexicographic order, regardless of `inclusive`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -946,10 +950,9 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         }
     }
 
-    /// Get an iterator over the node itself and all children. All elements returned have a prefix
-    /// that is contained within `prefix` itself (or are the same). The iterator yields
-    /// `(P, &'a T)`, with reconstructed prefixes `P`. The iterator yields elements in
-    /// lexicographic order.
+    /// Iterate over `prefix` and all more-specific entries contained within it, including `prefix`
+    /// itself if it is present. The iterator yields `(P, &'a T)`, with reconstructed prefixes `P`,
+    /// in lexicographic order.
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
@@ -1013,10 +1016,9 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         }
     }
 
-    /// Get an iterator of mutable references of the node itself and all its children. All elements
-    /// returned have a prefix that is contained within `prefix` itself (or are the same). The
-    /// iterator yields `(P, &'a mut T)`, with reconstructed prefixes `P`. The iterator yields
-    /// elements in lexicographic order.
+    /// Iterate with mutable references over `prefix` and all more-specific entries contained within
+    /// it, including `prefix` itself if it is present. The iterator yields `(P, &'a mut T)`, with
+    /// reconstructed prefixes `P`, in lexicographic order.
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] on a mutable map reference as an
     /// alternative.
@@ -1078,9 +1080,8 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         }
     }
 
-    /// Get an iterator over the node itself and all children with a value. All elements returned
-    /// have a prefix that is contained within `prefix` itself (or are the same). This function will
-    /// consume `self`, returning an iterator over all owned children.
+    /// Consume the map and iterate over `prefix` and all more-specific entries contained within it,
+    /// including `prefix` itself if it is present. This returns an iterator over the owned entries.
     ///
     /// ```
     /// # use prefix_trie::joint::*;

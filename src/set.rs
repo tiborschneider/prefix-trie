@@ -36,7 +36,10 @@ impl<P: Prefix> PrefixSet<P> {
         Self(Default::default())
     }
 
-    /// Returns the number of prefixes stored in `self`.
+    /// Returns the number of prefixes stored in the set.
+    ///
+    /// This is the number of stored prefixes, not the number of addresses they cover (see
+    /// [`address_count`](Self::address_count)).
     ///
     /// ```
     /// use prefix_trie::PrefixSet;
@@ -128,7 +131,7 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.address_count()
     }
 
-    /// Check whether `prefix` is present in the set using exact prefix matching.
+    /// Check whether `prefix` is present in the set.
     ///
     /// ```
     /// use prefix_trie::PrefixSet;
@@ -150,7 +153,7 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.contains_key(prefix)
     }
 
-    /// Get the canonical reconstructed prefix by exact prefix matching.
+    /// Get the canonical (reconstructed) prefix that matches `prefix` exactly.
     ///
     /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
     /// bits masked out by the prefix length are not preserved.
@@ -424,13 +427,16 @@ impl<P: Prefix> PrefixSet<P> {
         self.into_iter()
     }
 
-    /// Return an iterator starting at the given prefix in lexicographic order.
+    /// Iterate over all prefixes starting at `prefix`, in lexicographic order.
     ///
-    /// If `inclusive` is `true`, the iterator includes `prefix` (if present).
-    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    /// This enables stateless, cursor-based pagination: pass the last-seen prefix to resume.
     ///
-    /// If `prefix` is not present in the set, the iterator starts at the first prefix that
-    /// would come after it in lexicographic order, regardless of `inclusive`.
+    /// - If `inclusive` is `true`, the iterator includes `prefix` (if present).
+    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Prefixes more specific than
+    ///   `prefix` (its children) are still yielded.
+    ///
+    /// If `prefix` is not present in the set, the iterator starts at the first prefix that would
+    /// come after `prefix` in lexicographic order, regardless of `inclusive`.
     ///
     /// ```
     /// use prefix_trie::PrefixSet;
@@ -484,7 +490,8 @@ impl<P: Prefix> PrefixSet<P> {
         self.0.retain(|p, _| f(p));
     }
 
-    /// Get an iterator over `prefix` and all more-specific prefixes contained within it.
+    /// Iterate over `prefix` and all more-specific prefixes contained within it, including `prefix`
+    /// itself if it is present.
     ///
     /// The iterator yields canonical owned prefixes in lexicographic order.
     ///

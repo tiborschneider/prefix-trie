@@ -56,13 +56,16 @@ where
         }
     }
 
-    /// Returns the number of elements stored in `self`.
+    /// Returns the number of entries stored in the map.
+    ///
+    /// This is the number of stored prefixes, not the number of addresses they cover (see
+    /// [`address_count`](Self::address_count)).
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.count
     }
 
-    /// Returns `true` if the map contains no elements.
+    /// Returns `true` if the map contains no entries.
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.count == 0
@@ -116,7 +119,7 @@ where
         &mut self.table
     }
 
-    /// Get the value of an element by matching exactly on the prefix.
+    /// Get the value stored at exactly `prefix`.
     ///
     /// ```
     /// # use prefix_trie::*; use prefix_trie::*;
@@ -139,7 +142,7 @@ where
         Some(self.table.find(key, prefix_len)?.get())
     }
 
-    /// Get a mutable reference to a value of an element by matching exactly on the prefix.
+    /// Get a mutable reference to the value stored at exactly `prefix`.
     ///
     /// ```
     /// # use prefix_trie::*; use prefix_trie::*;
@@ -162,7 +165,7 @@ where
         Some(self.table.find_mut(key, prefix_len).present()?.get_mut())
     }
 
-    /// Get the value of an element by matching exactly on the prefix.
+    /// Get the value stored at exactly `prefix`, together with the canonical matched prefix.
     ///
     /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
     /// bits masked out by the prefix length are not preserved.
@@ -205,7 +208,7 @@ where
         Some((p, r.get()))
     }
 
-    /// Get a value of an element by using longest prefix matching
+    /// Get the longest prefix in the map that contains `prefix`, together with its value.
     ///
     /// ```
     /// # use prefix_trie::*; use prefix_trie::*;
@@ -247,7 +250,7 @@ where
         Some((p, r.get()))
     }
 
-    /// Get a mutable reference to a value of an element by using longest prefix matching
+    /// Get a mutable reference to the value of the longest prefix in the map that contains `prefix`.
     ///
     /// ```
     /// # use prefix_trie::*; use prefix_trie::*;
@@ -275,7 +278,7 @@ where
         Some((p, r.get_mut()))
     }
 
-    /// Get the longest prefix in the datastructure that matches the given `prefix`.
+    /// Get the longest prefix in the map that contains `prefix`.
     ///
     /// ```
     /// # use prefix_trie::*; use prefix_trie::*;
@@ -313,7 +316,7 @@ where
         self.get_lpm(prefix).map(|(p, _)| p)
     }
 
-    /// Check if a key is present in the datastructure.
+    /// Check whether `prefix` is present in the map.
     ///
     /// ```
     /// # use prefix_trie::*; use prefix_trie::*;
@@ -336,7 +339,7 @@ where
         self.table.find(key, prefix_len).is_some()
     }
 
-    /// Get a value of an element by using shortest prefix matching.
+    /// Get the shortest prefix in the map that contains `prefix`, together with its value.
     ///
     /// ```
     /// # use prefix_trie::*; use prefix_trie::*;
@@ -365,7 +368,7 @@ where
         Some((p, r.get()))
     }
 
-    /// Get the shortest prefix in the datastructure that contains the given `prefix`.
+    /// Get the shortest prefix in the map that contains `prefix`.
     ///
     /// ```
     /// # use prefix_trie::*; use prefix_trie::*;
@@ -862,9 +865,8 @@ where
         self.aggregate_fill(T::default)
     }
 
-    /// Iterate over all entries in the map that covers the given `prefix` (including `prefix`
-    /// itself if that is present in the map). The returned iterator yields `(P, &'a T)`, with
-    /// reconstructed prefixes `P`.
+    /// Iterate over all entries in the map that cover `prefix`, including `prefix` itself if it is
+    /// present. The returned iterator yields `(P, &'a T)`, with reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -912,9 +914,8 @@ where
         Cover::new(self, prefix)
     }
 
-    /// Iterate over all keys (prefixes) in the map that covers the given `prefix` (including
-    /// `prefix` itself if that is present in the map). The returned iterator yields reconstructed
-    /// prefixes `P`.
+    /// Iterate over all prefixes in the map that cover `prefix`, including `prefix` itself if it is
+    /// present. The returned iterator yields reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -943,8 +944,8 @@ where
         CoverKeys(Cover::new(self, prefix))
     }
 
-    /// Iterate over all values in the map that covers the given `prefix` (including `prefix`
-    /// itself if that is present in the map). The returned iterator yields `&'a T`.
+    /// Iterate over the values of all prefixes in the map that cover `prefix`, including `prefix`
+    /// itself if it is present. The returned iterator yields `&'a T`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -1011,14 +1012,16 @@ where
         IterMut::new(&mut self.table)
     }
 
-    /// Return an iterator starting at the given prefix in lexicographic order.
+    /// Iterate over all entries starting at `prefix`, in lexicographic order.
+    ///
+    /// This enables stateless, cursor-based pagination: pass the last-seen prefix to resume.
     ///
     /// - If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
-    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Prefixes that are contained
-    ///   within (are children of) `prefix` are still yielded.
+    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Entries more specific than
+    ///   `prefix` (its children) are still yielded.
     ///
-    /// If `prefix` is not present in the map, the iterator starts at the first entry that
-    /// would come after `prefix` in lexicographic order, regardless of `inclusive`.
+    /// If `prefix` is not present in the map, the iterator starts at the first entry that would come
+    /// after `prefix` in lexicographic order, regardless of `inclusive`.
     ///
     /// ```
     /// # use prefix_trie::*;
@@ -1174,10 +1177,9 @@ impl<P, T> PrefixMap<P, T>
 where
     P: Prefix,
 {
-    /// Get an iterator over the node itself and all children. All elements returned have a prefix
-    /// that is contained within `prefix` itself (or are the same). The iterator yields
-    /// `(P, &'a T)`, with reconstructed prefixes `P`. The iterator yields elements in
-    /// lexicographic order.
+    /// Iterate over `prefix` and all more-specific entries contained within it, including `prefix`
+    /// itself if it is present. The iterator yields `(P, &'a T)`, with reconstructed prefixes `P`,
+    /// in lexicographic order.
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
@@ -1208,10 +1210,9 @@ where
         Iter::at_node(&self.table, lex)
     }
 
-    /// Get an iterator of mutable references of the node itself and all its children. All elements
-    /// returned have a prefix that is contained within `prefix` itself (or are the same). The
-    /// iterator yields `(P, &'a mut T)`, with reconstructed prefixes `P`. The iterator yields
-    /// elements in lexicographic order.
+    /// Iterate with mutable references over `prefix` and all more-specific entries contained within
+    /// it, including `prefix` itself if it is present. The iterator yields `(P, &'a mut T)`, with
+    /// reconstructed prefixes `P`, in lexicographic order.
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] on a mutable map reference as an
     /// alternative.
@@ -1247,9 +1248,8 @@ where
         IterMut::at_node(&mut self.table, lex)
     }
 
-    /// Get an iterator over the node itself and all children with a value. All elements returned
-    /// have a prefix that is contained within `prefix` itself (or are the same). This function will
-    /// consume `self`, returning an iterator over all owned children.
+    /// Consume the map and iterate over `prefix` and all more-specific entries contained within it,
+    /// including `prefix` itself if it is present. This returns an iterator over the owned entries.
     ///
     /// ```
     /// # use prefix_trie::*; use prefix_trie::*;

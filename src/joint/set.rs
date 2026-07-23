@@ -37,7 +37,10 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         }
     }
 
-    /// Returns the number of elements stored in `self`.
+    /// Returns the number of prefixes stored in the set.
+    ///
+    /// This is the number of stored prefixes, not the number of addresses they cover (see
+    /// [`address_count`](Self::address_count)).
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -59,7 +62,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         self.t1.len() + self.t2.len()
     }
 
-    /// Returns `true` if the set contains no elements.
+    /// Returns `true` if the set contains no prefixes.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -104,7 +107,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         (self.t1.address_count(), self.t2.address_count())
     }
 
-    /// Check whether some prefix is present in the set, without using longest prefix match.
+    /// Check whether `prefix` is present in the set.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -126,7 +129,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         fork_ref!(self, prefix, contains)
     }
 
-    /// Get the canonical reconstructed prefix by exact prefix matching.
+    /// Get the canonical (reconstructed) prefix that matches `prefix` exactly.
     ///
     /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
     /// bits masked out by the prefix length are not preserved.
@@ -147,7 +150,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         fork_ref!(self, prefix as P, get)
     }
 
-    /// Get the longest prefix in the set that contains the given prefix.
+    /// Get the longest prefix in the set that contains `prefix`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -169,7 +172,7 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         fork_ref!(self, prefix as P, get_lpm)
     }
 
-    /// Get the shortest prefix in the set that contains the given prefix.
+    /// Get the shortest prefix in the set that contains `prefix`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -342,9 +345,16 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         self.into_iter()
     }
 
-    /// Return an iterator starting at the given prefix in lexicographic order. If `inclusive` is
-    /// `true`, the iterator includes `prefix` itself (if present); otherwise it starts just after
-    /// it. This is useful for cursor-based pagination over a [`JointPrefixSet`].
+    /// Iterate over all prefixes starting at `prefix`, in lexicographic order.
+    ///
+    /// This enables stateless, cursor-based pagination: pass the last-seen prefix to resume.
+    ///
+    /// - If `inclusive` is `true`, the iterator includes `prefix` (if present).
+    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Prefixes more specific than
+    ///   `prefix` (its children) are still yielded.
+    ///
+    /// If `prefix` is not present in the set, the iterator starts at the first prefix that would
+    /// come after `prefix` in lexicographic order, regardless of `inclusive`.
     ///
     /// ```
     /// # use prefix_trie::joint::*;
@@ -414,9 +424,9 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         self.t2.retain(|p| f(P::from_p2(p)));
     }
 
-    /// Get an iterator over the node itself and all children. All elements returned have a prefix
-    /// that is contained within `prefix` itself (or are the same). The iterator yields elements in
-    /// lexicographic order.
+    /// Iterate over `prefix` and all more-specific prefixes contained within it, including `prefix`
+    /// itself if it is present. The iterator yields reconstructed prefixes `P` in lexicographic
+    /// order.
     ///
     /// **Info**: Use the [`crate::trieview::TrieView`] abstraction that provides more flexibility.
     ///
@@ -455,9 +465,8 @@ impl<P: JointPrefix> JointPrefixSet<P> {
         })
     }
 
-    /// Iterate over all prefixes in the set that covers the given `prefix` (including `prefix`
-    /// itself if that is present in the set). The returned iterator yields reconstructed prefixes
-    /// `P`.
+    /// Iterate over all prefixes in the set that cover `prefix`, including `prefix` itself if it is
+    /// present. The returned iterator yields reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
