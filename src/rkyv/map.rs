@@ -155,6 +155,137 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         Some(prefix)
     }
 
+    /// Iterate over all entries in the map that cover the given `prefix` (including `prefix` itself
+    /// if that is present in the map). The returned iterator yields `(P, &'a T::Archived)`, with
+    /// reconstructed prefixes `P`.
+    ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
+    /// See [`PrefixMap::cover`] for an example.
+    pub fn cover<'a>(&'a self, prefix: &P) -> Cover<'a, P, T> {
+        Cover::new(self, prefix)
+    }
+
+    /// Iterate over all prefixes in the map that cover the given `prefix` (including `prefix` itself
+    /// if that is present in the map). The returned iterator yields reconstructed prefixes `P`.
+    ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
+    /// See [`PrefixMap::cover_keys`] for an example.
+    pub fn cover_keys<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, T> {
+        CoverKeys(Cover::new(self, prefix))
+    }
+
+    /// Iterate over all values of prefixes in the map that cover the given `prefix` (including
+    /// `prefix` itself if that is present in the map). The returned iterator yields
+    /// `&'a T::Archived`.
+    ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
+    /// See [`PrefixMap::cover_values`] for an example.
+    pub fn cover_values<'a>(&'a self, prefix: &P) -> CoverValues<'a, P, T> {
+        CoverValues(Cover::new(self, prefix))
+    }
+}
+
+/// An iterator that yields all elements in an `ArchivedPrefixMap` that cover (are a superset of) a
+/// given prefix (including the prefix itself if present).
+///
+/// See [`PrefixMap::cover`] for an example.
+pub struct Cover<'a, P: Prefix, T: Archive> {
+    map: &'a ArchivedPrefixMap<P, T>,
+    loc: Loc,
+    depth: u32,
+    lpm_elements: Vec<Loc>,
+    key: P::R,
+    prefix_len: u32,
+}
+
+impl<'a, P: Prefix, T: Archive> Cover<'a, P, T> {
+    pub(super) fn new(map: &'a ArchivedPrefixMap<P, T>, prefix: &P) -> Self {
+        let (key, prefix_len) = key_prefix_len(prefix);
+        let mut s = Self {
+            map,
+            loc: Loc::root(),
+            lpm_elements: Vec::new(),
+            depth: 0,
+            key,
+            prefix_len,
+        };
+        s.populate_lpm_elements();
+        s
+    }
+
+    fn step(&mut self) -> Option<()> {
+        // check if we can still take one step
+        if self.prefix_len < self.depth + K {
+            return None;
+        }
+
+        let child_bit = child_bit(self.depth, self.key);
+        self.loc = self.map.nodes[self.loc.idx()].child_loc(child_bit)?;
+        self.depth += K;
+        self.populate_lpm_elements();
+        Some(())
+    }
+
+    fn populate_lpm_elements(&mut self) {
+        self.lpm_elements = self.map.nodes[self.loc.idx()]
+            .data_lpm_locs(self.depth, self.key, self.prefix_len)
+            .rev()
+            .collect();
+    }
+}
+
+impl<'a, P: Prefix, T: Archive> Iterator for Cover<'a, P, T> {
+    type Item = (P, &'a T::Archived);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // if we already have some elements in the LPM list, pop those.
+            if let Some(data_loc) = self.lpm_elements.pop() {
+                let prefix = reconstruct_prefix(self.key, self.depth, data_loc.bit as usize);
+                return Some((prefix, &self.map.data[data_loc.idx()]));
+            };
+
+            self.step()?
+        }
+    }
+}
+
+/// An iterator that yields all prefixes in an `ArchivedPrefixMap` that cover (are a superset of) a
+/// given prefix (including the prefix itself if present).
+///
+/// See [`PrefixMap::cover_keys`] for an example.
+pub struct CoverKeys<'a, P: Prefix, T: Archive>(Cover<'a, P, T>);
+
+impl<'a, P: Prefix, T: Archive> Iterator for CoverKeys<'a, P, T> {
+    type Item = P;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(p, _)| p)
+    }
+}
+
+/// An iterator that yields all values of prefixes in an `ArchivedPrefixMap` that cover (are a
+/// superset of) a given prefix (including the prefix itself if present).
+///
+/// See [`PrefixMap::cover_values`] for an example.
+pub struct CoverValues<'a, P: Prefix, T: Archive>(Cover<'a, P, T>);
+
+impl<'a, P: Prefix, T: Archive> Iterator for CoverValues<'a, P, T> {
+    type Item = &'a T::Archived;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(_, t)| t)
+    }
+}
+
+// Private functions
+impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// recursive function to compute the address count.
     fn address_count_at(&self, loc: u32, depth: u32) -> Option<P::R> {
         let node = &self.nodes[loc as usize];
@@ -292,17 +423,55 @@ impl ArchivedNodeRepr {
         }
     }
 
+    /// Get the data loc of the longest prefix match in this node (if it exists).
+    /// Returns Loc with bit (bitmap position) and computed slot.
+    #[inline(always)]
+    fn data_lpm_loc<R: Key>(&self, depth: u32, key: R, prefix_len: u32) -> Option<Loc> {
+        let nodes_present = self.data_bitmap & data_lpm_mask(depth, key, prefix_len);
+        if nodes_present == 0 {
+            return None;
+        }
+        let msb_bit = u32::BITS - 1 - nodes_present.leading_zeros();
+        Some(Loc {
+            idx: self.data_idx() + compute_slot(self.data_bitmap(), msb_bit),
+            bit: msb_bit,
+        })
+    }
+
+    /// Get the data loc of the shortest prefix match in this node (if it exists).
+    /// Returns Loc with bit (bitmap position) and computed slot.
+    #[inline(always)]
+    fn data_spm_loc<R: Key>(&self, depth: u32, key: R, prefix_len: u32) -> Option<Loc> {
+        let nodes_present = self.data_bitmap & data_lpm_mask(depth, key, prefix_len);
+        if nodes_present == 0 {
+            return None;
+        }
+        let lsb_bit = nodes_present.trailing_zeros();
+        Some(Loc {
+            idx: self.data_idx() + compute_slot(self.data_bitmap(), lsb_bit),
+            bit: lsb_bit,
+        })
+    }
+
     /// Get an iterator over all indices of data.
     #[inline(always)]
     pub(super) fn data_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
         let bitmap = self.data_bitmap();
-        let offset = self.data_idx();
-        (0..(NUM_CHILDREN as u32))
-            .filter(move |&bit| bitmap & (1 << bit) != 0)
-            .map(move |bit| Loc {
-                idx: offset + compute_slot(bitmap, bit),
-                bit,
-            })
+        bitmap_offset_locs(bitmap, bitmap, self.data_idx())
+    }
+
+    /// Get an iterator over all indices of data that cover (or equal) the prefix, i.e.,
+    /// `(key, prefix_len)`.
+    #[inline(always)]
+    pub(super) fn data_lpm_locs<R: Key>(
+        &self,
+        depth: u32,
+        key: R,
+        prefix_len: u32,
+    ) -> impl DoubleEndedIterator<Item = Loc> + 'static {
+        let bitmap = self.data_bitmap();
+        let filter = bitmap & data_lpm_mask(depth, key, prefix_len);
+        bitmap_offset_locs(bitmap, filter, self.data_idx())
     }
 
     #[inline(always)]
@@ -336,44 +505,22 @@ impl ArchivedNodeRepr {
     #[inline(always)]
     pub(super) fn child_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
         let bitmap = self.child_bitmap();
-        let offset = self.children_idx();
-        (0..(NUM_CHILDREN as u32))
-            .filter(move |&bit| bitmap & (1 << bit) != 0)
-            .map(move |bit| Loc {
-                idx: offset + compute_slot(bitmap, bit),
-                bit,
-            })
+        bitmap_offset_locs(bitmap, bitmap, self.children_idx())
     }
+}
 
-    /// Get the data loc of the longest prefix match in this node (if it exists).
-    /// Returns Loc with bit (bitmap position) and computed slot.
-    #[inline(always)]
-    fn data_lpm_loc<R: Key>(&self, depth: u32, key: R, prefix_len: u32) -> Option<Loc> {
-        let nodes_present = self.data_bitmap & data_lpm_mask(depth, key, prefix_len);
-        if nodes_present == 0 {
-            return None;
-        }
-        let msb_bit = u32::BITS - 1 - nodes_present.leading_zeros();
-        Some(Loc {
-            idx: self.data_idx() + compute_slot(self.data_bitmap(), msb_bit),
-            bit: msb_bit,
+/// `bitmap` is used to compute the popcount (offset), while `filter` is used for filtering.
+fn bitmap_offset_locs(
+    bitmap: u32,
+    filter: u32,
+    offset: u32,
+) -> impl DoubleEndedIterator<Item = Loc> + 'static {
+    (0..(NUM_CHILDREN as u32))
+        .filter(move |&bit| filter & (1 << bit) != 0)
+        .map(move |bit| Loc {
+            idx: offset + compute_slot(bitmap, bit),
+            bit,
         })
-    }
-
-    /// Get the data loc of the shortest prefix match in this node (if it exists).
-    /// Returns Loc with bit (bitmap position) and computed slot.
-    #[inline(always)]
-    fn data_spm_loc<R: Key>(&self, depth: u32, key: R, prefix_len: u32) -> Option<Loc> {
-        let nodes_present = self.data_bitmap & data_lpm_mask(depth, key, prefix_len);
-        if nodes_present == 0 {
-            return None;
-        }
-        let lsb_bit = nodes_present.trailing_zeros();
-        Some(Loc {
-            idx: self.data_idx() + compute_slot(self.data_bitmap(), lsb_bit),
-            bit: lsb_bit,
-        })
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -8,10 +8,10 @@
 //! root).
 
 mod deserialize;
-mod joint;
-mod map;
+pub mod joint;
+pub mod map;
 mod serialize;
-mod set;
+pub mod set;
 #[cfg(test)]
 mod test;
 mod validate;

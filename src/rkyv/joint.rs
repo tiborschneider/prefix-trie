@@ -128,6 +128,50 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
             Right(p) => self.t2.get_spm_prefix(p).map(|p| P::from_p2(&p)),
         }
     }
+
+    /// Iterate over all entries in the map that cover the given `prefix` (including `prefix` itself
+    /// if that is present in the map). The returned iterator yields `(P, &'a T::Archived)`, with
+    /// reconstructed prefixes `P`.
+    ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
+    /// See [`JointPrefixMap::cover`] for an example.
+    pub fn cover<'a>(&'a self, prefix: &P) -> Cover<'a, P, T> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => Cover::P1(self.t1.cover(p)),
+            Right(p) => Cover::P2(self.t2.cover(p)),
+        }
+    }
+
+    /// Iterate over all prefixes in the map that cover the given `prefix` (including `prefix` itself
+    /// if that is present in the map). The returned iterator yields reconstructed prefixes `P`.
+    ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
+    /// See [`JointPrefixMap::cover_keys`] for an example.
+    pub fn cover_keys<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, T> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => CoverKeys::P1(self.t1.cover_keys(p)),
+            Right(p) => CoverKeys::P2(self.t2.cover_keys(p)),
+        }
+    }
+
+    /// Iterate over all values of prefixes in the map that cover the given `prefix` (including
+    /// `prefix` itself if that is present in the map). The returned iterator yields
+    /// `&'a T::Archived`.
+    ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
+    /// See [`JointPrefixMap::cover_values`] for an example.
+    pub fn cover_values<'a>(&'a self, prefix: &P) -> CoverValues<'a, P, T> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => CoverValues::P1(self.t1.cover_values(p)),
+            Right(p) => CoverValues::P2(self.t2.cover_values(p)),
+        }
+    }
 }
 
 /// Archived (immutable) version of a [`JointPrefixSet`].
@@ -214,6 +258,74 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         match prefix.p1_or_p2_ref() {
             Left(p) => self.t1.get_spm(p).as_ref().map(P::from_p1),
             Right(p) => self.t2.get_spm(p).as_ref().map(P::from_p2),
+        }
+    }
+
+    /// Iterate over all prefixes in the set that cover the given `prefix` (including `prefix` itself
+    /// if that is present in the map). The returned iterator yields reconstructed prefixes `P`.
+    ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
+    /// See [`JointPrefixSet::cover`] for an example.
+    pub fn cover<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, ()> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => CoverKeys::P1(self.t1.cover(p)),
+            Right(p) => CoverKeys::P2(self.t2.cover(p)),
+        }
+    }
+}
+
+/// An iterator that yields all items of a `JointPrefixMap` thhat cover a given prefix (including
+/// the prefix itself if present). See `JointPrefixMap::cover` for an example.
+pub enum Cover<'a, P: JointPrefix, T: Archive> {
+    P1(super::map::Cover<'a, P::P1, T>),
+    P2(super::map::Cover<'a, P::P2, T>),
+}
+
+impl<'a, P: JointPrefix, T: Archive> Iterator for Cover<'a, P, T> {
+    type Item = (P, &'a T::Archived);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::P1(c) => c.next().map(|(p, t)| (P::from_p1(&p), t)),
+            Self::P2(c) => c.next().map(|(p, t)| (P::from_p2(&p), t)),
+        }
+    }
+}
+
+/// An iterator that yields all prefixes of a `JointPrefixMap` thhat cover a given prefix (including
+/// the prefix itself if present). See `JointPrefixMap::cover_keys` for an example.
+pub enum CoverKeys<'a, P: JointPrefix, T: Archive> {
+    P1(super::map::CoverKeys<'a, P::P1, T>),
+    P2(super::map::CoverKeys<'a, P::P2, T>),
+}
+
+impl<'a, P: JointPrefix, T: Archive> Iterator for CoverKeys<'a, P, T> {
+    type Item = P;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::P1(c) => c.next().map(|p| P::from_p1(&p)),
+            Self::P2(c) => c.next().map(|p| P::from_p2(&p)),
+        }
+    }
+}
+
+/// An iterator that yields all values of prefixes in a `JointPrefixMap` thhat cover a given prefix
+/// (including the prefix itself if present). See `JointPrefixMap::cover_values` for an example.
+pub enum CoverValues<'a, P: JointPrefix, T: Archive> {
+    P1(super::map::CoverValues<'a, P::P1, T>),
+    P2(super::map::CoverValues<'a, P::P2, T>),
+}
+
+impl<'a, P: JointPrefix, T: Archive> Iterator for CoverValues<'a, P, T> {
+    type Item = &'a T::Archived;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::P1(c) => c.next(),
+            Self::P2(c) => c.next(),
         }
     }
 }

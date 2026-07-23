@@ -2,7 +2,10 @@
 
 use rkyv::{bytecheck::CheckBytes, Portable};
 
-use crate::{rkyv::ArchivedPrefixMap, Prefix};
+use crate::{
+    rkyv::{map::CoverKeys, ArchivedPrefixMap},
+    Prefix,
+};
 
 /// Archived (immutable) version of a [`PrefixSet`].
 ///
@@ -77,5 +80,16 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     #[inline(always)]
     pub fn get_spm(&self, prefix: &P) -> Option<P> {
         self.0.get_spm_prefix(prefix)
+    }
+
+    /// Iterate over all prefixes in the set that cover the given `prefix` (including `prefix` itself
+    /// if that is present in the map). The returned iterator yields reconstructed prefixes `P`.
+    ///
+    /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
+    /// the tree.
+    ///
+    /// See [`PrefixSet::cover`] for an example.
+    pub fn cover<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, ()> {
+        self.0.cover_keys(prefix)
     }
 }
