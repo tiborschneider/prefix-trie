@@ -53,12 +53,15 @@ pub struct ArchivedPrefixMap<P, T: Archive> {
 }
 
 impl<P, T: Archive> ArchivedPrefixMap<P, T> {
-    /// Returns the number of elements stored in `self`.
+    /// Returns the number of entries stored in the map.
+    ///
+    /// This is the number of stored prefixes, not the number of addresses they cover (see
+    /// [`address_count`](Self::address_count)).
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
-    /// Returns `true` if the map contains no elements.
+    /// Returns `true` if the map contains no entries.
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
@@ -105,7 +108,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         self.address_count_at(0, 0)
     }
 
-    /// Get the value of an element by matching exactly on the prefix.
+    /// Get the value stored at exactly `prefix`.
     ///
     /// This mirrors [`PrefixMap::get`], but operates on the archived map and yields a reference to
     /// the archived value.
@@ -141,7 +144,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         Some(&self.data[data_loc.idx()])
     }
 
-    /// Check if a key is present in the datastructure
+    /// Check whether `prefix` is present in the map.
     ///
     /// This mirrors [`PrefixMap::contains_key`], but operates on the archived map.
     ///
@@ -177,8 +180,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         self.nodes[loc.idx()].data_loc(bit).is_some()
     }
 
-    /// Get the value of an element by matching exactly on the prefix, plus the (canonical version)
-    /// of the matched prefix.
+    /// Get the value stored at exactly `prefix`, together with the canonical matched prefix.
     ///
     /// **Warning**: The table does not store the prefix, but it is reconstructed. This means that
     /// any bits in the host part will be truncated.
@@ -217,7 +219,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         Some((prefix, &self.data[data_loc.idx()]))
     }
 
-    /// Get the value of an address or prefix using longest prefix matching.
+    /// Get the longest prefix in the map that contains `prefix`, together with its value.
     ///
     /// This mirrors [`PrefixMap::get_lpm`], but operates on the archived map and yields a reference
     /// to the archived value.
@@ -288,7 +290,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         Some(prefix)
     }
 
-    /// Get the value of an address or prefix using shortest prefix matching.
+    /// Get the shortest prefix in the map that contains `prefix`, together with its value.
     ///
     /// This mirrors [`PrefixMap::get_spm`], but operates on the archived map and yields a reference
     /// to the archived value.
@@ -481,10 +483,9 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         Values(Iter::new(self))
     }
 
-    /// Get an iterator over the node itself and all children. All elements returned have a prefix
-    /// that is contained within `prefix` itself (or are the same). The iterator yields
-    /// `(P, &'a T)`, with reconstructed prefixes `P`. The iterator yields elements in
-    /// lexicographic order.
+    /// Iterate over `prefix` and all more-specific entries contained within it, including `prefix`
+    /// itself if it is present. The iterator yields `(P, &'a T)`, with reconstructed prefixes `P`,
+    /// in lexicographic order.
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
@@ -528,15 +529,16 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         Iter::at_node(self, lex)
     }
 
-    /// Return an iterator starting at the given prefix in lexicographic order. This function can be
-    /// used to implement paginated access without remembering state (of the iterator position).
+    /// Iterate over all entries starting at `prefix`, in lexicographic order.
+    ///
+    /// This enables stateless, cursor-based pagination: pass the last-seen prefix to resume.
     ///
     /// - If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
-    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Prefixes that are contained
-    ///   within (are children of) `prefix` are still yielded.
+    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Entries more specific than
+    ///   `prefix` (its children) are still yielded.
     ///
-    /// If `prefix` is not present in the map, the iterator starts at the first entry that
-    /// would come after `prefix` in lexicographic order, regardless of `inclusive`.
+    /// If `prefix` is not present in the map, the iterator starts at the first entry that would come
+    /// after `prefix` in lexicographic order, regardless of `inclusive`.
     ///
     /// This mirrors [`PrefixMap::iter_from`], but operates on the archived map and yields references
     /// to archived values.
@@ -594,9 +596,8 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         Iter::from_stack(self, stack)
     }
 
-    /// Iterate over all entries in the map that cover the given `prefix` (including `prefix` itself
-    /// if that is present in the map). The returned iterator yields `(P, &'a T::Archived)`, with
-    /// reconstructed prefixes `P`.
+    /// Iterate over all entries in the map that cover `prefix`, including `prefix` itself if it is
+    /// present. The returned iterator yields `(P, &'a T::Archived)`, with reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -638,8 +639,8 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         Cover::new(self, prefix)
     }
 
-    /// Iterate over all prefixes in the map that cover the given `prefix` (including `prefix` itself
-    /// if that is present in the map). The returned iterator yields reconstructed prefixes `P`.
+    /// Iterate over all prefixes in the map that cover `prefix`, including `prefix` itself if it is
+    /// present. The returned iterator yields reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -678,9 +679,8 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         CoverKeys(Cover::new(self, prefix))
     }
 
-    /// Iterate over all values of prefixes in the map that cover the given `prefix` (including
-    /// `prefix` itself if that is present in the map). The returned iterator yields
-    /// `&'a T::Archived`.
+    /// Iterate over the values of all prefixes in the map that cover `prefix`, including `prefix`
+    /// itself if it is present. The returned iterator yields `&'a T::Archived`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.

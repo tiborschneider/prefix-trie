@@ -50,13 +50,16 @@ where
 }
 
 impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
-    /// Returns the number of elements stored in `self`.
+    /// Returns the number of entries stored in the map.
+    ///
+    /// This is the number of stored prefixes, not the number of addresses they cover (see
+    /// [`address_count`](Self::address_count)).
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.t1.len() + self.t2.len()
     }
 
-    /// Returns `true` if the map contains no elements.
+    /// Returns `true` if the map contains no entries.
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.t1.is_empty() && self.t2.is_empty()
@@ -99,7 +102,7 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         (self.t1.address_count(), self.t2.address_count())
     }
 
-    /// Get the value of an element by matching exactly on the prefix.
+    /// Get the value stored at exactly `prefix`.
     ///
     /// This mirrors [`JointPrefixMap::get`], but operates on the archived map and yields a reference
     /// to the archived value.
@@ -135,7 +138,7 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
-    /// Check if a key is present in the datastructure
+    /// Check whether `prefix` is present in the map.
     ///
     /// This mirrors [`JointPrefixMap::contains_key`], but operates on the archived map.
     ///
@@ -169,8 +172,7 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
-    /// Get the value of an element by matching exactly on the prefix, plus the (canonical version)
-    /// of the matched prefix.
+    /// Get the value stored at exactly `prefix`, together with the canonical matched prefix.
     ///
     /// **Warning**: The table does not store the prefix, but it is reconstructed. This means that
     /// any bits in the host part will be truncated.
@@ -207,7 +209,7 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
-    /// Get the value of an address or prefix using longest prefix matching.
+    /// Get the longest prefix in the map that contains `prefix`, together with its value.
     ///
     /// This mirrors [`JointPrefixMap::get_lpm`], but operates on the archived map and yields a
     /// reference to the archived value.
@@ -278,7 +280,7 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
-    /// Get the value of an address or prefix using shortest prefix matching.
+    /// Get the shortest prefix in the map that contains `prefix`, together with its value.
     ///
     /// This mirrors [`JointPrefixMap::get_spm`], but operates on the archived map and yields a
     /// reference to the archived value.
@@ -490,10 +492,9 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
-    /// Get an iterator over the node itself and all children. All elements returned have a prefix
-    /// that is contained within `prefix` itself (or are the same). The iterator yields
-    /// `(P, &'a T)`, with reconstructed prefixes `P`. The iterator yields elements in
-    /// lexicographic order.
+    /// Iterate over `prefix` and all more-specific entries contained within it, including `prefix`
+    /// itself if it is present. The iterator yields `(P, &'a T)`, with reconstructed prefixes `P`,
+    /// in lexicographic order.
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
@@ -542,14 +543,16 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
-    /// Return an iterator starting at the given prefix in lexicographic order. This function can be
-    /// used to implement paginated access without remembering state (of the iterator position).
+    /// Iterate over all entries starting at `prefix`, in lexicographic order.
     ///
-    /// If `inclusive` is `true`, the iterator includes `prefix` (if present).
-    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    /// This enables stateless, cursor-based pagination: pass the last-seen prefix to resume.
     ///
-    /// If `prefix` is not present in the map, the iterator starts at the first prefix that
-    /// would come after it in lexicographic order, regardless of `inclusive`.
+    /// - If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
+    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Entries more specific than
+    ///   `prefix` (its children) are still yielded.
+    ///
+    /// If `prefix` is not present in the map, the iterator starts at the first entry that would come
+    /// after `prefix` in lexicographic order, regardless of `inclusive`.
     ///
     /// This mirrors [`JointPrefixMap::iter_from`], but operates on the archived map and yields
     /// references to archived values.
@@ -595,9 +598,8 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
-    /// Iterate over all entries in the map that cover the given `prefix` (including `prefix` itself
-    /// if that is present in the map). The returned iterator yields `(P, &'a T::Archived)`, with
-    /// reconstructed prefixes `P`.
+    /// Iterate over all entries in the map that cover `prefix`, including `prefix` itself if it is
+    /// present. The returned iterator yields `(P, &'a T::Archived)`, with reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -642,8 +644,8 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
-    /// Iterate over all prefixes in the map that cover the given `prefix` (including `prefix` itself
-    /// if that is present in the map). The returned iterator yields reconstructed prefixes `P`.
+    /// Iterate over all prefixes in the map that cover `prefix`, including `prefix` itself if it is
+    /// present. The returned iterator yields reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -685,9 +687,8 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
-    /// Iterate over all values of prefixes in the map that cover the given `prefix` (including
-    /// `prefix` itself if that is present in the map). The returned iterator yields
-    /// `&'a T::Archived`.
+    /// Iterate over the values of all prefixes in the map that cover `prefix`, including `prefix`
+    /// itself if it is present. The returned iterator yields `&'a T::Archived`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -781,13 +782,16 @@ pub struct ArchivedJointPrefixSet<P: JointPrefix> {
 }
 
 impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
-    /// Returns the number of elements stored in `self`.
+    /// Returns the number of prefixes stored in the set.
+    ///
+    /// This is the number of stored prefixes, not the number of addresses they cover (see
+    /// [`address_count`](Self::address_count)).
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.t1.len() + self.t2.len()
     }
 
-    /// Returns `true` if the map contains no elements.
+    /// Returns `true` if the set contains no prefixes.
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.t1.is_empty() && self.t2.is_empty()
@@ -830,7 +834,7 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         (self.t1.address_count(), self.t2.address_count())
     }
 
-    /// Check whether some (exact) prefix is present in the set, without using longest prefix match.
+    /// Check whether `prefix` is present in the set.
     ///
     /// This mirrors [`JointPrefixSet::contains`], but operates on the archived set.
     ///
@@ -865,7 +869,7 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         }
     }
 
-    /// Get the canonical (reconstructed) prefix by exact prefix matching.
+    /// Get the canonical (reconstructed) prefix that matches `prefix` exactly.
     ///
     /// Prefixes are not stored verbatim. They are reconstructed from the trie position, so host
     /// bits are not preserved.
@@ -1014,9 +1018,9 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         }
     }
 
-    /// Get an iterator over the node itself and all children. All elements returned have a prefix
-    /// that is contained within `prefix` itself (or are the same). The iterator yields
-    /// reconstructed prefixes `P` in lexicographic order.
+    /// Iterate over `prefix` and all more-specific prefixes contained within it, including `prefix`
+    /// itself if it is present. The iterator yields reconstructed prefixes `P` in lexicographic
+    /// order.
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
@@ -1062,14 +1066,16 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         }
     }
 
-    /// Return an iterator starting at the given prefix in lexicographic order. This function can be
-    /// used to implement paginated access without remembering state (of the iterator position).
+    /// Iterate over all prefixes starting at `prefix`, in lexicographic order.
     ///
-    /// If `inclusive` is `true`, the iterator includes `prefix` (if present).
-    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    /// This enables stateless, cursor-based pagination: pass the last-seen prefix to resume.
     ///
-    /// If `prefix` is not present in the set, the iterator starts at the first prefix that
-    /// would come after it in lexicographic order, regardless of `inclusive`.
+    /// - If `inclusive` is `true`, the iterator includes `prefix` (if present).
+    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Prefixes more specific than
+    ///   `prefix` (its children) are still yielded.
+    ///
+    /// If `prefix` is not present in the set, the iterator starts at the first prefix that would
+    /// come after `prefix` in lexicographic order, regardless of `inclusive`.
     ///
     /// This mirrors [`JointPrefixSet::iter_from`], but operates on the archived set.
     ///
@@ -1112,8 +1118,8 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         }
     }
 
-    /// Iterate over all prefixes in the set that cover the given `prefix` (including `prefix` itself
-    /// if that is present in the map). The returned iterator yields reconstructed prefixes `P`.
+    /// Iterate over all prefixes in the set that cover `prefix`, including `prefix` itself if it is
+    /// present. The returned iterator yields reconstructed prefixes `P`.
     ///
     /// The iterator will always yield elements ordered by their prefix length, i.e., their depth in
     /// the tree.
@@ -1262,7 +1268,7 @@ impl<'a, P: JointPrefix, T: Archive> Iterator for Values<'a, P, T> {
     }
 }
 
-/// An iterator that yields all items of a `JointPrefixMap` thhat cover a given prefix (including
+/// An iterator that yields all items of a `JointPrefixMap` that cover a given prefix (including
 /// the prefix itself if present). See `JointPrefixMap::cover` for an example.
 pub enum Cover<'a, P: JointPrefix, T: Archive> {
     /// The iterator corresponding to the first prefix type.
@@ -1282,7 +1288,7 @@ impl<'a, P: JointPrefix, T: Archive> Iterator for Cover<'a, P, T> {
     }
 }
 
-/// An iterator that yields all prefixes of a `JointPrefixMap` thhat cover a given prefix (including
+/// An iterator that yields all prefixes of a `JointPrefixMap` that cover a given prefix (including
 /// the prefix itself if present). See `JointPrefixMap::cover_keys` for an example.
 pub enum CoverKeys<'a, P: JointPrefix, T: Archive> {
     /// The iterator corresponding to the first prefix type.
@@ -1302,7 +1308,7 @@ impl<'a, P: JointPrefix, T: Archive> Iterator for CoverKeys<'a, P, T> {
     }
 }
 
-/// An iterator that yields all values of prefixes in a `JointPrefixMap` thhat cover a given prefix
+/// An iterator that yields all values of prefixes in a `JointPrefixMap` that cover a given prefix
 /// (including the prefix itself if present). See `JointPrefixMap::cover_values` for an example.
 pub enum CoverValues<'a, P: JointPrefix, T: Archive> {
     /// The iterator corresponding to the first prefix type.
