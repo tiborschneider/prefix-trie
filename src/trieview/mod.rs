@@ -209,6 +209,34 @@ pub trait TrieView<'a>: Sized {
     /// always exact. To check emptiness exactly, iterate:
     /// `view.iter().next().is_none()`. Note that [`iter`][Self::iter] takes the view by value;
     /// clone it first if you still need it afterwards.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut map = PrefixMap::new();
+    /// map.insert(net!("10.0.0.0/8"), 1);
+    /// assert!(map.view().is_non_empty());
+    ///
+    /// let empty: PrefixMap<ipnet::Ipv4Net, i32> = PrefixMap::new();
+    /// assert!(!empty.view().is_non_empty());
+    ///
+    /// // Over-approximation: `right` removes `left`'s only entry entirely, but `DifferenceView`
+    /// // still exposes left's child pointer toward it, so `is_non_empty` says `true` even though
+    /// // iterating the difference yields nothing.
+    /// let mut left = PrefixMap::new();
+    /// left.insert(net!("10.1.0.0/16"), 1);
+    /// let mut right = PrefixMap::new();
+    /// right.insert(net!("10.1.0.0/16"), 1);
+    ///
+    /// let diff = left.view().difference(&right);
+    /// assert!(diff.is_non_empty());
+    /// assert!(diff.iter().next().is_none());
+    /// # }
+    /// ```
     #[inline]
     fn is_non_empty(&self) -> bool {
         self.data_bitmap() != 0 || self.child_bitmap() != 0
@@ -343,8 +371,8 @@ pub trait TrieView<'a>: Sized {
 
     /// Navigate to `prefix` and return the view if the sub-trie is non-empty.
     ///
-    /// The emptiness check uses [`is_non_empty`][Self::is_non_empty], which may over-approximate
-    /// on composed views (e.g., [`DifferenceView`]): the returned view may yield no entries when
+    /// The emptiness check may over-approximate on composed views (see
+    /// [`is_non_empty`][Self::is_non_empty]): the returned view may yield no entries when
     /// iterated. `None`, however, always means that the view contains nothing at or below
     /// `prefix`. To check exactly whether the sub-trie contains an entry, iterate the returned
     /// view: `view.iter().next().is_none()`. Note that [`iter`][Self::iter] takes the view by
@@ -576,13 +604,16 @@ pub trait TrieView<'a>: Sized {
         ViewIter::new(self)
     }
 
-    /// Return an iterator starting at the given prefix in lexicographic order.
+    /// Iterate over all entries in this sub-trie starting at `prefix`, in lexicographic order.
     ///
-    /// If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
-    /// If `inclusive` is `false`, the iterator starts after `prefix`.
+    /// This enables stateless, cursor-based pagination: pass the last-seen prefix to resume.
     ///
-    /// If `prefix` is not present, the iterator starts at the first entry that would come
-    /// after `prefix` in lexicographic order, regardless of `inclusive`.
+    /// - If `inclusive` is `true`, the iterator includes the entry at `prefix` (if present).
+    /// - If `inclusive` is `false`, the iterator starts after `prefix`. Entries more specific than
+    ///   `prefix` (its children) are still yielded.
+    ///
+    /// If `prefix` is not present, the iterator starts at the first entry that would come after
+    /// `prefix` in lexicographic order, regardless of `inclusive`.
     ///
     /// ```
     /// # use prefix_trie::{PrefixMap, AsView, TrieView};
