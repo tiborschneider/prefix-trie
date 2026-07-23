@@ -28,6 +28,9 @@ use crate::{
     table::{reconstruct_prefix, K, NUM_CHILDREN, NUM_DATA},
     Prefix,
 };
+// needed for doc references.
+#[allow(unused_imports)]
+use crate::{PrefixMap, PrefixSet};
 
 /// Archived (immutable) version of a [`PrefixMap`].
 ///
@@ -92,7 +95,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
 
     /// Check if a key is present in the datastructure
     ///
-    /// See [`PrefixMap::contains`] for an example.
+    /// See [`PrefixMap::contains_key`] for an example.
     pub fn contains_key(&self, prefix: &P) -> bool {
         let (key, prefix_len) = key_prefix_len(prefix);
         let Some((loc, _)) = self.find_loc(key, prefix_len) else {
@@ -452,6 +455,24 @@ impl<'a, P: Prefix, T: Archive> IntoIterator for &'a ArchivedPrefixMap<P, T> {
     }
 }
 
+impl<P, T> Eq for ArchivedPrefixMap<P, T>
+where
+    T: Archive,
+    T::Archived: Eq,
+{
+}
+
+impl<P, T> PartialEq for ArchivedPrefixMap<P, T>
+where
+    T: Archive,
+    T::Archived: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        // We can directly compare nodes and data due to the canonical representation.
+        self.nodes == other.nodes && self.data == other.data
+    }
+}
+
 // Private functions
 impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// recursive function to compute the address count.
@@ -622,7 +643,7 @@ fn key_prefix_len<P: Prefix>(prefix: &P) -> (P::R, u32) {
 
 /// Rkyv representation of a node with compacted indices
 #[derive(Archive, Serialize, Default)]
-#[rkyv(derive(Debug, Default))]
+#[rkyv(derive(Debug, Default, PartialEq, Eq, Hash))]
 pub(super) struct NodeRepr {
     pub(super) data_bitmap: u32,
     pub(super) child_bitmap: u32,
@@ -850,7 +871,7 @@ impl<'a, R: Key> Iterator for MaskedLexIter<'a, R> {
     }
 }
 
-/// The `rkyv` resolver for [`ArchivedPrefixMap`] and [`ArchivedPrefixSet`].
+/// The `rkyv` resolver for [`ArchivedPrefixMap`] and [`super::ArchivedPrefixSet`].
 pub struct PrefixMapResolver {
     pub(super) nodes: VecResolver,
     pub(super) nodes_len: usize,

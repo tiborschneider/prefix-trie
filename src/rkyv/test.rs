@@ -1,7 +1,9 @@
 use crate::{
     fuzzing::*,
     joint::{JointPrefix, JointPrefixMap, JointPrefixSet},
-    qc, Prefix, PrefixMap, PrefixSet,
+    qc,
+    rkyv::*,
+    Prefix, PrefixMap, PrefixSet,
 };
 use rkyv::{
     access,
@@ -57,6 +59,8 @@ mod map {
 
     use super::*;
     type P = TestPrefix;
+    type Trie = PrefixMap<P, i32>;
+    type Archived = ArchivedPrefixMap<P, i32>;
 
     qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
     fn _serialize_canonical_bytes(ops: Vec<Operation<P, i32>>) -> bool {
@@ -76,6 +80,30 @@ mod map {
         let archived = from_bytes::<PrefixMap<P, i32>, Error>(trie_bytes.as_slice()).unwrap();
 
         trie == archived
+    }
+
+    qc!(eq, _eq);
+    fn _eq(ops: Vec<Operation<P, i32>>) -> bool {
+        let trie = Trie::from_ops(ops);
+
+        let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+        let left = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+        let norm_trie: Trie = trie.iter().map(|(p, t)| (p, *t)).collect();
+        let trie_bytes = to_bytes::<Error>(&norm_trie).unwrap();
+        let right = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+        left == right
+    }
+
+    qc!(debug, _debug);
+    fn _debug(ops: Vec<Operation<P, i32>>) -> bool {
+        let trie = Trie::from_ops(ops);
+
+        let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+        let archived = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+        format!("{trie:?}") == format!("{archived:?}")
     }
 
     rkyv_eq_test!(PrefixMap<P, i32>, len());
@@ -101,6 +129,8 @@ mod map {
 mod set {
     use super::*;
     type P = TestPrefix;
+    type Trie = PrefixSet<P>;
+    type Archived = ArchivedPrefixSet<P>;
 
     qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
     fn _serialize_canonical_bytes(ops: Vec<Operation<P, ()>>) -> bool {
@@ -117,9 +147,33 @@ mod set {
     fn _deserialize_validate(ops: Vec<Operation<P, ()>>) -> bool {
         let trie = <PrefixSet<P>>::from_ops(ops);
         let trie_bytes = to_bytes::<Error>(&trie).unwrap();
-        let archived = from_bytes::<PrefixSet<P>, Error>(trie_bytes.as_slice()).unwrap();
+        let archived = from_bytes::<Trie, Error>(trie_bytes.as_slice()).unwrap();
 
         trie == archived
+    }
+
+    qc!(eq, _eq);
+    fn _eq(ops: Vec<Operation<P, ()>>) -> bool {
+        let trie = Trie::from_ops(ops);
+
+        let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+        let left = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+        let norm_trie: Trie = trie.iter().collect();
+        let trie_bytes = to_bytes::<Error>(&norm_trie).unwrap();
+        let right = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+        left == right
+    }
+
+    qc!(debug, _debug);
+    fn _debug(ops: Vec<Operation<P, ()>>) -> bool {
+        let trie = Trie::from_ops(ops);
+
+        let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+        let archived = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+        format!("{trie:?}") == format!("{archived:?}")
     }
 
     rkyv_eq_test!(PrefixSet<P>, len());
@@ -141,14 +195,18 @@ mod joint {
 
     mod map {
         use super::*;
+        use crate::rkyv::ArchivedJointPrefixMap;
+
+        type Trie = JointPrefixMap<P, i32>;
+        type Archived = ArchivedJointPrefixMap<P, i32>;
 
         qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
         fn _serialize_canonical_bytes(ops: Vec<Operation<P, i32>>) -> bool {
-            let trie = <JointPrefixMap<P, i32>>::from_ops(ops);
+            let trie = Trie::from_ops(ops);
 
             let t1: PrefixMap<_, _> = trie.t1.iter().map(|(p, t)| (p, *t)).collect();
             let t2: PrefixMap<_, _> = trie.t2.iter().map(|(p, t)| (p, *t)).collect();
-            let fresh = JointPrefixMap::<P, _> { t1, t2 };
+            let fresh = Trie { t1, t2 };
 
             let trie_bytes = to_bytes::<Error>(&trie).unwrap();
             let fresh_bytes = to_bytes::<Error>(&fresh).unwrap();
@@ -158,13 +216,36 @@ mod joint {
 
         qc!(deserialize_validate, _deserialize_validate);
         fn _deserialize_validate(ops: Vec<Operation<P, i32>>) -> bool {
-            let trie = <JointPrefixMap<P, i32>>::from_ops(ops);
+            let trie = Trie::from_ops(ops);
 
             let trie_bytes = to_bytes::<Error>(&trie).unwrap();
-            let archived =
-                from_bytes::<JointPrefixMap<P, i32>, Error>(trie_bytes.as_slice()).unwrap();
+            let archived = from_bytes::<Trie, Error>(trie_bytes.as_slice()).unwrap();
 
             trie == archived
+        }
+
+        qc!(eq, _eq);
+        fn _eq(ops: Vec<Operation<P, i32>>) -> bool {
+            let trie = Trie::from_ops(ops);
+
+            let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+            let left = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+            let norm_trie: Trie = trie.iter().map(|(p, t)| (p, *t)).collect();
+            let trie_bytes = to_bytes::<Error>(&norm_trie).unwrap();
+            let right = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+            left == right
+        }
+
+        qc!(debug, _debug);
+        fn _debug(ops: Vec<Operation<P, i32>>) -> bool {
+            let trie = Trie::from_ops(ops);
+
+            let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+            let archived = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+            format!("{trie:?}") == format!("{archived:?}")
         }
 
         rkyv_eq_test!(JointPrefixMap<P, i32>, len());
@@ -190,13 +271,16 @@ mod joint {
     mod set {
         use super::*;
 
+        type Trie = JointPrefixSet<P>;
+        type Archived = ArchivedJointPrefixSet<P>;
+
         qc!(serialize_canonical_bytes, _serialize_canonical_bytes);
         fn _serialize_canonical_bytes(ops: Vec<Operation<P, ()>>) -> bool {
-            let trie = <JointPrefixSet<P>>::from_ops(ops);
+            let trie = Trie::from_ops(ops);
 
             let t1: PrefixSet<_> = trie.t1.iter().collect();
             let t2: PrefixSet<_> = trie.t2.iter().collect();
-            let fresh = JointPrefixSet::<P> { t1, t2 };
+            let fresh = Trie { t1, t2 };
 
             let trie_bytes = to_bytes::<Error>(&trie).unwrap();
             let fresh_bytes = to_bytes::<Error>(&fresh).unwrap();
@@ -206,11 +290,35 @@ mod joint {
 
         qc!(deserialize_validate, _deserialize_validate);
         fn _deserialize_validate(ops: Vec<Operation<P, ()>>) -> bool {
-            let trie = <JointPrefixSet<P>>::from_ops(ops);
+            let trie = Trie::from_ops(ops);
             let trie_bytes = to_bytes::<Error>(&trie).unwrap();
-            let archived = from_bytes::<JointPrefixSet<P>, Error>(trie_bytes.as_slice()).unwrap();
+            let archived = from_bytes::<Trie, Error>(trie_bytes.as_slice()).unwrap();
 
             trie == archived
+        }
+
+        qc!(eq, _eq);
+        fn _eq(ops: Vec<Operation<P, ()>>) -> bool {
+            let trie = Trie::from_ops(ops);
+
+            let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+            let left = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+            let norm_trie: Trie = trie.iter().collect();
+            let trie_bytes = to_bytes::<Error>(&norm_trie).unwrap();
+            let right = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+            left == right
+        }
+
+        qc!(debug, _debug);
+        fn _debug(ops: Vec<Operation<P, ()>>) -> bool {
+            let trie = Trie::from_ops(ops);
+
+            let trie_bytes = to_bytes::<Error>(&trie).unwrap();
+            let archived = access::<Archived, Error>(trie_bytes.as_slice()).unwrap();
+
+            format!("{trie:?}") == format!("{archived:?}")
         }
 
         rkyv_eq_test!(JointPrefixSet<P>, len());

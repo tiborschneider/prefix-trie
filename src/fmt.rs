@@ -14,6 +14,19 @@ impl<P: Prefix + Debug, T: Debug> Debug for PrefixMap<P, T> {
     }
 }
 
+#[cfg(feature = "rkyv")]
+impl<P, T> Debug for crate::rkyv::ArchivedPrefixMap<P, T>
+where
+    P: Prefix + Debug,
+    T: rkyv::Archive,
+    T::Archived: Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        let entries: Vec<(P, &T::Archived)> = self.iter().collect();
+        DebugSubtree { entries: &entries }.fmt(f)
+    }
+}
+
 struct DebugSubtree<'a, P, T> {
     entries: &'a [(P, &'a T)],
 }

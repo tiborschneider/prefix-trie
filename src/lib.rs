@@ -109,7 +109,7 @@ pub(crate) mod fuzzing;
 mod node;
 mod prefix;
 #[cfg(feature = "rkyv")]
-mod rkyv;
+pub mod rkyv;
 #[cfg(feature = "serde")]
 mod serde;
 mod table;

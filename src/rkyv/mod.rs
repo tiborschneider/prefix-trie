@@ -24,17 +24,29 @@ pub use map::{ArchivedPrefixMap, PrefixMapResolver};
 pub use set::ArchivedPrefixSet;
 
 #[derive(Debug)]
+/// Error while serializing an Archive or validating it.
 pub enum ArchiveError {
+    /// The node list does not contain all referenced nodes.
     NodeListTooShort,
+    /// The node list contains unreferenced nodes.
     NodeListTooLong,
+    /// The node list is not stored in BFS order.
     NodeListInconsistent,
+    /// The node list is too long to be serialized or deserialized.
     NodeIndexOverflow,
+    /// The data list does not contain all referenced data.
     DataListTooShort,
+    /// The data list contains unreferenced data
     DataListTooLong,
+    /// The data list is not stored in BFS order.
     DataListInconsistent,
+    /// The data list is too long to be serialized or deserialized.
     DataIndexOverflow,
+    /// The trie contains empty nodes.
     ContainsEmptyNode,
+    /// The root node is missing
     MissingRootNode,
+    /// The tree is deeper than the Prefix type allows.
     DepthExceedsPrefixRepr,
 }
 

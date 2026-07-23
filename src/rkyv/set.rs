@@ -2,6 +2,9 @@
 
 use rkyv::{bytecheck::CheckBytes, Portable};
 
+// needed for doc references.
+#[allow(unused_imports)]
+use crate::PrefixSet;
 use crate::{
     rkyv::{
         map::{CoverKeys, Keys},
@@ -136,5 +139,22 @@ impl<'a, P: Prefix> IntoIterator for &'a ArchivedPrefixSet<P> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl<P> std::fmt::Debug for ArchivedPrefixSet<P>
+where
+    P: Prefix + std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.iter()).finish()
+    }
+}
+
+impl<P> Eq for ArchivedPrefixSet<P> {}
+
+impl<P> PartialEq for ArchivedPrefixSet<P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }

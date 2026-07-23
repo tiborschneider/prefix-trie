@@ -1,10 +1,15 @@
 //! Module containing the archived joint prefix set and map.
 
+use std::fmt::Debug;
+
 use crate::{
     joint::JointPrefix,
     rkyv::{ArchivedPrefixMap, ArchivedPrefixSet, PrefixMapResolver},
     Prefix,
 };
+// needed for doc references.
+#[allow(unused_imports)]
+use crate::joint::{JointPrefixMap, JointPrefixSet};
 use either::Either::{Left, Right};
 use rkyv::{bytecheck::CheckBytes, Archive, Portable};
 
@@ -26,6 +31,22 @@ pub struct ArchivedJointPrefixMap<P: JointPrefix, T: Archive> {
     pub t1: ArchivedPrefixMap<P::P1, T>,
     /// PrefixMap that corresponds to the second prefix type
     pub t2: ArchivedPrefixMap<P::P2, T>,
+}
+
+impl<P, T> Debug for ArchivedJointPrefixMap<P, T>
+where
+    P::P1: Debug,
+    P::P2: Debug,
+    P: JointPrefix + Debug,
+    T: Archive,
+    T::Archived: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JointPrefixMap")
+            .field("t1", &self.t1)
+            .field("t2", &self.t2)
+            .finish()
+    }
 }
 
 impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
@@ -260,6 +281,25 @@ impl<'a, P: JointPrefix, T: Archive> IntoIterator for &'a ArchivedJointPrefixMap
     }
 }
 
+impl<P, T> Eq for ArchivedJointPrefixMap<P, T>
+where
+    P: JointPrefix,
+    T: Archive,
+    T::Archived: PartialEq,
+{
+}
+
+impl<P, T> PartialEq for ArchivedJointPrefixMap<P, T>
+where
+    P: JointPrefix,
+    T: Archive,
+    T::Archived: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.t1 == other.t1 && self.t2 == other.t2
+    }
+}
+
 /// Archived (immutable) version of a [`JointPrefixSet`].
 ///
 /// Any (verified) archived prefix set is canonical and has the following properties:
@@ -364,7 +404,7 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
     ///
     /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
     ///
-    /// See [`PrefixSet::children`] for an example.
+    /// See [`JointPrefixSet::children`] for an example.
     pub fn children<'a>(&'a self, prefix: &P) -> Keys<'a, P, ()> {
         match prefix.p1_or_p2_ref() {
             Left(p) => Keys {
@@ -422,6 +462,28 @@ impl<'a, P: JointPrefix> IntoIterator for &'a ArchivedJointPrefixSet<P> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl<P: JointPrefix> Eq for ArchivedJointPrefixSet<P> {}
+
+impl<P: JointPrefix> PartialEq for ArchivedJointPrefixSet<P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.t1 == other.t1 && self.t2 == other.t2
+    }
+}
+
+impl<P> Debug for ArchivedJointPrefixSet<P>
+where
+    P::P1: Debug,
+    P::P2: Debug,
+    P: JointPrefix + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JointPrefixSet")
+            .field("t1", &self.t1)
+            .field("t2", &self.t2)
+            .finish()
     }
 }
 
@@ -503,7 +565,9 @@ impl<'a, P: JointPrefix, T: Archive> Iterator for Values<'a, P, T> {
 /// An iterator that yields all items of a `JointPrefixMap` thhat cover a given prefix (including
 /// the prefix itself if present). See `JointPrefixMap::cover` for an example.
 pub enum Cover<'a, P: JointPrefix, T: Archive> {
+    /// The iterator corresponding to the first prefix type.
     P1(super::map::Cover<'a, P::P1, T>),
+    /// The iterator corresponding to the second prefix type.
     P2(super::map::Cover<'a, P::P2, T>),
 }
 
@@ -521,7 +585,9 @@ impl<'a, P: JointPrefix, T: Archive> Iterator for Cover<'a, P, T> {
 /// An iterator that yields all prefixes of a `JointPrefixMap` thhat cover a given prefix (including
 /// the prefix itself if present). See `JointPrefixMap::cover_keys` for an example.
 pub enum CoverKeys<'a, P: JointPrefix, T: Archive> {
+    /// The iterator corresponding to the first prefix type.
     P1(super::map::CoverKeys<'a, P::P1, T>),
+    /// The iterator corresponding to the second prefix type.
     P2(super::map::CoverKeys<'a, P::P2, T>),
 }
 
@@ -539,7 +605,9 @@ impl<'a, P: JointPrefix, T: Archive> Iterator for CoverKeys<'a, P, T> {
 /// An iterator that yields all values of prefixes in a `JointPrefixMap` thhat cover a given prefix
 /// (including the prefix itself if present). See `JointPrefixMap::cover_values` for an example.
 pub enum CoverValues<'a, P: JointPrefix, T: Archive> {
+    /// The iterator corresponding to the first prefix type.
     P1(super::map::CoverValues<'a, P::P1, T>),
+    /// The iterator corresponding to the second prefix type.
     P2(super::map::CoverValues<'a, P::P2, T>),
 }
 
