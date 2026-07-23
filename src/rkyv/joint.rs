@@ -162,6 +162,27 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
         }
     }
 
+    /// Get an iterator over the node itself and all children. All elements returned have a prefix
+    /// that is contained within `prefix` itself (or are the same). The iterator yields
+    /// `(P, &'a T)`, with reconstructed prefixes `P`. The iterator yields elements in
+    /// lexicographic order.
+    ///
+    /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
+    ///
+    /// See [`JointPrefixMap::children`] for an example.
+    pub fn children<'a>(&'a self, prefix: &P) -> Iter<'a, P, T> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => Iter {
+                i1: self.t1.children(p),
+                i2: Default::default(),
+            },
+            Right(p) => Iter {
+                i1: Default::default(),
+                i2: self.t2.children(p),
+            },
+        }
+    }
+
     /// Return an iterator starting at the given prefix in lexicographic order. This function can be
     /// used to implement paginated access without remembering state (of the iterator position).
     ///
@@ -227,6 +248,15 @@ impl<P: JointPrefix, T: Archive> ArchivedJointPrefixMap<P, T> {
             Left(p) => CoverValues::P1(self.t1.cover_values(p)),
             Right(p) => CoverValues::P2(self.t2.cover_values(p)),
         }
+    }
+}
+
+impl<'a, P: JointPrefix, T: Archive> IntoIterator for &'a ArchivedJointPrefixMap<P, T> {
+    type Item = (P, &'a T::Archived);
+    type IntoIter = Iter<'a, P, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
@@ -328,6 +358,26 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
         }
     }
 
+    /// Get an iterator over the node itself and all children. All elements returned have a prefix
+    /// that is contained within `prefix` itself (or are the same). The iterator yields
+    /// reconstructed prefixes `P` in lexicographic order.
+    ///
+    /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
+    ///
+    /// See [`PrefixSet::children`] for an example.
+    pub fn children<'a>(&'a self, prefix: &P) -> Keys<'a, P, ()> {
+        match prefix.p1_or_p2_ref() {
+            Left(p) => Keys {
+                i1: self.t1.children(p),
+                i2: Default::default(),
+            },
+            Right(p) => Keys {
+                i1: Default::default(),
+                i2: self.t2.children(p),
+            },
+        }
+    }
+
     /// Return an iterator starting at the given prefix in lexicographic order. This function can be
     /// used to implement paginated access without remembering state (of the iterator position).
     ///
@@ -363,6 +413,15 @@ impl<P: JointPrefix> ArchivedJointPrefixSet<P> {
             Left(p) => CoverKeys::P1(self.t1.cover(p)),
             Right(p) => CoverKeys::P2(self.t2.cover(p)),
         }
+    }
+}
+
+impl<'a, P: JointPrefix> IntoIterator for &'a ArchivedJointPrefixSet<P> {
+    type Item = P;
+    type IntoIter = Keys<'a, P, ()>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 

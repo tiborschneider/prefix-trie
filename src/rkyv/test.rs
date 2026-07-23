@@ -91,6 +91,7 @@ mod map {
     rkyv_eq_test!(PrefixMap<P, i32>, iter().collect());
     rkyv_eq_test!(PrefixMap<P, i32>, keys().collect());
     rkyv_eq_test!(PrefixMap<P, i32>, values().collect());
+    rkyv_eq_test!(PrefixMap<P, i32>, children(P).collect());
     rkyv_eq_test!(PrefixMap<P, i32>, iter_from(P, bool).collect());
     rkyv_eq_test!(PrefixMap<P, i32>, cover(P).collect());
     rkyv_eq_test!(PrefixMap<P, i32>, cover_keys(P).collect());
@@ -129,6 +130,7 @@ mod set {
     rkyv_eq_test!(PrefixSet<P>, get_lpm(P));
     rkyv_eq_test!(PrefixSet<P>, get_spm(P));
     rkyv_eq_test!(PrefixSet<P>, iter().collect());
+    rkyv_eq_test!(PrefixSet<P>, children(P).collect());
     rkyv_eq_test!(PrefixSet<P>, iter_from(P, bool).collect());
     rkyv_eq_test!(PrefixSet<P>, cover(P).collect());
 }
@@ -178,6 +180,7 @@ mod joint {
         rkyv_eq_test!(JointPrefixMap<P, i32>, iter().collect());
         rkyv_eq_test!(JointPrefixMap<P, i32>, keys().collect());
         rkyv_eq_test!(JointPrefixMap<P, i32>, values().collect());
+        rkyv_eq_test!(JointPrefixMap<P, i32>, children(P).collect());
         rkyv_eq_test!(JointPrefixMap<P, i32>, iter_from(P, bool).collect());
         rkyv_eq_test!(JointPrefixMap<P, i32>, cover(P).collect());
         rkyv_eq_test!(JointPrefixMap<P, i32>, cover_keys(P).collect());
@@ -218,6 +221,7 @@ mod joint {
         rkyv_eq_test!(JointPrefixSet<P>, get_lpm(P));
         rkyv_eq_test!(JointPrefixSet<P>, get_spm(P));
         rkyv_eq_test!(JointPrefixSet<P>, iter().collect());
+        rkyv_eq_test!(JointPrefixSet<P>, children(P).collect());
         rkyv_eq_test!(JointPrefixSet<P>, iter_from(P, bool).collect());
         rkyv_eq_test!(JointPrefixSet<P>, cover(P).collect());
     }

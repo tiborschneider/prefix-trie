@@ -431,6 +431,7 @@ where
 }
 
 /// Create a lex iterator that covers the given prefix.
+#[inline(always)]
 pub(crate) fn lpm_children_iter_start<P: Prefix, T>(
     table: &Table<T>,
     prefix: &P,

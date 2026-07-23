@@ -93,6 +93,17 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
         self.0.keys()
     }
 
+    /// Get an iterator over the node itself and all children. All elements returned have a prefix
+    /// that is contained within `prefix` itself (or are the same). The iterator yields
+    /// reconstructed prefixes `P` in lexicographic order.
+    ///
+    /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
+    ///
+    /// See [`PrefixSet::children`] for an example.
+    pub fn children<'a>(&'a self, prefix: &P) -> Keys<'a, P, ()> {
+        Keys(self.0.children(prefix))
+    }
+
     /// Return an iterator starting at the given prefix in lexicographic order. This function can be
     /// used to implement paginated access without remembering state (of the iterator position).
     ///
@@ -116,5 +127,14 @@ impl<P: Prefix> ArchivedPrefixSet<P> {
     /// See [`PrefixSet::cover`] for an example.
     pub fn cover<'a>(&'a self, prefix: &P) -> CoverKeys<'a, P, ()> {
         self.0.cover_keys(prefix)
+    }
+}
+
+impl<'a, P: Prefix> IntoIterator for &'a ArchivedPrefixSet<P> {
+    type Item = P;
+    type IntoIter = Keys<'a, P, ()>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }

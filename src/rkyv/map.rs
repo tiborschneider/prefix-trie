@@ -22,8 +22,8 @@ use crate::{
     aggregate::member_coverage,
     allocator::compute_slot,
     node::{
-        child_bit, data_bit, data_lpm_mask, extend_repr, lex_after_child, lex_after_data, Key,
-        LexElem, DATA_BIT_TO_PREFIX, LEX_ORDER,
+        child_bit, child_cover_mask, data_bit, data_cover_mask, data_lpm_mask, extend_repr,
+        lex_after_child, lex_after_data, Key, LexElem, DATA_BIT_TO_PREFIX, LEX_ORDER,
     },
     table::{reconstruct_prefix, K, NUM_CHILDREN, NUM_DATA},
     Prefix,
@@ -180,6 +180,22 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// See [`PrefixMap::values`] for an example.
     pub fn values(&self) -> Values<'_, P, T> {
         Values(Iter::new(self))
+    }
+
+    /// Get an iterator over the node itself and all children. All elements returned have a prefix
+    /// that is contained within `prefix` itself (or are the same). The iterator yields
+    /// `(P, &'a T)`, with reconstructed prefixes `P`. The iterator yields elements in
+    /// lexicographic order.
+    ///
+    /// **Note**: Consider using [`crate::AsView::view_at`] as an alternative.
+    ///
+    /// See [`PrefixMap::children`] for an example.
+    pub fn children<'a>(&'a self, prefix: &P) -> Iter<'a, P, T> {
+        let (key, prefix_len) = key_prefix_len(prefix);
+        let Some(lex) = self.build_children_lex_iter(key, prefix_len) else {
+            return Default::default();
+        };
+        Iter::at_node(self, lex)
     }
 
     /// Return an iterator starting at the given prefix in lexicographic order. This function can be
@@ -427,6 +443,15 @@ impl<'a, P: Prefix, T: Archive> Iterator for CoverValues<'a, P, T> {
     }
 }
 
+impl<'a, P: Prefix, T: Archive> IntoIterator for &'a ArchivedPrefixMap<P, T> {
+    type Item = (P, &'a T::Archived);
+    type IntoIter = Iter<'a, P, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 // Private functions
 impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
     /// recursive function to compute the address count.
@@ -519,6 +544,20 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
             loc = self.nodes[loc.idx()].child_loc(child_bit)?;
             depth += K;
         }
+    }
+
+    /// Build a lex iter to iterate all children of the prefix.
+    fn build_children_lex_iter(
+        &self,
+        key: P::R,
+        prefix_len: u32,
+    ) -> Option<MaskedLexIter<'_, P::R>> {
+        let (loc, depth) = self.find_loc(key, prefix_len)?;
+        let mut lex = MaskedLexIter::new(loc, depth, key, self);
+        // Only take those that are children of the prefix
+        lex.apply_data_mask(data_cover_mask(depth, key, prefix_len));
+        lex.apply_child_mask(child_cover_mask(depth, key, prefix_len));
+        Some(lex)
     }
 
     /// Build an iterator stack positioned at a given prefix in lex order.
