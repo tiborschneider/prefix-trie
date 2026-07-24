@@ -377,6 +377,80 @@ mod tests {
         .collect()
     }
 
+    // -- UnionItem accessor methods ---------------------------------------------
+
+    #[test]
+    fn union_item_left_and_right() {
+        let left: UnionItem<i32, i32> = UnionItem::Left(1);
+        let right: UnionItem<i32, i32> = UnionItem::Right(2);
+        let both: UnionItem<i32, i32> = UnionItem::Both(1, 2);
+
+        assert_eq!(left.left(), Some(&1));
+        assert_eq!(left.right(), None);
+        assert_eq!(right.left(), None);
+        assert_eq!(right.right(), Some(&2));
+        assert_eq!(both.left(), Some(&1));
+        assert_eq!(both.right(), Some(&2));
+    }
+
+    #[test]
+    fn union_item_both() {
+        let left: UnionItem<i32, i32> = UnionItem::Left(1);
+        let right: UnionItem<i32, i32> = UnionItem::Right(2);
+        let both: UnionItem<i32, i32> = UnionItem::Both(1, 2);
+
+        assert_eq!(left.both(), None);
+        assert_eq!(right.both(), None);
+        assert_eq!(both.both(), Some((&1, &2)));
+    }
+
+    #[test]
+    fn union_item_into_left_and_into_right() {
+        let left: UnionItem<i32, i32> = UnionItem::Left(1);
+        let right: UnionItem<i32, i32> = UnionItem::Right(2);
+        let both: UnionItem<i32, i32> = UnionItem::Both(1, 2);
+
+        assert_eq!(left.clone().into_left(), Some(1));
+        assert_eq!(left.into_right(), None);
+        assert_eq!(right.clone().into_left(), None);
+        assert_eq!(right.into_right(), Some(2));
+        assert_eq!(both.clone().into_left(), Some(1));
+        assert_eq!(both.into_right(), Some(2));
+    }
+
+    #[test]
+    fn union_item_into_both() {
+        let left: UnionItem<i32, i32> = UnionItem::Left(1);
+        let right: UnionItem<i32, i32> = UnionItem::Right(2);
+        let both: UnionItem<i32, i32> = UnionItem::Both(1, 2);
+
+        assert_eq!(left.into_both(), (Some(1), None));
+        assert_eq!(right.into_both(), (None, Some(2)));
+        assert_eq!(both.into_both(), (Some(1), Some(2)));
+    }
+
+    #[test]
+    fn union_item_left_or_right() {
+        let left: UnionItem<i32, i32> = UnionItem::Left(1);
+        let right: UnionItem<i32, i32> = UnionItem::Right(2);
+        let both: UnionItem<i32, i32> = UnionItem::Both(1, 2);
+
+        assert_eq!(left.left_or_right(), 1);
+        assert_eq!(right.left_or_right(), 2);
+        assert_eq!(both.left_or_right(), 1);
+    }
+
+    #[test]
+    fn union_item_right_or_left() {
+        let left: UnionItem<i32, i32> = UnionItem::Left(1);
+        let right: UnionItem<i32, i32> = UnionItem::Right(2);
+        let both: UnionItem<i32, i32> = UnionItem::Both(1, 2);
+
+        assert_eq!(left.right_or_left(), 1);
+        assert_eq!(right.right_or_left(), 2);
+        assert_eq!(both.right_or_left(), 2);
+    }
+
     // -- Same-depth cases ------------------------------------------------------
 
     #[test]
