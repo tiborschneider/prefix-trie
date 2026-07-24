@@ -13,7 +13,6 @@ use rkyv::{
     Archive,
 };
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 unsafe impl<P, T, C> Verify<C> for ArchivedPrefixMap<P, T>
 where
     P: Prefix,
@@ -23,13 +22,13 @@ where
 {
     fn verify(&self, _context: &mut C) -> Result<(), C::Error> {
         if self.nodes.len() > 1 << 32 {
-            Err(C::Error::new(NodeIndexOverflow))?
+            Err(C::Error::new(NodeIndexOverflow))? // coverage-exclude
         }
         if self.data.len() > 1 << 32 {
-            Err(C::Error::new(DataIndexOverflow))?
+            Err(C::Error::new(DataIndexOverflow))? // coverage-exclude
         }
         if self.nodes.is_empty() {
-            Err(C::Error::new(MissingRootNode))?
+            Err(C::Error::new(MissingRootNode))? // coverage-exclude
         }
 
         let mut child_cursor = 1;
@@ -43,7 +42,7 @@ where
             let node = &self.nodes[i];
             // check non-empty (allow empty roots though)
             if i > 0 && node.data_bitmap == 0 && node.child_bitmap == 0 {
-                Err(C::Error::new(ContainsEmptyNode))?
+                Err(C::Error::new(ContainsEmptyNode))? // coverage-exclude
             }
 
             // check the depth count
@@ -51,7 +50,7 @@ where
                 cur_depth += K;
                 next_depth = node.children_idx.to_native();
                 if cur_depth > max_depth {
-                    Err(C::Error::new(DepthExceedsPrefixRepr))?
+                    Err(C::Error::new(DepthExceedsPrefixRepr))? // coverage-exclude
                 }
             }
 
@@ -59,28 +58,28 @@ where
             let max_allowed = u32::min(K - 1, max_depth - cur_depth);
             let denied_mask = DENIED_DEPTH_MASK[max_allowed as usize];
             if node.data_bitmap & denied_mask != 0 {
-                Err(C::Error::new(DepthExceedsPrefixRepr))?
+                Err(C::Error::new(DepthExceedsPrefixRepr))? // coverage-exclude
             }
 
             if node.data_idx != data_cursor {
-                Err(C::Error::new(DataListInconsistent))?
+                Err(C::Error::new(DataListInconsistent))? // coverage-exclude
             }
             data_cursor += node.data_bitmap.to_native().count_ones();
             if node.children_idx != child_cursor {
-                Err(C::Error::new(NodeListInconsistent))?
+                Err(C::Error::new(NodeListInconsistent))? // coverage-exclude
             }
             child_cursor += node.child_bitmap.to_native().count_ones();
         }
 
         match child_cursor.cmp(&(self.nodes.len() as u32)) {
-            Ordering::Less => Err(C::Error::new(NodeListTooShort))?,
+            Ordering::Less => Err(C::Error::new(NodeListTooShort))?, // coverage-exclude
             Ordering::Equal => {}
-            Ordering::Greater => Err(C::Error::new(NodeListTooLong))?,
+            Ordering::Greater => Err(C::Error::new(NodeListTooLong))?, // coverage-exclude
         }
         match data_cursor.cmp(&(self.data.len() as u32)) {
-            Ordering::Less => Err(C::Error::new(DataListTooShort))?,
+            Ordering::Less => Err(C::Error::new(DataListTooShort))?, // coverage-exclude
             Ordering::Equal => {}
-            Ordering::Greater => Err(C::Error::new(DataListTooLong))?,
+            Ordering::Greater => Err(C::Error::new(DataListTooLong))?, // coverage-exclude
         }
 
         Ok(())

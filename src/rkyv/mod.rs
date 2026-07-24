@@ -206,6 +206,8 @@ pub enum ArchiveError {
 }
 
 impl Error for ArchiveError {}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl std::fmt::Display for ArchiveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
