@@ -1,6 +1,6 @@
 [package]
 name = "prefix-trie"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/tiborschneider/prefix-trie"
@@ -64,6 +64,7 @@ smallvec = "1.15.2"
 rkyv = { version = "0.8", optional = true }
 
 [package.metadata.docs.rs]
+all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dev-dependencies]

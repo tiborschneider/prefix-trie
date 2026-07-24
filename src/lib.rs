@@ -1,4 +1,7 @@
+#![allow(clippy::collapsible_else_if)]
+#![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_notable_trait, doc_cfg))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! # Prefix-Trie
 //!
@@ -126,10 +129,6 @@
 //! [`union`](TrieView::union), [`intersection`](TrieView::intersection),
 //! [`difference`](TrieView::difference), and the covering variants) as owned tries. See the
 //! [`rkyv`] module for details and examples.
-
-#![allow(clippy::collapsible_else_if)]
-#![deny(missing_docs)]
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod aggregate;
 mod allocator;
