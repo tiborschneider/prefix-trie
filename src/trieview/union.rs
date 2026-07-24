@@ -615,15 +615,15 @@ mod tests {
         let u = a.view().union(b.view());
 
         // find_exact on a prefix present in both
-        let v = u.clone().find_exact(&p(0x0a000000, 8)).unwrap();
+        let v = u.find_exact(&p(0x0a000000, 8)).unwrap();
         assert!(matches!(v.value().unwrap(), UnionItem::Both(l, r) if *l == 1 && *r == 10));
 
         // find_exact on a prefix present only in a
-        let v2 = u.clone().find_exact(&p(0x0a010000, 16)).unwrap();
+        let v2 = u.find_exact(&p(0x0a010000, 16)).unwrap();
         assert!(matches!(v2.value().unwrap(), UnionItem::Left(l) if *l == 2));
 
         // find_exact on a prefix present only in b
-        let v3 = u.clone().find_exact(&p(0x0b000000, 8)).unwrap();
+        let v3 = u.find_exact(&p(0x0b000000, 8)).unwrap();
         assert!(matches!(v3.value().unwrap(), UnionItem::Right(r) if *r == 20));
 
         // find_exact on a prefix in neither
@@ -636,12 +636,11 @@ mod tests {
         let b = map_from(&[(0x0a010100, 24, 30), (0x0b000000, 8, 40)]);
         let u = a.view().union(b.view());
 
-        let lpm = u.clone().find_lpm(&p(0x0a010180, 25)).unwrap();
+        let lpm = u.find_lpm(&p(0x0a010180, 25)).unwrap();
         assert_eq!(lpm.prefix(), p(0x0a010100, 24));
         assert!(matches!(lpm.value().unwrap(), UnionItem::Right(r) if *r == 30));
 
         let got = u
-            .clone()
             .find_lpm_value(&p(0x0a010180, 25))
             .map(|(prefix, value)| (prefix, value.into_both()));
         assert!(matches!(
@@ -650,7 +649,7 @@ mod tests {
         ));
 
         assert_eq!(
-            u.clone().keys().collect::<Vec<_>>(),
+            u.keys().collect::<Vec<_>>(),
             vec![
                 p(0x0a000000, 8),
                 p(0x0a010000, 16),
@@ -940,7 +939,7 @@ mod tests {
             .union(b.view_at(&p(0x0a020000, 15)).unwrap());
 
         // Full union of the sub-views: 10.2/16(B), 10.3/16(B)
-        let all: Vec<_> = u.clone().iter().map(|(p, _)| p).collect();
+        let all: Vec<_> = u.iter().map(|(p, _)| p).collect();
         assert_eq!(all, vec![p(0x0a020000, 16), p(0x0a030000, 16)]);
 
         // iter_from exclusive from 10.2/16 → only 10.3/16

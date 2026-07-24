@@ -623,7 +623,7 @@ mod tests {
         // a sub-view entries: 10.2/16, 10.3/16
         // diff removes 10.2/16 → only 10.3/16 remains
         let diff = a.view_at(&p(0x0a020000, 15)).unwrap().difference(b.view());
-        let all = collect_diff(diff.clone().iter());
+        let all = collect_diff(diff.iter());
         assert_eq!(all, vec![(p(0x0a030000, 16), 3)]);
 
         // iter_from inclusive at 10.3/16 → same single result

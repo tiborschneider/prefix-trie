@@ -173,6 +173,7 @@ impl Debug for TestPrefix {
 impl Arbitrary for TestPrefix {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
         #[rustfmt::skip]
+        #[allow(clippy::zero_prefixed_literal)]
         let len: u8 = *g
             .choose(&[
                 00,

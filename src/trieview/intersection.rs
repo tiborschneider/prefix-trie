@@ -317,7 +317,7 @@ mod tests {
         let isect = a.view().intersection(b.view()).unwrap();
 
         // find_exact on a prefix present in both
-        let v = isect.clone().find_exact(&p(0x0a010000, 16)).unwrap();
+        let v = isect.find_exact(&p(0x0a010000, 16)).unwrap();
         let (l, r) = v.value().unwrap();
         assert_eq!((*l, *r), (2, 20));
 
@@ -414,11 +414,7 @@ mod tests {
             .intersection(b.view_at(&p(0x0a020000, 15)).unwrap())
             .unwrap();
 
-        let all: Vec<_> = isect
-            .clone()
-            .iter()
-            .map(|(p, (l, r))| (p, (*l, *r)))
-            .collect();
+        let all: Vec<_> = isect.iter().map(|(p, (l, r))| (p, (*l, *r))).collect();
         assert_eq!(
             all,
             vec![(p(0x0a020000, 16), (2, 20)), (p(0x0a030000, 16), (3, 30))]
