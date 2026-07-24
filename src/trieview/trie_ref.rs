@@ -289,6 +289,18 @@ mod tests {
     }
 
     #[test]
+    fn view_find_rejects_targets_outside_root() {
+        let m = map_from(&[(0x0a000000, 8, 1)]);
+        let sub = m.view().find(&p(0x0a000000, 8)).unwrap();
+
+        // `10.0.0.0/7` is a strict ancestor of the view's root: not reachable from it.
+        assert!(sub.find(&p(0x0a000000, 7)).is_none());
+
+        // `11.0.0.0/8` is a sibling of the view's root, not a descendant of it.
+        assert!(sub.find(&p(0x0b000000, 8)).is_none());
+    }
+
+    #[test]
     fn view_prefix_reconstruction() {
         let m = map_from(&[(0x0a010203, 32, 99)]);
         let v = m.view().find_exact(&p(0x0a010203, 32)).unwrap();

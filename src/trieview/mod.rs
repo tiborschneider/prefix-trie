@@ -1133,6 +1133,10 @@ where
     V: TrieView<'a, P = P, T = T>,
     P: Prefix,
 {
+    if !contains_key::<P>(view.key(), view.prefix_len(), target_key, target_len) {
+        return None;
+    }
+
     while target_len >= view.depth() + K {
         let child_bit = child_bit(view.depth(), target_key);
         if (view.child_bitmap() >> child_bit) & 1 == 0 {
@@ -1142,8 +1146,10 @@ where
         // view instance before view is replaced by the returned child.
         view = unsafe { view.get_child(child_bit) };
     }
+
     // SAFETY: view is replaced by the repositioned cursor; the old position is
-    // not used for data access after this point.
+    // not used for data access after this point. `target` is checked above to sit at or
+    // below the view's current position.
     unsafe { view.reposition(target_key, target_len) }
     Some(view)
 }
