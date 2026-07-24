@@ -167,6 +167,67 @@ where
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::{
+        trieview::{AsView, TrieView},
+        Prefix, PrefixMap,
+    };
+
+    type P = (u32, u8);
+
+    fn p(repr: u32, len: u8) -> P {
+        P::from_repr_len(repr, len)
+    }
+
+    fn map_from(entries: &[(u32, u8, i32)]) -> PrefixMap<P, i32> {
+        let mut m = PrefixMap::new();
+        for &(repr, len, val) in entries {
+            m.insert(p(repr, len), val);
+        }
+        m
+    }
+
+    #[test]
+    fn map_view_iter_and_as_view() {
+        let m = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2), (0x0a020000, 16, 3)]);
+        let mapped = m.view().map(|x| *x * 10);
+        // AsView::view() on a MapView returns itself.
+        let got: Vec<(P, i32)> = mapped.view().into_iter().collect();
+        assert_eq!(
+            got,
+            vec![
+                (p(0x0a000000, 8), 10),
+                (p(0x0a010000, 16), 20),
+                (p(0x0a020000, 16), 30),
+            ]
+        );
+    }
+
+    #[test]
+    fn cloned_view_into_iter_and_as_view() {
+        let mut m: PrefixMap<P, Vec<i32>> = PrefixMap::new();
+        m.insert(p(0x0a000000, 8), vec![1]);
+        m.insert(p(0x0a010000, 16), vec![2, 3]);
+
+        let cloned = m.view().cloned();
+        let got: Vec<(P, Vec<i32>)> = cloned.view().into_iter().collect();
+        assert_eq!(
+            got,
+            vec![(p(0x0a000000, 8), vec![1]), (p(0x0a010000, 16), vec![2, 3])]
+        );
+    }
+
+    #[test]
+    fn copied_view_into_iter_and_as_view() {
+        let m = map_from(&[(0x0a000000, 8, 1), (0x0a010000, 16, 2)]);
+
+        let copied = m.view().copied();
+        let got: Vec<(P, i32)> = copied.view().into_iter().collect();
+        assert_eq!(got, vec![(p(0x0a000000, 8), 1), (p(0x0a010000, 16), 2)]);
+    }
+}
+
 /// Copies each value of the wrapped view before yielding them.
 #[derive(Clone, Copy)]
 pub struct CopiedView<'a, V, T> {
