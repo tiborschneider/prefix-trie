@@ -1311,6 +1311,7 @@ impl<T> Table<T> {
     }
 
     #[cfg(feature = "rkyv")]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn from_bfs<E: rkyv::rancor::Source>(
         mut nodes: impl Iterator<Item = (u32, u32)>,
         mut cells: impl Iterator<Item = Result<T, E>>,
@@ -1333,7 +1334,6 @@ impl<T> Table<T> {
                 .take(num_cells)
                 .collect::<Result<Vec<_>, _>>()?;
             if cell_values.len() < num_cells {
-                #[cfg_attr(coverage_nightly, coverage(off))]
                 return Err(E::new(DataListTooShort));
             }
             let data_idx = if !cell_values.is_empty() {
@@ -1369,11 +1369,9 @@ impl<T> Table<T> {
 
         // assert that the iterators are now empty
         if nodes.next().is_some() {
-            #[cfg_attr(coverage_nightly, coverage(off))]
             return Err(E::new(NodeListTooLong));
         }
         if cells.next().is_some() {
-            #[cfg_attr(coverage_nightly, coverage(off))]
             return Err(E::new(DataListTooLong));
         }
 

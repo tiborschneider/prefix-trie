@@ -13,6 +13,7 @@ use rkyv::{
     Archive,
 };
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 unsafe impl<P, T, C> Verify<C> for ArchivedPrefixMap<P, T>
 where
     P: Prefix,
@@ -22,15 +23,12 @@ where
 {
     fn verify(&self, _context: &mut C) -> Result<(), C::Error> {
         if self.nodes.len() > 1 << 32 {
-            #[cfg_attr(coverage_nightly, coverage(off))]
             Err(C::Error::new(NodeIndexOverflow))?
         }
         if self.data.len() > 1 << 32 {
-            #[cfg_attr(coverage_nightly, coverage(off))]
             Err(C::Error::new(DataIndexOverflow))?
         }
         if self.nodes.is_empty() {
-            #[cfg_attr(coverage_nightly, coverage(off))]
             Err(C::Error::new(MissingRootNode))?
         }
 
@@ -45,7 +43,6 @@ where
             let node = &self.nodes[i];
             // check non-empty (allow empty roots though)
             if i > 0 && node.data_bitmap == 0 && node.child_bitmap == 0 {
-                #[cfg_attr(coverage_nightly, coverage(off))]
                 Err(C::Error::new(ContainsEmptyNode))?
             }
 
@@ -54,7 +51,6 @@ where
                 cur_depth += K;
                 next_depth = node.children_idx.to_native();
                 if cur_depth > max_depth {
-                    #[cfg_attr(coverage_nightly, coverage(off))]
                     Err(C::Error::new(DepthExceedsPrefixRepr))?
                 }
             }
@@ -63,29 +59,24 @@ where
             let max_allowed = u32::min(K - 1, max_depth - cur_depth);
             let denied_mask = DENIED_DEPTH_MASK[max_allowed as usize];
             if node.data_bitmap & denied_mask != 0 {
-                #[cfg_attr(coverage_nightly, coverage(off))]
                 Err(C::Error::new(DepthExceedsPrefixRepr))?
             }
 
             if node.data_idx != data_cursor {
-                #[cfg_attr(coverage_nightly, coverage(off))]
                 Err(C::Error::new(DataListInconsistent))?
             }
             data_cursor += node.data_bitmap.to_native().count_ones();
             if node.children_idx != child_cursor {
-                #[cfg_attr(coverage_nightly, coverage(off))]
                 Err(C::Error::new(NodeListInconsistent))?
             }
             child_cursor += node.child_bitmap.to_native().count_ones();
         }
 
-        #[cfg_attr(coverage_nightly, coverage(off))]
         match child_cursor.cmp(&(self.nodes.len() as u32)) {
             Ordering::Less => Err(C::Error::new(NodeListTooShort))?,
             Ordering::Equal => {}
             Ordering::Greater => Err(C::Error::new(NodeListTooLong))?,
         }
-        #[cfg_attr(coverage_nightly, coverage(off))]
         match data_cursor.cmp(&(self.data.len() as u32)) {
             Ordering::Less => Err(C::Error::new(DataListTooShort))?,
             Ordering::Equal => {}
