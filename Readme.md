@@ -104,6 +104,22 @@ There are three removal styles:
   place, which can make reinserting the same prefix cheaper but may leave empty internal nodes for
   future traversals to pass through.
 
+## Zero-Copy Archives with `rkyv`
+
+With the `rkyv` feature enabled, every map and set in this crate can be serialized into a byte
+buffer and read back without a deserialization step. Each owned collection has an archived
+counterpart: `ArchivedPrefixMap`, `ArchivedPrefixSet`, `ArchivedJointPrefixMap`, and
+`ArchivedJointPrefixSet`. These types are validated once and then queried directly out of the
+bytes. The archived types expose (or reimplement) all immutable access methods of their owned
+counterparts, such as `get`, `get_lpm`, `get_spm`, `contains_key`, and the various iterators.
+
+Archives integrate with the rest of the crate through the same `TrieView` infrastructure used by
+the owned collections. `&ArchivedPrefixMap` and `&ArchivedPrefixSet` implement `AsView`, so any
+function written against a `TrieView` accepts an archive just as it accepts a borrowed `PrefixMap`
+or `PrefixSet`, and archives participate in the same set operations (`union`, `intersection`,
+`difference`, and the covering variants) as owned tries. See the `rkyv` module docs for details
+and examples.
+
 ## Comparison with related projects
 
 [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap) 
