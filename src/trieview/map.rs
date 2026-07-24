@@ -88,3 +88,159 @@ where
         self.iter()
     }
 }
+
+/// Clones each value of the wrapped view before yielding them.
+#[derive(Clone, Copy)]
+pub struct ClonedView<'a, V, T> {
+    pub(super) view: V,
+    pub(super) _marker: PhantomData<&'a T>,
+}
+
+impl<'a, 'b, V, T> TrieView<'a> for ClonedView<'a, V, T>
+where
+    V: TrieView<'a, T = &'b T>,
+    T: Clone + 'b,
+{
+    type P = V::P;
+    type T = T;
+
+    fn depth(&self) -> u32 {
+        self.view.depth()
+    }
+
+    fn key(&self) -> <Self::P as crate::Prefix>::R {
+        self.view.key()
+    }
+
+    fn prefix_len(&self) -> u32 {
+        self.view.prefix_len()
+    }
+
+    fn data_bitmap(&self) -> u32 {
+        self.view.data_bitmap()
+    }
+
+    fn child_bitmap(&self) -> u32 {
+        self.view.child_bitmap()
+    }
+
+    unsafe fn get_data(&mut self, data_bit: u32) -> Self::T {
+        let inner = self.view.get_data(data_bit);
+        inner.clone()
+    }
+
+    unsafe fn get_child(&mut self, child_bit: u32) -> Self {
+        Self {
+            view: self.view.get_child(child_bit),
+            _marker: PhantomData,
+        }
+    }
+
+    unsafe fn reposition(&mut self, key: <Self::P as crate::Prefix>::R, prefix_len: u32) {
+        self.view.reposition(key, prefix_len)
+    }
+}
+
+impl<'a, 'b, V, T> AsView<'a> for ClonedView<'a, V, T>
+where
+    V: TrieView<'a, T = &'b T>,
+    T: Clone + 'b,
+{
+    type P = V::P;
+    type View = Self;
+
+    fn view(self) -> Self {
+        self
+    }
+}
+
+impl<'a, 'b, V, T> IntoIterator for ClonedView<'a, V, T>
+where
+    V: TrieView<'a, T = &'b T>,
+    T: Clone + 'b,
+{
+    type Item = (V::P, T);
+    type IntoIter = ViewIter<'a, Self>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+/// Copies each value of the wrapped view before yielding them.
+#[derive(Clone, Copy)]
+pub struct CopiedView<'a, V, T> {
+    pub(super) view: V,
+    pub(super) _marker: PhantomData<&'a T>,
+}
+
+impl<'a, 'b, V, T> TrieView<'a> for CopiedView<'a, V, T>
+where
+    V: TrieView<'a, T = &'b T>,
+    T: Copy + 'b,
+{
+    type P = V::P;
+    type T = T;
+
+    fn depth(&self) -> u32 {
+        self.view.depth()
+    }
+
+    fn key(&self) -> <Self::P as crate::Prefix>::R {
+        self.view.key()
+    }
+
+    fn prefix_len(&self) -> u32 {
+        self.view.prefix_len()
+    }
+
+    fn data_bitmap(&self) -> u32 {
+        self.view.data_bitmap()
+    }
+
+    fn child_bitmap(&self) -> u32 {
+        self.view.child_bitmap()
+    }
+
+    unsafe fn get_data(&mut self, data_bit: u32) -> Self::T {
+        let inner = self.view.get_data(data_bit);
+        *inner
+    }
+
+    unsafe fn get_child(&mut self, child_bit: u32) -> Self {
+        Self {
+            view: self.view.get_child(child_bit),
+            _marker: PhantomData,
+        }
+    }
+
+    unsafe fn reposition(&mut self, key: <Self::P as crate::Prefix>::R, prefix_len: u32) {
+        self.view.reposition(key, prefix_len)
+    }
+}
+
+impl<'a, 'b, V, T> AsView<'a> for CopiedView<'a, V, T>
+where
+    V: TrieView<'a, T = &'b T>,
+    T: Copy + 'b,
+{
+    type P = V::P;
+    type View = Self;
+
+    fn view(self) -> Self {
+        self
+    }
+}
+
+impl<'a, 'b, V, T> IntoIterator for CopiedView<'a, V, T>
+where
+    V: TrieView<'a, T = &'b T>,
+    T: Copy + 'b,
+{
+    type Item = (V::P, T);
+    type IntoIter = ViewIter<'a, Self>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}

@@ -99,7 +99,7 @@ pub use covering_union::{CoveringUnionItem, CoveringUnionView};
 pub use difference::DifferenceView;
 pub use intersection::IntersectionView;
 pub use iter::{ViewIter, ViewKeys, ViewValues};
-pub use map::MapView;
+pub use map::{ClonedView, CopiedView, MapView};
 pub use trie_ref::TrieRef;
 pub use trie_ref_mut::TrieRefMut;
 pub use union::{UnionItem, UnionView};
@@ -717,6 +717,65 @@ pub trait TrieView<'a>: Sized {
         MapView {
             view: self,
             f,
+            _marker: Default::default(),
+        }
+    }
+
+    /// Creates a view which clones each value it yeilds.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut data = PrefixMap::new();
+    /// data.insert(net!("192.168.0.0/20"), vec![1]);
+    /// data.insert(net!("192.168.0.0/22"), vec![2]);
+    /// data.insert(net!("192.168.0.0/24"), vec![3]);
+    ///
+    /// assert_eq!(
+    ///     data.view().cloned().values().collect::<Vec<_>>(),
+    ///     vec![vec![1], vec![2], vec![3]]
+    /// );
+    /// # }
+    /// ```
+    fn cloned<'b, T>(self) -> ClonedView<'a, Self, T>
+    where
+        Self: TrieView<'a, T = &'b T>,
+        T: 'b + Clone,
+    {
+        ClonedView {
+            view: self,
+            _marker: Default::default(),
+        }
+    }
+
+    /// Creates a view which copies each value it yeilds.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut data = PrefixMap::new();
+    /// data.insert(net!("192.168.0.0/20"), 1);
+    /// data.insert(net!("192.168.0.0/22"), 2);
+    /// data.insert(net!("192.168.0.0/24"), 3);
+    ///
+    /// assert_eq!(data.view().copied().values().collect::<Vec<_>>(), vec![1, 2, 3]);
+    /// # }
+    /// ```
+    fn copied<'b, T>(self) -> CopiedView<'a, Self, T>
+    where
+        Self: TrieView<'a, T = &'b T>,
+        T: 'b + Copy,
+    {
+        CopiedView {
+            view: self,
             _marker: Default::default(),
         }
     }

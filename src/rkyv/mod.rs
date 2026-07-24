@@ -114,7 +114,7 @@
 //!     .view()
 //!     .map(|v| v.to_native())
 //!     .difference(&removals)
-//!     .union(updates.view().map(|v| *v))
+//!     .union(updates.view().copied())
 //!     .map(|item| item.right_or_left());
 //!
 //! // Now, you can use view access methods directly.
