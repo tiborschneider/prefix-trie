@@ -34,10 +34,10 @@ jobs:
         --ignore-not-existing --ignore "examples" --ignore "/*" --ignore "src/*test.rs" --ignore "src/fuzzing/*"
         --excl-line "coverage-exclude"
         --excl-start "coverage-exclude-start"
-        --excl-end "coverage-exclude-end"
+        --excl-stop "coverage-exclude-stop"
         --excl-br-line "coverage-exclude"
         --excl-br-start "coverage-exclude-start"
-        --excl-br-end "coverage-exclude-end"
+        --excl-br-stop "coverage-exclude-stop"
     - name: Upload coverage
       uses: codecov/codecov-action@v5
       env:
