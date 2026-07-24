@@ -47,7 +47,7 @@ use super::{iter::ViewIter, TrieView};
 /// computed as `left_bitmap & !cov_bitmap`. The special case where an ancestor R covers
 /// the entire subtrie is represented by `cov_data = 0x7FFFFFFF, cov_child = 0xFFFFFFFF`
 /// (all 31 data bits and all 32 child bits), which drives both bitmaps to zero.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct CoveringDifferenceView<'a, L, R> {
     left: L,
     right: Option<R>,

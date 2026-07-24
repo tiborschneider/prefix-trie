@@ -90,6 +90,22 @@ impl<L, R> UnionItem<L, R> {
     }
 }
 
+impl<T> UnionItem<T, T> {
+    /// Get the left value if present, or the right one otherwise.
+    pub fn left_or_right(self) -> T {
+        match self {
+            UnionItem::Left(t) | UnionItem::Right(t) | UnionItem::Both(t, _) => t,
+        }
+    }
+
+    /// Get the right value if present, or the left one otherwise.
+    pub fn right_or_left(self) -> T {
+        match self {
+            UnionItem::Left(t) | UnionItem::Right(t) | UnionItem::Both(_, t) => t,
+        }
+    }
+}
+
 /// An immutable view over the union of two [`TrieView`]s.
 ///
 /// Returned by [`TrieView::union`]. The two views are **not** aligned at
@@ -100,7 +116,7 @@ impl<L, R> UnionItem<L, R> {
 /// Yields every prefix present in **either** sub-trie in lexicographic order,
 /// with [`UnionItem::Left`], [`UnionItem::Right`], or [`UnionItem::Both`] indicating
 /// membership.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct UnionView<'a, L, R>
 where
     L: TrieView<'a>,

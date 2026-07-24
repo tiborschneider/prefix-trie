@@ -27,7 +27,7 @@ use super::{
 /// Prefixes present in both views yield [`Both`][CoveringUnionItem::Both]. Prefixes present on
 /// only one side yield that side's value plus the longest prefix match from the opposite side,
 /// if such a prefix exists inside the opposite input view.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoveringUnionItem<P, L, R> {
     /// Present only in the left view.
     Left {

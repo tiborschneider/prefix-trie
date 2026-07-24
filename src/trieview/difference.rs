@@ -33,7 +33,7 @@ use super::TrieView;
 /// The right side is `Option<R>` internally: once the traversal enters a subtree
 /// that the right view does not cover, the right side becomes `None` and all
 /// remaining left entries in that subtree are yielded unconditionally.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct DifferenceView<'a, L, R> {
     left: L,
     right: Option<R>,

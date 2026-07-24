@@ -20,7 +20,7 @@ use super::{TrieView, ViewIter};
 ///
 /// A live `IntersectionView` can be iterated directly (implements [`IntoIterator`])
 /// or composed with further set operations before iterating.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct IntersectionView<'a, L, R> {
     left: L,
     right: R,

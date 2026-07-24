@@ -89,6 +89,7 @@ pub mod difference;
 mod equality;
 pub mod intersection;
 pub(crate) mod iter;
+mod map;
 pub mod trie_ref;
 pub mod trie_ref_mut;
 pub mod union;
@@ -98,6 +99,7 @@ pub use covering_union::{CoveringUnionItem, CoveringUnionView};
 pub use difference::DifferenceView;
 pub use intersection::IntersectionView;
 pub use iter::{ViewIter, ViewKeys, ViewValues};
+pub use map::MapView;
 pub use trie_ref::TrieRef;
 pub use trie_ref_mut::TrieRefMut;
 pub use union::{UnionItem, UnionView};
@@ -684,6 +686,39 @@ pub trait TrieView<'a>: Sized {
     #[inline]
     fn values(self) -> ViewValues<'a, Self> {
         ViewValues::new(self)
+    }
+
+    /// Takes a closure and creates a view which calls that closure for each value it yields.
+    ///
+    /// **Warning**: The closure `f` may not applied to all elements of the view if it is further
+    /// combined with others.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut data = PrefixMap::new();
+    /// data.insert(net!("192.168.0.0/20"), 1);
+    /// data.insert(net!("192.168.0.0/22"), 2);
+    /// data.insert(net!("192.168.0.0/24"), 3);
+    ///
+    /// let mapped = data.view().map(|x| *x * 2);
+    /// assert_eq!(mapped.values().collect::<Vec<_>>(), vec![2, 4, 6]);
+    /// # }
+    /// ```
+    fn map<F, U>(self, f: F) -> MapView<'a, Self, F, U>
+    where
+        F: Fn(Self::T) -> U,
+        U: 'a,
+    {
+        MapView {
+            view: self,
+            f,
+            _marker: Default::default(),
+        }
     }
 
     /// Return the intersection of `self` and `other` as a view, or `None` if disjoint.
