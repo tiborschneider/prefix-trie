@@ -109,9 +109,18 @@ impl<'a, P: JointPrefix, T> Iterator for Iter<'a, P, T> {
 }
 
 /// An iterator over all prefixes of a [`JointPrefixMap`] in lexicographic order.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Keys<'a, P: JointPrefix, T> {
     pub(crate) inner: Iter<'a, P, T>,
+}
+
+impl<P: JointPrefix, T> Default for Keys<'_, P, T> {
+    /// The default iterator is empty.
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
+        }
+    }
 }
 
 impl<P: JointPrefix, T> Iterator for Keys<'_, P, T> {
@@ -124,9 +133,18 @@ impl<P: JointPrefix, T> Iterator for Keys<'_, P, T> {
 
 /// An iterator over all values of a [`JointPrefixMap`] in lexicographic order of their associated
 /// prefixes.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Values<'a, P: JointPrefix, T> {
     pub(crate) inner: Iter<'a, P, T>,
+}
+
+impl<P: JointPrefix, T> Default for Values<'_, P, T> {
+    /// The default iterator is empty.
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
+        }
+    }
 }
 
 impl<'a, P: JointPrefix, T> Iterator for Values<'a, P, T> {
@@ -270,13 +288,21 @@ impl<'a, P: JointPrefix, T> Iterator for IterMut<'a, P, T> {
 
 /// A mutable iterator over values of [`JointPrefixMap`]. This iterator yields elements in
 /// lexicographic order.
-#[derive(Default)]
 pub struct ValuesMut<'a, P: JointPrefix, T> {
     // # Safety
     // You must ensure that there only ever exists one such iterator for each tree. You may create
     // multiple such iterators for the same tree if you start with distinct starting nodes! This
     // ensures that any one iteration will never yield elements of the other iterator.
     pub(crate) inner: IterMut<'a, P, T>,
+}
+
+impl<P: JointPrefix, T> Default for ValuesMut<'_, P, T> {
+    /// The default iterator is empty.
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
+        }
+    }
 }
 
 impl<'a, P: JointPrefix, T> Iterator for ValuesMut<'a, P, T> {

@@ -710,3 +710,15 @@ impl<'a, P: Prefix> AsView<'a> for &'a mut PrefixSet<P> {
         TrieRefMut::new_root(self.0.table(), raw)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type P = (u32, u8);
+
+    #[test]
+    fn test_default_iter_is_empty() {
+        assert_eq!(Iter::<P>::default().count(), 0);
+    }
+}

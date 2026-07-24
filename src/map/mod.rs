@@ -1517,6 +1517,15 @@ mod tests {
     }
 
     #[test]
+    fn test_default_iterators_are_empty() {
+        assert_eq!(Iter::<P, i32>::default().count(), 0);
+        assert_eq!(Keys::<P, i32>::default().count(), 0);
+        assert_eq!(Values::<P, i32>::default().count(), 0);
+        assert_eq!(IterMut::<P, i32>::default().count(), 0);
+        assert_eq!(ValuesMut::<P, i32>::default().count(), 0);
+    }
+
+    #[test]
     fn test_remove_children_leak() {
         // Reproduce the quickcheck minimal failing case exactly
         use crate::fuzzing::TestPrefix;

@@ -556,3 +556,18 @@ mod iter_from {
     #[instantiate_tests(<::cidr::IpCidr>)]
     mod cidr {}
 }
+
+mod default_iterators {
+    use super::*;
+
+    type P = either::Either<(u32, u8), (u128, u8)>;
+
+    #[test]
+    fn test_default_iterators_are_empty() {
+        assert_eq!(Iter::<P, i32>::default().count(), 0);
+        assert_eq!(Keys::<P, i32>::default().count(), 0);
+        assert_eq!(Values::<P, i32>::default().count(), 0);
+        assert_eq!(IterMut::<P, i32>::default().count(), 0);
+        assert_eq!(ValuesMut::<P, i32>::default().count(), 0);
+    }
+}

@@ -183,6 +183,12 @@ mod set {
     mod cidr {}
 }
 
+#[test]
+fn set_iter_default_is_empty() {
+    type P = either::Either<(u32, u8), (u128, u8)>;
+    assert_eq!(crate::joint::set::Iter::<P>::default().count(), 0);
+}
+
 #[generic_tests::define]
 mod map {
     use super::*;
