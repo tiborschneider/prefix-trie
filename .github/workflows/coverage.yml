@@ -31,13 +31,13 @@ jobs:
     - name: Generate coverage report
       run: >
         grcov . --binary-path ./target/debug/ -s . -t lcov --branch -o lcov.info
-          --ignore-not-existing --ignore "examples" --ignore "/*" --ignore "src/*test.rs" --ignore "src/fuzzing/*" 
-          --excl-line "coverage-exclude"
-          --excl-start "coverage-exclude-start"
-          --excl-end "coverage-exclude-end"
-          --excl-br-line "coverage-exclude"
-          --excl-br-start "coverage-exclude-start"
-          --excl-br-end "coverage-exclude-end"
+        --ignore-not-existing --ignore "examples" --ignore "/*" --ignore "src/*test.rs" --ignore "src/fuzzing/*"
+        --excl-line "coverage-exclude"
+        --excl-start "coverage-exclude-start"
+        --excl-end "coverage-exclude-end"
+        --excl-br-line "coverage-exclude"
+        --excl-br-start "coverage-exclude-start"
+        --excl-br-end "coverage-exclude-end"
     - name: Upload coverage
       uses: codecov/codecov-action@v5
       env:
