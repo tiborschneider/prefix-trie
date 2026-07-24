@@ -8,8 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-Cinstrument-coverage"
-  RUSTDOCFLAGS: "-Cinstrument-coverage -Z unstable-options --persist-doctests target/debug/doctestbins"
+  RUSTFLAGS: "-Cinstrument-coverage --cfg=coverage_nightly"
+  RUSTDOCFLAGS: "-Cinstrument-coverage --cfg=coverage_nightly -Z unstable-options --persist-doctests target/debug/doctestbins"
 
 jobs:
   build:

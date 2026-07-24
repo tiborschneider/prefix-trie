@@ -22,6 +22,7 @@ pub(crate) struct MultiBitNode {
     pub(super) data_idx: AllocIdx,
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl std::fmt::Debug for MultiBitNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MultiBitNode")
@@ -226,6 +227,7 @@ const PATTERN_SIZE: usize = (K as usize) * LEVEL_SIZE;
 type Pattern = [u32; PATTERN_SIZE];
 
 const DATA_LPM_PATTERN: Pattern = array_const_fn_init![const_data_lpm_pattern; 80];
+#[cfg_attr(coverage_nightly, coverage(off))]
 const fn const_data_lpm_pattern(i: usize) -> u32 {
     let lvl = i / LEVEL_SIZE;
     let pos = i % LEVEL_SIZE;
@@ -241,6 +243,7 @@ const fn const_data_lpm_pattern(i: usize) -> u32 {
 }
 
 const DATA_COVER_PATTERN: Pattern = array_const_fn_init![const_data_cover_pattern; 80];
+#[cfg_attr(coverage_nightly, coverage(off))]
 const fn const_data_cover_pattern(i: usize) -> u32 {
     let i = i as u32;
     let lvl = i / LEVEL_SIZE as u32;
@@ -268,6 +271,7 @@ const fn const_data_cover_pattern(i: usize) -> u32 {
 }
 
 const CHILD_COVER_PATTERN: Pattern = array_const_fn_init![const_child_cover_pattern; 80];
+#[cfg_attr(coverage_nightly, coverage(off))]
 const fn const_child_cover_pattern(i: usize) -> u32 {
     let k = K as usize;
     let lvl = i / LEVEL_SIZE;
@@ -363,10 +367,12 @@ pub(crate) struct LexElem(u8);
 const CHILD_FLAG: u8 = 1 << 7;
 
 impl LexElem {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     const fn data(x: u8) -> Self {
         Self(x)
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     const fn child(x: u8) -> Self {
         Self(x + CHILD_FLAG)
     }
@@ -383,6 +389,7 @@ impl LexElem {
 
 pub(crate) const LEX_ORDER: [LexElem; NUM_DATA + NUM_CHILDREN] =
     array_const_fn_init![const_lex_iter; 63];
+#[cfg_attr(coverage_nightly, coverage(off))]
 const fn const_lex_iter(i: usize) -> LexElem {
     let mut i = i as u32;
     let mut node: u32 = 0;

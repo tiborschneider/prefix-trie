@@ -100,6 +100,7 @@
 
 #![allow(clippy::collapsible_else_if)]
 #![deny(missing_docs)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod aggregate;
 mod allocator;
