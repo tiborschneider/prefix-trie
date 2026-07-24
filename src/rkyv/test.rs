@@ -126,6 +126,24 @@ mod map {
     rkyv_eq_test!(PrefixMap<P, i32>, cover(P).collect());
     rkyv_eq_test!(PrefixMap<P, i32>, cover_keys(P).collect());
     rkyv_eq_test!(PrefixMap<P, i32>, cover_values(P).collect());
+
+    #[test]
+    fn iter_default_is_empty() {
+        let it: crate::rkyv::map::Iter<P, i32> = Default::default();
+        assert_eq!(it.count(), 0);
+    }
+
+    #[test]
+    fn keys_default_is_empty() {
+        let it: crate::rkyv::map::Keys<P, i32> = Default::default();
+        assert_eq!(it.count(), 0);
+    }
+
+    #[test]
+    fn values_default_is_empty() {
+        let it: crate::rkyv::map::Values<P, i32> = Default::default();
+        assert_eq!(it.count(), 0);
+    }
 }
 
 mod set {
@@ -272,6 +290,24 @@ mod joint {
         rkyv_eq_test!(JointPrefixMap<P, i32>, cover_values(P).collect());
         rkyv_eq_test!(JointPrefixMap<P, i32>, is_covered(P));
         rkyv_eq_test!(JointPrefixMap<P, i32>, is_covered_in_aggregate(P));
+
+        #[test]
+        fn iter_default_is_empty() {
+            let it: crate::rkyv::joint::Iter<P, i32> = Default::default();
+            assert_eq!(it.count(), 0);
+        }
+
+        #[test]
+        fn keys_default_is_empty() {
+            let it: crate::rkyv::joint::Keys<P, i32> = Default::default();
+            assert_eq!(it.count(), 0);
+        }
+
+        #[test]
+        fn values_default_is_empty() {
+            let it: crate::rkyv::joint::Values<P, i32> = Default::default();
+            assert_eq!(it.count(), 0);
+        }
     }
 
     mod set {
