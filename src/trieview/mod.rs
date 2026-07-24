@@ -87,6 +87,7 @@ pub mod covering_difference;
 pub mod covering_union;
 pub mod difference;
 mod equality;
+mod filter;
 pub mod intersection;
 pub(crate) mod iter;
 mod map;
@@ -97,6 +98,7 @@ pub mod union;
 pub use covering_difference::CoveringDifferenceView;
 pub use covering_union::{CoveringUnionItem, CoveringUnionView};
 pub use difference::DifferenceView;
+pub use filter::FilterView;
 pub use intersection::IntersectionView;
 pub use iter::{ViewIter, ViewKeys, ViewValues};
 pub use map::{ClonedView, CopiedView, MapView};
@@ -159,12 +161,12 @@ pub trait TrieView<'a>: Sized {
     /// Return the value at `data_bit`.
     ///
     /// # Safety
-    /// Each `data_bit` must be passed to this method **at most once** per view instance.
+    /// `data_bit` must be set in [`data_bitmap`][Self::data_bitmap], and must be passed to this
+    /// method **at most once** per view instance.
     /// For mutable views (`T = &'a mut T`), calling with the same bit twice produces two
-    /// aliasing `&'a mut T` references -> undefined behavior.
-    ///
-    /// # Panics
-    /// May panic or return garbage if `data_bit` is not set in [`data_bitmap`][Self::data_bitmap].
+    /// aliasing `&'a mut T` references -> undefined behavior. Some implementations (e.g. those
+    /// caching values behind `MaybeUninit`) rely on `data_bit` being set in `data_bitmap` for
+    /// soundness, not merely for a well-defined result.
     unsafe fn get_data(&mut self, data_bit: u32) -> Self::T;
 
     /// Return a child view at `child_bit`.
@@ -719,6 +721,32 @@ pub trait TrieView<'a>: Sized {
             f,
             _marker: Default::default(),
         }
+    }
+
+    /// Takes a closure and creates a view which only yields values for which the closure
+    /// returns `true`.
+    ///
+    /// ```
+    /// # use prefix_trie::{PrefixMap, AsView, TrieView};
+    /// # #[cfg(feature = "ipnet")]
+    /// macro_rules! net { ($x:literal) => { $x.parse::<ipnet::Ipv4Net>().unwrap() }; }
+    ///
+    /// # #[cfg(feature = "ipnet")]
+    /// # {
+    /// let mut data = PrefixMap::new();
+    /// data.insert(net!("192.0.0.0/8"), 1);
+    /// data.insert(net!("192.168.0.0/16"), 2);
+    /// data.insert(net!("192.168.0.0/24"), 3);
+    ///
+    /// let filtered = data.view().filter(|_, x| *x % 2 == 0).copied();
+    /// assert_eq!(filtered.values().collect::<Vec<_>>(), vec![2]);
+    /// # }
+    /// ```
+    fn filter<F>(self, f: F) -> FilterView<'a, Self, F>
+    where
+        F: Fn(Self::P, &Self::T) -> bool,
+    {
+        FilterView::new(self, f)
     }
 
     /// Creates a view which clones each value it yeilds.
