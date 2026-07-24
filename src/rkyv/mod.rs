@@ -25,6 +25,35 @@
 //!   [`PrefixMap`](crate::PrefixMap), allocator and free list included, when you need a mutable
 //!   trie back.
 //!
+//! ```
+//! # use prefix_trie::PrefixMap;
+//! # use prefix_trie::rkyv::ArchivedPrefixMap;
+//! # use rkyv::rancor::Error;
+//! # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # type P = ipnet::Ipv4Net;
+//! # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+//! let mut pm = PrefixMap::<P, i32>::new();
+//! pm.insert(p!("10.0.0.0/24"), 1);
+//! pm.insert(p!("10.0.1.0/24"), 2);
+//!
+//! // Serialize the map into a byte buffer.
+//! let bytes = rkyv::to_bytes::<Error>(&pm)?;
+//!
+//! // Access the archive directly without deserializing it.
+//! let archive: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+//! assert_eq!(archive.get(&p!("10.0.0.0/24")).map(|v| v.to_native()), Some(1));
+//! assert_eq!(archive.get(&p!("10.0.2.0/24")), None);
+//!
+//! // Deserialize the map to get a mutable archive again.
+//! let restored: PrefixMap<P, i32> = rkyv::deserialize::<_, Error>(archive)?;
+//! assert_eq!(restored, pm);
+//! # Ok(())
+//! # }
+//! # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+//! # fn main() {}
+//! ```
+//!
 //! Prefixes are never stored in the archive. Just like in the owned collections, an entry is
 //! identified by its path through the trie, and the prefix is reconstructed from that position when
 //! it is returned. The prefix type `P` therefore does not need to implement any `rkyv` trait (it
@@ -55,6 +84,58 @@
 //! (`union`, `intersection`, `difference`, and the covering variants), which are themselves
 //! expressed as trie views: you can combine an archived trie with an owned one and evaluate the
 //! result in a single traversal, without deserializing either side.
+//!
+//! ```
+//! # use prefix_trie::{PrefixMap, PrefixSet, AsView, TrieView};
+//! # use prefix_trie::rkyv::ArchivedPrefixMap;
+//! # use rkyv::rancor::Error;
+//! # #[cfg(all(feature = "rkyv", feature = "ipnet"))]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # type P = ipnet::Ipv4Net;
+//! # macro_rules! p { ($s:literal) => { $s.parse::<P>()? } }
+//! let mut pm = PrefixMap::<P, i32>::new();
+//! pm.insert(p!("10.0.0.0/24"), 1);
+//! pm.insert(p!("10.0.1.0/24"), 2);
+//! pm.insert(p!("10.0.2.0/24"), 3);
+//!
+//! // Get an immutable PrefixMap (could contain millions of prefixes.)
+//! let bytes = rkyv::to_bytes::<Error>(&pm)?;
+//! let archive: &ArchivedPrefixMap<P, i32> = rkyv::access::<_, Error>(&bytes)?;
+//!
+//! // Pending changes to layer on top of the (immutable) archive:
+//! let mut removals = PrefixSet::<P>::new();
+//! removals.insert(p!("10.0.1.0/24"));
+//! let mut updates = PrefixMap::<P, i32>::new();
+//! updates.insert(p!("10.0.0.0/8"), 9);
+//! updates.insert(p!("10.0.3.0/24"), 4);
+//!
+//! // Generate one view that combines all three.
+//! let merged = archive
+//!     .view()
+//!     .map(|v| v.to_native())
+//!     .difference(&removals)
+//!     .union(updates.view().map(|v| *v))
+//!     .map(|item| item.right_or_left());
+//!
+//! // Now, you can use view access methods directly.
+//! assert_eq!(merged.find_lpm(&p!("10.0.0.0/32")).and_then(|x| x.value()), Some(1));
+//! assert_eq!(merged.find_lpm(&p!("10.0.1.0/32")).and_then(|x| x.value()), Some(9));
+//! assert_eq!(merged.find_lpm(&p!("10.0.2.0/32")).and_then(|x| x.value()), Some(3));
+//! // or iterate over all elements.
+//! assert_eq!(
+//!     merged.iter().collect::<Vec<_>>(),
+//!     vec![
+//!         (p!("10.0.0.0/8"), 9),
+//!         (p!("10.0.0.0/24"), 1),
+//!         (p!("10.0.2.0/24"), 3),
+//!         (p!("10.0.3.0/24"), 4),
+//!     ],
+//! );
+//! # Ok(())
+//! # }
+//! # #[cfg(not(all(feature = "rkyv", feature = "ipnet")))]
+//! # fn main() {}
+//! ```
 //!
 //! The joint archives do not implement [`AsView`](crate::AsView) directly. Reach for their public
 //! `t1` and `t2` fields, which are ordinary [`ArchivedPrefixMap`]/[`ArchivedPrefixSet`] values, to
