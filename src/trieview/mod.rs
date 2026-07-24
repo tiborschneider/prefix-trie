@@ -726,6 +726,10 @@ pub trait TrieView<'a>: Sized {
     /// Takes a closure and creates a view which only yields values for which the closure
     /// returns `true`.
     ///
+    /// **Warning**: As with [`map`][Self::map], the predicate may not be evaluated on all
+    /// elements if this view is further combined with others: a branch that an outer
+    /// combinator never descends into is never visited, so the predicate never runs on it.
+    ///
     /// ```
     /// # use prefix_trie::{PrefixMap, AsView, TrieView};
     /// # #[cfg(feature = "ipnet")]
@@ -749,7 +753,7 @@ pub trait TrieView<'a>: Sized {
         FilterView::new(self, f)
     }
 
-    /// Creates a view which clones each value it yeilds.
+    /// Creates a view which clones each value it yields.
     ///
     /// ```
     /// # use prefix_trie::{PrefixMap, AsView, TrieView};
@@ -780,7 +784,7 @@ pub trait TrieView<'a>: Sized {
         }
     }
 
-    /// Creates a view which copies each value it yeilds.
+    /// Creates a view which copies each value it yields.
     ///
     /// ```
     /// # use prefix_trie::{PrefixMap, AsView, TrieView};
