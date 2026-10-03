@@ -136,6 +136,10 @@ impl<'a, P: Prefix, T> Iterator for Keys<'a, P, T> {
     fn next(&mut self) -> Option<P> {
         self.0.next().map(|(k, _)| k)
     }
+
+    fn fold<B, F: FnMut(B, P) -> B>(self, init: B, mut f: F) -> B {
+        self.0.fold(init, |acc, (k, _)| f(acc, k))
+    }
 }
 
 /// An iterator over all values of a [`PrefixMap`] in lexicographic order of their associated
@@ -148,6 +152,10 @@ impl<'a, P: Prefix, T> Iterator for Values<'a, P, T> {
 
     fn next(&mut self) -> Option<&'a T> {
         self.0.next().map(|(_, v)| v)
+    }
+
+    fn fold<B, F: FnMut(B, &'a T) -> B>(self, init: B, mut f: F) -> B {
+        self.0.fold(init, |acc, (_, v)| f(acc, v))
     }
 }
 
