@@ -75,11 +75,9 @@ impl<'a, P: Prefix, T> Iterator for Iter<'a, P, T> {
 
             match next {
                 LexIterElem::Data(idx) => {
-                    // SAFETY: `Iter` holds `&'a Table`; no structural changes occur during
-                    // immutable iteration, so `idx.node` remains valid.
-                    let Some(r) = (unsafe { idx.resolve(table) }) else {
-                        continue;
-                    };
+                    // SAFETY: `Iter` holds `&'a Table`; no changes occur during immutable
+                    // iteration, so the node snapshot in `lex_iter` is current and the bit is set.
+                    let r = unsafe { table.present_at(lex_iter.data_loc(idx.bit), idx.depth) };
                     let p = r.prefix(key);
                     return Some((p, r.get()));
                 }
@@ -92,6 +90,39 @@ impl<'a, P: Prefix, T> Iterator for Iter<'a, P, T> {
             }
         }
         None
+    }
+
+    // Internal iteration (used by `for_each`, `count`, `sum`, ...) runs the traversal in a single
+    // loop, avoiding the per-element state save and restore of `next`.
+    fn fold<B, F>(mut self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, (P, &'a T)) -> B,
+    {
+        let mut acc = init;
+        let Some(table) = self.table else {
+            return acc;
+        };
+        while let Some(lex_iter) = self.stack.last_mut() {
+            let key = *lex_iter.key();
+            let Some(next) = lex_iter.next() else {
+                self.stack.pop();
+                continue;
+            };
+
+            match next {
+                LexIterElem::Data(idx) => {
+                    // SAFETY: same as in `next`.
+                    let r = unsafe { table.present_at(lex_iter.data_loc(idx.bit), idx.depth) };
+                    acc = f(acc, (r.prefix(key), r.get()));
+                }
+                LexIterElem::Child(next_loc, depth, next_key) => {
+                    // SAFETY: same as in `next`.
+                    self.stack
+                        .push(unsafe { table.lex_iter(next_loc, depth, next_key) })
+                }
+            }
+        }
+        acc
     }
 }
 

@@ -439,6 +439,20 @@ impl<T> Table<T> {
         .insert(value);
     }
 
+    /// Reference the data element at `data` (in a node at `depth`) without re-reading the node.
+    ///
+    /// # Safety
+    /// `data` must point to a present element of a live node: its `idx`/`slot` must have been
+    /// computed from that node's current `data_idx` and `data_bitmap`, with the bit set.
+    #[inline(always)]
+    pub(crate) unsafe fn present_at(&self, data: Loc, depth: u32) -> Present<'_, T> {
+        Present {
+            table: self,
+            data,
+            depth,
+        }
+    }
+
     /// Remove a child from a parent node and compact the children allocation.
     ///
     /// After insertion, each child occupies physical slot `compute_slot(child_bitmap, bit)`.
