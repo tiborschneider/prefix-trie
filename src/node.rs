@@ -44,17 +44,47 @@ impl std::fmt::Debug for MultiBitNode {
 ///
 /// `bitmap` is the full bitmap (used for POPCNT slot computation).
 /// `filter` is the subset of bits to yield (must be a subset of `bitmap`).
-/// `len` is the number of bit positions to scan (NUM_DATA or NUM_CHILDREN).
+///
+/// Only set bits are visited, avoiding a poorly predicted branch per bit position.
 #[inline(always)]
-fn bitmap_locs(
+fn bitmap_locs(idx: AllocIdx, bitmap: u32, filter: u32) -> BitmapLocs {
+    BitmapLocs {
+        idx,
+        bitmap,
+        remaining: filter,
+    }
+}
+
+struct BitmapLocs {
     idx: AllocIdx,
     bitmap: u32,
-    filter: u32,
-    len: u32,
-) -> impl DoubleEndedIterator<Item = Loc> + 'static {
-    (0..len)
-        .filter(move |&raw| filter & (1 << raw) != 0)
-        .map(move |raw| Loc::new(idx, raw, bitmap))
+    remaining: u32,
+}
+
+impl Iterator for BitmapLocs {
+    type Item = Loc;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Loc> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let bit = self.remaining.trailing_zeros();
+        self.remaining &= self.remaining - 1;
+        Some(Loc::new(self.idx, bit, self.bitmap))
+    }
+}
+
+impl DoubleEndedIterator for BitmapLocs {
+    #[inline(always)]
+    fn next_back(&mut self) -> Option<Loc> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let bit = u32::BITS - 1 - self.remaining.leading_zeros();
+        self.remaining &= !(1 << bit);
+        Some(Loc::new(self.idx, bit, self.bitmap))
+    }
 }
 
 impl MultiBitNode {
@@ -89,12 +119,7 @@ impl MultiBitNode {
     /// Yields Loc structs with bit (bitmap position) and computed slot for data access.
     #[inline(always)]
     pub(crate) fn data_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
-        bitmap_locs(
-            self.data_idx,
-            self.data_bitmap,
-            self.data_bitmap,
-            NUM_DATA as u32,
-        )
+        bitmap_locs(self.data_idx, self.data_bitmap, self.data_bitmap)
     }
 
     /****** CHILD HANDLING *******/
@@ -118,12 +143,7 @@ impl MultiBitNode {
     /// Yields Loc with bit set to the child bitmap position (for operations like unset_child_bit).
     #[inline(always)]
     pub(crate) fn child_locs(&self) -> impl DoubleEndedIterator<Item = Loc> + 'static {
-        bitmap_locs(
-            self.children_idx,
-            self.child_bitmap,
-            self.child_bitmap,
-            NUM_CHILDREN as u32,
-        )
+        bitmap_locs(self.children_idx, self.child_bitmap, self.child_bitmap)
     }
 
     /****** COVER STUFF *******/
@@ -140,7 +160,7 @@ impl MultiBitNode {
         prefix_len: u32,
     ) -> impl DoubleEndedIterator<Item = Loc> + 'static {
         let filter = data_cover_mask(depth, key, prefix_len) & self.data_bitmap;
-        bitmap_locs(self.data_idx, self.data_bitmap, filter, NUM_DATA as u32)
+        bitmap_locs(self.data_idx, self.data_bitmap, filter)
     }
 
     /// Iterator over the indices of all children that of that node that are covered within the
@@ -156,12 +176,7 @@ impl MultiBitNode {
         prefix_len: u32,
     ) -> impl DoubleEndedIterator<Item = Loc> + 'static {
         let filter = child_cover_mask(depth, key, prefix_len) & self.child_bitmap;
-        bitmap_locs(
-            self.children_idx,
-            self.child_bitmap,
-            filter,
-            NUM_CHILDREN as u32,
-        )
+        bitmap_locs(self.children_idx, self.child_bitmap, filter)
     }
 
     /****** DATA LPM *******/
@@ -177,7 +192,7 @@ impl MultiBitNode {
         prefix_len: u32,
     ) -> impl DoubleEndedIterator<Item = Loc> + 'static {
         let filter = data_lpm_mask(depth, key, prefix_len) & self.data_bitmap;
-        bitmap_locs(self.data_idx, self.data_bitmap, filter, NUM_DATA as u32)
+        bitmap_locs(self.data_idx, self.data_bitmap, filter)
     }
 
     /// Get the data loc of the longest prefix match in this node (if it exists).
