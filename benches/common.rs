@@ -78,7 +78,7 @@ pub enum SortingOrder {
 
 pub trait DataSampler: Prefix + Sized + Copy {
     /// Associated Type to achieve the type bounds on the prefix.
-    type IpLookupTable: BenchMap<Self>;
+    type IpLookupTable: BenchMap<Self> + BenchLpm<Self>;
 
     fn ris_peer_initial_state(seed: u64, order: SortingOrder) -> Vec<Self>;
     fn ris_peer_mutations(seed: u64) -> Vec<Insn<Self>>;
@@ -95,6 +95,21 @@ pub trait DataSampler: Prefix + Sized + Copy {
         (0..iter)
             .map(|_| *addresses.iter().choose(&mut rng).unwrap())
             .map(|p| Insn::ExactMatch(p))
+            .collect()
+    }
+    /// Random host addresses (full-length prefixes), each inside a randomly chosen prefix of
+    /// `addresses`, so that every lookup has a longest-prefix match at some depth.
+    fn random_hosts(seed: u64, addresses: &[Self], iter: usize) -> Vec<Self> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let num_bits = Self::num_bits();
+        (0..iter)
+            .map(|_| {
+                let p = addresses.iter().choose(&mut rng).unwrap();
+                let host: Self::R =
+                    num_traits::cast(rng.gen::<u128>() >> (128 - num_bits)).unwrap();
+                let repr = (p.repr() & p.mask()) | (host & !p.mask());
+                Self::from_repr_len(repr, num_bits as u8)
+            })
             .collect()
     }
     fn random_mutations(seed: u64, addresses: &[Self], iter: usize) -> Vec<Insn<Self>> {
@@ -244,6 +259,29 @@ impl<P: Prefix + Copy> BenchMap<P> for PrefixMap<P, u32> {
 
     fn exact_match(&self, prefix: P) -> Option<u32> {
         self.get(&prefix).copied()
+    }
+}
+
+/// Maps that support longest-prefix match lookups.
+pub trait BenchLpm<P: Prefix + Copy>: BenchMap<P> {
+    fn longest_match(&self, addr: P) -> Option<u32>;
+}
+
+impl<P: Prefix + Copy> BenchLpm<P> for PrefixMap<P, u32> {
+    fn longest_match(&self, addr: P) -> Option<u32> {
+        self.get_lpm(&addr).map(|(_, v)| *v)
+    }
+}
+
+impl BenchLpm<Ipv4Net> for IpLookupTable<Ipv4Addr, u32> {
+    fn longest_match(&self, addr: Ipv4Net) -> Option<u32> {
+        self.longest_match(addr.addr()).map(|(_, _, v)| *v)
+    }
+}
+
+impl BenchLpm<Ipv6Net> for IpLookupTable<Ipv6Addr, u32> {
+    fn longest_match(&self, addr: Ipv6Net) -> Option<u32> {
+        self.longest_match(addr.addr()).map(|(_, _, v)| *v)
     }
 }
 

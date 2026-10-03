@@ -111,6 +111,90 @@ pub fn bgp_lookup_random_ipv6(c: &mut Criterion) {
     bgp_lookup_random_for::<Ipv6Net>(c, "bgp-lookup-random-ipv6", SortingOrder::Random);
 }
 
+fn bench_lpm_one<P, M>(group: &mut BenchmarkGroup<'_, WallTime>, setup: &[Insn<P>], addrs: &[P])
+where
+    P: BenchPrefix,
+    M: BenchLpm<P>,
+{
+    let mut map = M::new_empty();
+    map.run(setup);
+    group.bench_function(M::NAME, |b| {
+        b.iter(|| {
+            for addr in addrs {
+                std::hint::black_box(map.longest_match(*addr));
+            }
+        })
+    });
+}
+
+/// Longest-prefix match of random host addresses. `HashMap` and `BTreeMap` are omitted, as they
+/// have no native longest-prefix match.
+fn bgp_lpm_random_for<P>(c: &mut Criterion, group_name: &str)
+where
+    P: BenchPrefix,
+{
+    let addrs = P::ris_peer_initial_state(0, SortingOrder::Random);
+    let setup = fill_table(0, &addrs);
+    let hosts = P::random_hosts(0, &addrs, ITERS);
+
+    let mut group = c.benchmark_group(group_name);
+    group.throughput(Throughput::Elements(hosts.len() as u64));
+    bench_lpm_one::<P, PrefixMap<P, u32>>(&mut group, &setup, &hosts);
+    bench_lpm_one::<P, P::IpLookupTable>(&mut group, &setup, &hosts);
+    group.finish();
+}
+
+pub fn bgp_lpm_random_ipv4(c: &mut Criterion) {
+    bgp_lpm_random_for::<Ipv4Net>(c, "bgp-lpm-random-ipv4");
+}
+
+pub fn bgp_lpm_random_ipv6(c: &mut Criterion) {
+    bgp_lpm_random_for::<Ipv6Net>(c, "bgp-lpm-random-ipv6");
+}
+
+/// Whole-table traversals of `PrefixMap`: `clone`, `cover` of random prefixes, and `iter`.
+fn bgp_traverse_for<P>(c: &mut Criterion, family: &str)
+where
+    P: BenchPrefix,
+{
+    let addrs = P::ris_peer_initial_state(0, SortingOrder::Random);
+    let mut map = PrefixMap::<P, u32>::new_empty();
+    map.run(&fill_table(0, &addrs));
+    let mut rng = StdRng::seed_from_u64(0);
+    let queries: Vec<P> = (0..ITERS)
+        .map(|_| *addrs.iter().choose(&mut rng).unwrap())
+        .collect();
+
+    let mut group = c.benchmark_group(format!("bgp-clone-{family}"));
+    group.throughput(Throughput::Elements(map.len() as u64));
+    group.bench_function("PrefixMap", |b| b.iter(|| map.clone()));
+    group.finish();
+
+    let mut group = c.benchmark_group(format!("bgp-cover-{family}"));
+    group.throughput(Throughput::Elements(queries.len() as u64));
+    group.bench_function("PrefixMap", |b| {
+        b.iter(|| {
+            for q in &queries {
+                std::hint::black_box(map.cover(q).count());
+            }
+        })
+    });
+    group.finish();
+
+    let mut group = c.benchmark_group(format!("bgp-iter-{family}"));
+    group.throughput(Throughput::Elements(map.len() as u64));
+    group.bench_function("PrefixMap", |b| b.iter(|| map.iter().count()));
+    group.finish();
+}
+
+pub fn bgp_traverse_ipv4(c: &mut Criterion) {
+    bgp_traverse_for::<Ipv4Net>(c, "ipv4");
+}
+
+pub fn bgp_traverse_ipv6(c: &mut Criterion) {
+    bgp_traverse_for::<Ipv6Net>(c, "ipv6");
+}
+
 fn bgp_lookup_ris_for<P>(c: &mut Criterion, group_name: &str, ordering: SortingOrder)
 where
     P: BenchPrefix,
@@ -318,6 +402,8 @@ criterion_group!(
         bgp_mods_random_ipv6,
         bgp_lookup_random_ipv4,
         bgp_lookup_random_ipv6,
+        bgp_lpm_random_ipv4,
+        bgp_lpm_random_ipv6,
         bgp_mods_ris_ipv4,
         bgp_mods_ris_ipv6,
         bgp_lookup_ris_ipv4,
@@ -330,5 +416,7 @@ criterion_group!(
         bgp_create_scattered_ipv6,
         aggregate_ipv4,
         aggregate_ipv6,
+        bgp_traverse_ipv4,
+        bgp_traverse_ipv6,
 );
 criterion_main!(benches);
