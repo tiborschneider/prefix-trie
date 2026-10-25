@@ -22,7 +22,7 @@ use crate::{
     Prefix,
     aggregate::{fold_coverage, member_coverage},
     allocator::compute_slot,
-    lex_order::{LEX_ORDER, LexElem, lex_after_child, lex_after_data},
+    lex_order::{LexSlots, lex_after_child, lex_after_data},
     node::{
         DATA_BIT_TO_PREFIX, Key, child_bit, child_cover_mask, child_cover_mask_for_bit, data_bit,
         data_cover_mask, data_lpm_mask, extend_repr,
@@ -1169,8 +1169,10 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
         let (loc, depth) = self.find_loc(key, prefix_len)?;
         let mut lex = MaskedLexIter::new(loc, depth, key, self);
         // Only take those that are children of the prefix
-        lex.apply_data_mask(data_cover_mask(depth, key, prefix_len));
-        lex.apply_child_mask(child_cover_mask(depth, key, prefix_len));
+        lex.apply_masks(
+            data_cover_mask(depth, key, prefix_len),
+            child_cover_mask(depth, key, prefix_len),
+        );
         Some(lex)
     }
 
@@ -1201,8 +1203,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
                 } else {
                     data_mask & !(1 << data_bit)
                 };
-                lex.apply_data_mask(data_mask);
-                lex.apply_child_mask(child_mask);
+                lex.apply_masks(data_mask, child_mask);
                 stack.push(lex);
                 break;
             }
@@ -1210,8 +1211,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
             // Target is deeper; follow the child pointer.
             let child_bit = child_bit(depth, key);
             let (data_mask, child_mask) = lex_after_child(child_bit);
-            lex.apply_data_mask(data_mask);
-            lex.apply_child_mask(child_mask);
+            lex.apply_masks(data_mask, child_mask);
             stack.push(lex);
 
             // SAFETY: `loc` is valid (see above); `child()` returns a valid `Loc` if present.
@@ -1378,14 +1378,11 @@ impl Loc {
 }
 
 pub(super) struct MaskedLexIter<'a, R> {
-    iter: std::slice::Iter<'static, LexElem>,
+    slots: LexSlots,
     depth: u32,
     key: R,
     // Original (unmasked) node: kept for correct POPCNT slot computation.
     node: &'a ArchivedNodeRepr,
-    // Separate filter fields: apply_*_mask modifies these, not the node bitmaps.
-    data_filter: u32,
-    child_filter: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -1409,23 +1406,21 @@ impl<'a, R> MaskedLexIter<'a, R> {
         P: Prefix<R = R>,
         T: Archive,
     {
+        let node = &map.nodes[loc.idx()];
         Self {
-            iter: LEX_ORDER.iter(),
+            slots: LexSlots::new(node.data_bitmap(), node.child_bitmap()),
             depth,
             key,
-            node: &map.nodes[loc.idx()],
-            data_filter: u32::MAX,
-            child_filter: u32::MAX,
+            node,
         }
     }
 
-    pub(crate) fn apply_data_mask(&mut self, mask: u32) {
-        // Only reduce the set of offsets to yield; keep node.data_bitmap intact for POPCNT.
-        self.data_filter &= mask;
-    }
-
-    pub(crate) fn apply_child_mask(&mut self, mask: u32) {
-        self.child_filter &= mask;
+    pub(crate) fn apply_masks(&mut self, data_mask: u32, child_mask: u32) {
+        // Keep the original bitmaps intact for physical slot computation.
+        self.slots.apply_masks(
+            data_mask & self.node.data_bitmap(),
+            child_mask & self.node.child_bitmap(),
+        );
     }
 }
 
@@ -1433,34 +1428,21 @@ impl<'a, R: Key> Iterator for MaskedLexIter<'a, R> {
     type Item = LexIterElem<R>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let next = *self.iter.next()?;
-            match next.decode() {
-                Ok(data_bit) => {
-                    // Check original bitmap (for existence) AND filter (for masking).
-                    if self.data_filter & (1 << data_bit) != 0 {
-                        if let Some(loc) = self.node.data_loc(data_bit) {
-                            return Some(LexIterElem::Data(loc, self.depth));
-                        }
-                    }
-                }
-                Err(child_bit) => {
-                    if self.node.has_child_bit(child_bit)
-                        && (self.child_filter & (1 << child_bit)) != 0
-                    {
-                        return Some(LexIterElem::Child(
-                            Loc::new(
-                                self.node.child_bitmap(),
-                                self.node.children_idx(),
-                                child_bit,
-                            ),
-                            self.depth + K,
-                            extend_repr(self.key, self.depth, child_bit),
-                        ));
-                    }
-                }
-            }
-        }
+        Some(match self.slots.next()? {
+            Ok(data_bit) => LexIterElem::Data(
+                Loc::new(self.node.data_bitmap(), self.node.data_idx(), data_bit),
+                self.depth,
+            ),
+            Err(child_bit) => LexIterElem::Child(
+                Loc::new(
+                    self.node.child_bitmap(),
+                    self.node.children_idx(),
+                    child_bit,
+                ),
+                self.depth + K,
+                extend_repr(self.key, self.depth, child_bit),
+            ),
+        })
     }
 }
 

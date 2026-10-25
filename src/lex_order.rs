@@ -123,6 +123,71 @@ fn to_lex(data_bitmap: u32, child_bitmap: u32) -> u64 {
     to_lex_part(data_bitmap, &DATA_LEX_POS) | to_lex_part(child_bitmap, &CHILD_LEX_POS)
 }
 
+/// Storage-independent iterator over occupied data and child bit numbers in lexicographic
+/// order. `Ok(bit)` denotes data and `Err(bit)` denotes a child. Either end can be consumed
+/// without visiting absent slots, and each occupied slot is yielded at most once.
+#[derive(Clone, Default)]
+pub(crate) struct LexSlots {
+    // Bit positions are indices into LEX_ORDER, not raw data/child bitmap positions.
+    remaining: u64,
+}
+
+impl LexSlots {
+    /// Construct from occupancy bitmaps containing only valid data/child bits.
+    #[inline]
+    pub(crate) fn new(data_bitmap: u32, child_bitmap: u32) -> Self {
+        Self {
+            remaining: to_lex(data_bitmap, child_bitmap),
+        }
+    }
+
+    /// Retain only the supplied valid data/child bits; never restore consumed slots.
+    #[inline]
+    pub(crate) fn apply_masks(&mut self, data_bitmap: u32, child_bitmap: u32) {
+        self.remaining &= to_lex(data_bitmap, child_bitmap);
+    }
+}
+
+impl Iterator for LexSlots {
+    type Item = Result<u32, u32>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let pos = self.remaining.trailing_zeros();
+        self.remaining &= self.remaining - 1;
+        Some(LEX_ORDER[pos as usize].decode())
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl DoubleEndedIterator for LexSlots {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let pos = u64::BITS - 1 - self.remaining.leading_zeros();
+        self.remaining &= !(1u64 << pos);
+        Some(LEX_ORDER[pos as usize].decode())
+    }
+}
+
+impl ExactSizeIterator for LexSlots {
+    fn len(&self) -> usize {
+        self.remaining.count_ones() as usize
+    }
+}
+
+impl std::iter::FusedIterator for LexSlots {}
+
+/// Map-specific wrapper resolving ordered slots against an original node snapshot.
 #[derive(Clone)]
 pub(crate) struct MaskedLexIter<R> {
     loc: Loc,
@@ -130,9 +195,7 @@ pub(crate) struct MaskedLexIter<R> {
     key: R,
     // Original (unmasked) node: kept for correct POPCNT slot computation.
     node: MultiBitNode,
-    // Remaining slots to yield, as a bitmask over `LEX_ORDER` positions. Iterating it with
-    // `trailing_zeros` visits only present slots, in lexicographic order.
-    remaining: u64,
+    slots: LexSlots,
 }
 
 impl<R: Key> Default for MaskedLexIter<R> {
@@ -142,7 +205,7 @@ impl<R: Key> Default for MaskedLexIter<R> {
             depth: Default::default(),
             key: R::zero(),
             node: Default::default(),
-            remaining: 0,
+            slots: LexSlots::default(),
         }
     }
 }
@@ -153,7 +216,7 @@ impl<R> MaskedLexIter<R> {
             loc,
             depth,
             key,
-            remaining: to_lex(node.data_bitmap, node.child_bitmap),
+            slots: LexSlots::new(node.data_bitmap, node.child_bitmap),
             node,
         }
     }
@@ -171,7 +234,7 @@ impl<R> MaskedLexIter<R> {
     /// Restrict both kinds of slots without changing the original node bitmaps,
     /// which are still needed for POPCNT slot computation.
     pub(crate) fn apply_masks(&mut self, data_mask: u32, child_mask: u32) {
-        self.remaining &= to_lex(
+        self.slots.apply_masks(
             data_mask & self.node.data_bitmap,
             child_mask & self.node.child_bitmap,
         );
@@ -183,12 +246,7 @@ impl<R: Key> Iterator for MaskedLexIter<R> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
-            return None;
-        }
-        let pos = self.remaining.trailing_zeros();
-        self.remaining &= self.remaining - 1;
-        Some(match LEX_ORDER[pos as usize].decode() {
+        Some(match self.slots.next()? {
             Ok(data_bit) => LexIterElem::Data(DataIdx {
                 node: self.loc,
                 bit: data_bit,
@@ -213,13 +271,6 @@ pub(crate) fn lex_after_data(data_bit: u32) -> (u32, u32) {
 #[inline(always)]
 pub(crate) fn lex_after_child(child_bit: u32) -> (u32, u32) {
     LEX_AFTER_CHILD[child_bit as usize]
-}
-
-/// Iterate over all data and child slot positions in lexicographic (DFS pre-order) order.
-/// Yields `Ok(data_bit)` for data positions and `Err(child_bit)` for child positions.
-/// Supports reverse iteration, which is needed to push stack entries in reverse lex order.
-pub(crate) fn lex_order() -> impl DoubleEndedIterator<Item = Result<u32, u32>> {
-    LEX_ORDER.iter().copied().map(LexElem::decode)
 }
 
 /// For data_bit `b`, returns `(data_mask, child_mask)` of all entries at or after `b` in lex

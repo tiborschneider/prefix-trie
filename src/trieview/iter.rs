@@ -6,7 +6,7 @@
 
 use crate::{
     Prefix,
-    lex_order::{lex_after_child, lex_after_data, lex_order},
+    lex_order::{LexSlots, lex_after_child, lex_after_data},
     node::{child_bit, data_bit},
     prefix::mask_from_prefix_len,
 };
@@ -97,12 +97,9 @@ fn expand_node_masked<'a, V: TrieView<'a>>(
     let effective_data = view.data_bitmap() & data_mask;
     let effective_children = view.child_bitmap() & child_mask;
 
-    for elem in lex_order().rev() {
+    for elem in LexSlots::new(effective_data, effective_children).rev() {
         match elem {
             Ok(data_bit) => {
-                if (effective_data >> data_bit) & 1 == 0 {
-                    continue;
-                }
                 let prefix = reconstruct_prefix::<V::P>(view.depth(), view.key(), data_bit);
                 // SAFETY: each data_bit is visited at most once per expand_node call;
                 // the effective bitmap is a subset of data_bitmap(), and we iterate
@@ -111,10 +108,8 @@ fn expand_node_masked<'a, V: TrieView<'a>>(
                 stack.push(IterElem::Item(prefix, value));
             }
             Err(child_bit) => {
-                if (effective_children >> child_bit) & 1 == 0 {
-                    continue;
-                }
-                // SAFETY: each child_bit is visited at most once per expand_node call.
+                // SAFETY: each child_bit is present in the effective bitmap and is
+                // visited at most once per expand_node call.
                 stack.push(IterElem::Node(unsafe { view.get_child(child_bit) }));
             }
         }
