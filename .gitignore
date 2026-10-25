@@ -3,3 +3,4 @@ target
 coverage
 .direnv
 .envrc
+bench-fixed-cpu.sh
