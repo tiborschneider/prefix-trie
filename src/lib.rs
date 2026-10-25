@@ -135,6 +135,7 @@ mod allocator;
 mod fmt;
 #[cfg(test)]
 pub(crate) mod fuzzing;
+mod lex_order;
 mod node;
 mod prefix;
 #[cfg(feature = "rkyv")]

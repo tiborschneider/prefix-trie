@@ -3,14 +3,15 @@
 use num_traits::{CheckedAdd, One, Zero};
 
 use crate::{
+    Prefix,
     aggregate::member_coverage,
     allocator::{AllocIdx, CellAllocator, Loc, NodeAllocator, RawPtr},
+    lex_order::{MaskedLexIter, lex_after_child, lex_after_data},
     node::{
-        child_bit, child_cover_mask, data_bit, data_cover_mask, extend_repr, lex_after_child,
-        lex_after_data, Key, MaskedLexIter, MultiBitNode, DATA_BIT_TO_PREFIX,
+        DATA_BIT_TO_PREFIX, Key, MultiBitNode, child_bit, child_cover_mask, data_bit,
+        data_cover_mask, extend_repr,
     },
     prefix::mask_from_prefix_len,
-    Prefix,
 };
 
 // ============================================================================
@@ -831,8 +832,10 @@ impl<T> Table<T> {
         // completed without structural mutations, `loc` is a valid, live node location.
         let mut lex = unsafe { self.lex_iter(loc, depth, key) };
         // Only take those that are children of the prefix
-        lex.apply_data_mask(data_cover_mask(depth, key, prefix_len));
-        lex.apply_child_mask(child_cover_mask(depth, key, prefix_len));
+        lex.apply_masks(
+            data_cover_mask(depth, key, prefix_len),
+            child_cover_mask(depth, key, prefix_len),
+        );
         lex
     }
 
@@ -905,8 +908,7 @@ impl<T> Table<T> {
                 } else {
                     data_mask & !(1 << data_bit)
                 };
-                lex.apply_data_mask(data_mask);
-                lex.apply_child_mask(child_mask);
+                lex.apply_masks(data_mask, child_mask);
                 stack.push(lex);
                 break;
             }
@@ -914,8 +916,7 @@ impl<T> Table<T> {
             // Target is deeper; follow the child pointer.
             let child_bit = child_bit(depth, key);
             let (data_mask, child_mask) = lex_after_child(child_bit);
-            lex.apply_data_mask(data_mask);
-            lex.apply_child_mask(child_mask);
+            lex.apply_masks(data_mask, child_mask);
             stack.push(lex);
 
             // SAFETY: `loc` is valid (see above); `child()` returns a valid `Loc` if present.
