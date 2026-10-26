@@ -15,7 +15,7 @@ pub(crate) enum LexIterElem<R> {
 }
 
 /// A raw slot pointing to a specific data or child bit.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Slot {
     Data(u8),
     Child(u8),
@@ -103,7 +103,7 @@ fn to_lex(data_bitmap: u32, child_bitmap: u32) -> u64 {
 }
 
 /// Storage-independent iterator over occupied data and child bit numbers in lexicographic
-/// order. `Ok(bit)` denotes data and `Err(bit)` denotes a child. Either end can be consumed
+/// order. Each item identifies a data or child bit. Either end can be consumed
 /// without visiting absent slots, and each occupied slot is yielded at most once.
 #[derive(Clone, Default)]
 pub(crate) struct LexSlotIter {
@@ -317,3 +317,119 @@ const LEX_AFTER_CHILD: [(u32, u32); NUM_CHILDREN] = {
     }
     table
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use Slot::{Child, Data};
+
+    #[test]
+    fn sparse_slots_in_lexicographic_order() {
+        let data = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 15) | (1 << 30);
+        let children = (1 << 0) | (1 << 1) | (1 << 15) | (1 << 16) | (1 << 31);
+        let expected = [
+            Data(0), Data(1), Data(15), Child(0), Child(1),
+            Child(15), Data(2), Child(16), Data(30), Child(31),
+        ];
+        assert_eq!(LexSlotIter::new(data, children).collect::<Vec<_>>(), expected);
+        assert_eq!(
+            LexSlotIter::new(data, children).rev().collect::<Vec<_>>(),
+            expected.into_iter().rev().collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn mixed_ends_and_exact_size() {
+        let mut slots = LexSlotIter::new((1 << 0) | (1 << 30), (1 << 0) | (1 << 31));
+        assert_eq!(slots.len(), 4);
+        assert_eq!(slots.size_hint(), (4, Some(4)));
+        assert_eq!(slots.next(), Some(Data(0)));
+        assert_eq!(slots.next_back(), Some(Child(31)));
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots.next_back(), Some(Data(30)));
+        assert_eq!(slots.next(), Some(Child(0)));
+        assert_eq!(slots.size_hint(), (0, Some(0)));
+        assert_eq!(slots.next(), None);
+        assert_eq!(slots.next_back(), None);
+        assert_eq!(slots.next(), None);
+    }
+
+    #[test]
+    fn unused_data_bit_is_ignored_but_last_child_is_valid() {
+        assert_eq!(LexSlotIter::new(1 << 31, 0).count(), 0);
+        assert_eq!(
+            LexSlotIter::new(1 << 31, 1 << 31).collect::<Vec<_>>(),
+            [Child(31)],
+        );
+        assert_eq!(LexSlotIter::new(!0, !0).count(), 63);
+        let mut slots = LexSlotIter::new(!0, 1 << 31);
+        slots.apply_masks(1 << 31, !0);
+        assert_eq!(slots.collect::<Vec<_>>(), [Child(31)]);
+    }
+
+    #[test]
+    fn masks_do_not_restore_consumed_or_filtered_slots() {
+        let mut slots = LexSlotIter::new((1 << 0) | (1 << 1) | (1 << 2), (1 << 0) | (1 << 31));
+        assert_eq!(slots.next(), Some(Data(0)));
+        assert_eq!(slots.next_back(), Some(Child(31)));
+        slots.apply_masks((1 << 0) | (1 << 2), !0);
+        slots.apply_masks(!0, !0);
+        assert_eq!(slots.clone().collect::<Vec<_>>(), [Child(0), Data(2)]);
+        slots.apply_masks(0, 0);
+        slots.apply_masks(!0, !0);
+        assert_eq!(slots.next(), None);
+        assert_eq!(slots.next_back(), None);
+    }
+
+    #[test]
+    fn start_masks_include_data_but_exclude_children() {
+        let mut slots = LexSlotIter::new(!0, !0);
+        let (data, children) = masks_from_data(30);
+        slots.apply_masks(data, children);
+        assert_eq!(slots.collect::<Vec<_>>(), [Data(30), Child(30), Child(31)]);
+
+        let mut slots = LexSlotIter::new(!0, !0);
+        let (data, children) = masks_after_child(30);
+        slots.apply_masks(data, children);
+        assert_eq!(slots.collect::<Vec<_>>(), [Child(31)]);
+
+        assert_eq!(masks_from_data(0), (0x7fffffff, u32::MAX));
+        assert_eq!(masks_after_child(31), (0, 0));
+    }
+
+    #[test]
+    fn node_masks_preserve_physical_offsets() {
+        let node = MultiBitNode {
+            data_bitmap: 1 | (1 << 2) | (1 << 30),
+            child_bitmap: 1 | (1 << 31),
+            ..Default::default()
+        };
+        let mut iter = LexNodeIter::new(Loc::root(), 5, 0u32, node);
+        iter.apply_masks(1 << 30, 1 << 31);
+
+        let Some(LexIterElem::Data(idx)) = iter.next() else {
+            panic!("expected data bit 30");
+        };
+        assert_eq!(idx.bit, 30);
+        assert_eq!(idx.depth, 5);
+        assert_eq!(idx.node, Loc::root());
+        // Filtering must not compact the original storage: bit 30 is still slot 2.
+        assert_eq!(iter.data_loc(idx.bit).slot, 2);
+
+        let Some(LexIterElem::Child(loc, depth, key)) = iter.next() else {
+            panic!("expected child bit 31");
+        };
+        assert_eq!(loc.bit, 31);
+        assert_eq!(loc.slot, 1);
+        assert_eq!(depth, 10);
+        assert_eq!(key, 0x07c00000);
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn default_iterators_are_empty() {
+        assert_eq!(LexSlotIter::default().next(), None);
+        assert_eq!(LexSlotIter::default().next_back(), None);
+        assert!(LexNodeIter::<u32>::default().next().is_none());
+    }
+}
