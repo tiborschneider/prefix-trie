@@ -22,7 +22,7 @@ use crate::{
     Prefix,
     aggregate::{fold_coverage, member_coverage},
     allocator::compute_slot,
-    lex_order::{LexSlots, lex_after_child, lex_after_data},
+    lex_order::{LexSlots, Slot, lex_after_child, lex_after_data},
     node::{
         DATA_BIT_TO_PREFIX, Key, child_bit, child_cover_mask, child_cover_mask_for_bit, data_bit,
         data_cover_mask, data_lpm_mask, extend_repr,
@@ -1429,18 +1429,22 @@ impl<'a, R: Key> Iterator for MaskedLexIter<'a, R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.slots.next()? {
-            Ok(data_bit) => LexIterElem::Data(
-                Loc::new(self.node.data_bitmap(), self.node.data_idx(), data_bit),
+            Slot::Data(data_bit) => LexIterElem::Data(
+                Loc::new(
+                    self.node.data_bitmap(),
+                    self.node.data_idx(),
+                    data_bit as u32,
+                ),
                 self.depth,
             ),
-            Err(child_bit) => LexIterElem::Child(
+            Slot::Child(child_bit) => LexIterElem::Child(
                 Loc::new(
                     self.node.child_bitmap(),
                     self.node.children_idx(),
-                    child_bit,
+                    child_bit as u32,
                 ),
                 self.depth + K,
-                extend_repr(self.key, self.depth, child_bit),
+                extend_repr(self.key, self.depth, child_bit as u32),
             ),
         })
     }

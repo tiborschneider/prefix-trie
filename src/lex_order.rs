@@ -14,52 +14,31 @@ pub(crate) enum LexIterElem<R> {
     Child(Loc, u32, R),
 }
 
-/// Temporary representation for `LEX_ORDER`.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct LexElem(u8);
-
-const CHILD_FLAG: u8 = 1 << 7;
-
-impl LexElem {
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    const fn data(x: u8) -> Self {
-        Self(x)
-    }
-
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    const fn child(x: u8) -> Self {
-        Self(x + CHILD_FLAG)
-    }
-    /// Decodes the element.
-    /// Returns `Ok(data_bit)` if this is a data slot, or `Err(child_bit)` if this is a child slot.
-    pub(crate) const fn decode(self) -> Result<u32, u32> {
-        if self.0 >= CHILD_FLAG {
-            Err((self.0 - CHILD_FLAG) as u32)
-        } else {
-            Ok(self.0 as u32)
-        }
-    }
+/// A raw slot pointing to a specific data or child bit.
+#[derive(Clone, Copy)]
+pub(crate) enum Slot {
+    Data(u8),
+    Child(u8),
 }
 
 /// Mapping from the lexicographic iteration position to the data / child cell.
-pub(crate) const LEX_ORDER: [LexElem; NUM_DATA + NUM_CHILDREN] =
+pub(crate) const LEX_ORDER: [Slot; NUM_DATA + NUM_CHILDREN] =
     array_const_fn_init![const_lex_iter; 63];
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-const fn const_lex_iter(i: usize) -> LexElem {
+const fn const_lex_iter(i: usize) -> Slot {
     let mut i = i as u32;
     let mut node: u32 = 0;
     let mut depth: u32 = 0;
 
     loop {
         if depth == K {
-            return LexElem::child((node - ((1 << K) - 1)) as u8);
+            return Slot::Child((node - ((1 << K) - 1)) as u8);
         }
 
         // This position in the traversal is the current node
         if i == 0 {
-            return LexElem::data(node as u8);
+            return Slot::Data(node as u8);
         }
 
         // Skip current node, descend into children
@@ -85,7 +64,7 @@ const DATA_LEX_POS: [u8; NUM_DATA] = {
     let mut table = [0u8; NUM_DATA];
     let mut i = 0;
     while i < NUM_DATA + NUM_CHILDREN {
-        if let Ok(db) = LEX_ORDER[i].decode() {
+        if let Slot::Data(db) = LEX_ORDER[i] {
             table[db as usize] = i as u8;
         }
         i += 1;
@@ -98,7 +77,7 @@ const CHILD_LEX_POS: [u8; NUM_CHILDREN] = {
     let mut table = [0u8; NUM_CHILDREN];
     let mut i = 0;
     while i < NUM_DATA + NUM_CHILDREN {
-        if let Err(cb) = LEX_ORDER[i].decode() {
+        if let Slot::Child(cb) = LEX_ORDER[i] {
             table[cb as usize] = i as u8;
         }
         i += 1;
@@ -149,7 +128,7 @@ impl LexSlots {
 }
 
 impl Iterator for LexSlots {
-    type Item = Result<u32, u32>;
+    type Item = Slot;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -158,7 +137,7 @@ impl Iterator for LexSlots {
         }
         let pos = self.remaining.trailing_zeros();
         self.remaining &= self.remaining - 1;
-        Some(LEX_ORDER[pos as usize].decode())
+        Some(LEX_ORDER[pos as usize])
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -175,7 +154,7 @@ impl DoubleEndedIterator for LexSlots {
         }
         let pos = u64::BITS - 1 - self.remaining.leading_zeros();
         self.remaining &= !(1u64 << pos);
-        Some(LEX_ORDER[pos as usize].decode())
+        Some(LEX_ORDER[pos as usize])
     }
 }
 
@@ -247,15 +226,19 @@ impl<R: Key> Iterator for MaskedLexIter<R> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.slots.next()? {
-            Ok(data_bit) => LexIterElem::Data(DataIdx {
+            Slot::Data(data_bit) => LexIterElem::Data(DataIdx {
                 node: self.loc,
-                bit: data_bit,
+                bit: data_bit as u32,
                 depth: self.depth,
             }),
-            Err(child_bit) => LexIterElem::Child(
-                Loc::new(self.node.children_idx, child_bit, self.node.child_bitmap),
+            Slot::Child(child_bit) => LexIterElem::Child(
+                Loc::new(
+                    self.node.children_idx,
+                    child_bit as u32,
+                    self.node.child_bitmap,
+                ),
                 self.depth + K,
-                extend_repr(self.key, self.depth, child_bit),
+                extend_repr(self.key, self.depth, child_bit as u32),
             ),
         })
     }
@@ -288,14 +271,14 @@ const LEX_AFTER_DATA: [(u32, u32); NUM_DATA] = {
         while j > 0 {
             j -= 1;
             let elem = LEX_ORDER[j];
-            match elem.decode() {
-                Ok(db) => {
+            match elem {
+                Slot::Data(db) => {
                     data_mask |= 1 << db;
                     if db as usize == i {
                         break;
                     }
                 }
-                Err(cb) => {
+                Slot::Child(cb) => {
                     child_mask |= 1 << cb;
                 }
             }
@@ -318,11 +301,11 @@ const LEX_AFTER_CHILD: [(u32, u32); NUM_CHILDREN] = {
         while j > 0 {
             j -= 1;
             let elem = LEX_ORDER[j];
-            match elem.decode() {
-                Ok(db) => {
+            match elem {
+                Slot::Data(db) => {
                     data_mask |= 1 << db;
                 }
-                Err(cb) => {
+                Slot::Child(cb) => {
                     if cb as usize == i {
                         break;
                     }
