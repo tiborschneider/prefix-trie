@@ -2,7 +2,7 @@
 
 use crate::{
     allocator::Loc,
-    node::{Key, MultiBitNode, extend_repr},
+    node::{extend_repr, Key, MultiBitNode},
     table::{DataIdx, K, NUM_CHILDREN, NUM_DATA},
 };
 use array_const_fn_init::array_const_fn_init;
@@ -328,10 +328,21 @@ mod tests {
         let data = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 15) | (1 << 30);
         let children = (1 << 0) | (1 << 1) | (1 << 15) | (1 << 16) | (1 << 31);
         let expected = [
-            Data(0), Data(1), Data(15), Child(0), Child(1),
-            Child(15), Data(2), Child(16), Data(30), Child(31),
+            Data(0),
+            Data(1),
+            Data(15),
+            Child(0),
+            Child(1),
+            Child(15),
+            Data(2),
+            Child(16),
+            Data(30),
+            Child(31),
         ];
-        assert_eq!(LexSlotIter::new(data, children).collect::<Vec<_>>(), expected);
+        assert_eq!(
+            LexSlotIter::new(data, children).collect::<Vec<_>>(),
+            expected
+        );
         assert_eq!(
             LexSlotIter::new(data, children).rev().collect::<Vec<_>>(),
             expected.into_iter().rev().collect::<Vec<_>>(),

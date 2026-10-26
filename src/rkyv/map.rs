@@ -12,22 +12,22 @@ unsafe impl<T> NoUndef for MyPhantomData<T> {}
 
 use num_traits::{CheckedAdd, One, Zero};
 use rkyv::{
-    Archive, Portable, Serialize,
     bytecheck::CheckBytes,
     traits::NoUndef,
     vec::{ArchivedVec, VecResolver},
+    Archive, Portable, Serialize,
 };
 
 use crate::{
-    Prefix,
     aggregate::{fold_coverage, member_coverage},
     allocator::compute_slot,
-    lex_order::{LexSlotIter, Slot, masks_after_child, masks_from_data},
+    lex_order::{masks_after_child, masks_from_data, LexSlotIter, Slot},
     node::{
-        DATA_BIT_TO_PREFIX, Key, child_bit, child_cover_mask, child_cover_mask_for_bit, data_bit,
-        data_cover_mask, data_lpm_mask, extend_repr,
+        child_bit, child_cover_mask, child_cover_mask_for_bit, data_bit, data_cover_mask,
+        data_lpm_mask, extend_repr, Key, DATA_BIT_TO_PREFIX,
     },
-    table::{K, NUM_CHILDREN, NUM_DATA, reconstruct_prefix},
+    table::{reconstruct_prefix, K, NUM_CHILDREN, NUM_DATA},
+    Prefix,
 };
 // needed for doc references.
 #[allow(unused_imports)]

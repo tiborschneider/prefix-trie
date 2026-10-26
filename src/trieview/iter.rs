@@ -5,13 +5,13 @@
 //! [`DifferenceView`][super::DifferenceView], etc. (through a single generic implementation).
 
 use crate::{
-    Prefix,
-    lex_order::{LexSlotIter, Slot, masks_after_child, masks_from_data},
+    lex_order::{masks_after_child, masks_from_data, LexSlotIter, Slot},
     node::{child_bit, data_bit},
     prefix::mask_from_prefix_len,
+    Prefix,
 };
 
-use super::{K, TrieView, reconstruct_prefix};
+use super::{reconstruct_prefix, TrieView, K};
 
 /// Iterator over all `(prefix, value)` pairs in a [`TrieView`] sub-trie.
 ///

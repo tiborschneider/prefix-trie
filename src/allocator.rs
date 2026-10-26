@@ -1,6 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    mem::{MaybeUninit, replace},
+    mem::{replace, MaybeUninit},
     ops::{Index, IndexMut},
 };
 
@@ -954,7 +954,7 @@ mod tests {
     fn test_cell_allocator_clone_panic_cleans_up() {
         use std::{
             cell::{Cell, RefCell},
-            panic::{AssertUnwindSafe, catch_unwind},
+            panic::{catch_unwind, AssertUnwindSafe},
             rc::Rc,
         };
 

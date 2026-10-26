@@ -817,7 +817,7 @@ mod t {
 fn clone_panic_cleans_up_multiple_nodes() {
     use std::{
         cell::{Cell, RefCell},
-        panic::{AssertUnwindSafe, catch_unwind},
+        panic::{catch_unwind, AssertUnwindSafe},
         rc::Rc,
     };
 
@@ -911,7 +911,7 @@ fn clone_panic_cleans_up_multiple_nodes() {
 fn clone_zero_sized_values_counts_clones_and_drops() {
     use std::{
         cell::RefCell,
-        panic::{AssertUnwindSafe, catch_unwind},
+        panic::{catch_unwind, AssertUnwindSafe},
     };
 
     #[derive(Default)]

@@ -5,11 +5,11 @@ use num_traits::Zero;
 use crate::{
     Prefix,
     {
-        PrefixMap,
         allocator::{Loc, RawPtr},
         lex_order::{LexIterElem, LexNodeIter},
         node::child_bit,
-        table::{DataIdx, K, Table},
+        table::{DataIdx, Table, K},
+        PrefixMap,
     },
 };
 
@@ -409,9 +409,9 @@ where
             let Some(loc) = self.lpm_elements.pop() else {
                 // fill the lpm_nodes
                 let loc = self.next_loc?; // if none, then exit.
-                // SAFETY: `Cover` holds `&'a Table<T>` — no structural mutations are possible
-                // for the lifetime `'a`. `loc` starts as `Loc::root()` and is only updated to
-                // the result of a prior `child()` call, so it is always a valid, live node.
+                                          // SAFETY: `Cover` holds `&'a Table<T>` — no structural mutations are possible
+                                          // for the lifetime `'a`. `loc` starts as `Loc::root()` and is only updated to
+                                          // the result of a prior `child()` call, so it is always a valid, live node.
                 self.lpm_elements = unsafe {
                     self.table
                         .data_ancestors(loc, self.depth, self.key, self.prefix_len)

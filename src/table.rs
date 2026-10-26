@@ -3,17 +3,17 @@
 use num_traits::{CheckedAdd, One, Zero};
 
 use crate::{
-    Prefix,
     aggregate::member_coverage,
     allocator::{
-        AllocIdx, CellAllocator, DATA_COUNT_TO_TIER, DATA_SPACING, Loc, NodeAllocator, RawPtr,
+        AllocIdx, CellAllocator, Loc, NodeAllocator, RawPtr, DATA_COUNT_TO_TIER, DATA_SPACING,
     },
-    lex_order::{LexNodeIter, masks_after_child, masks_from_data},
+    lex_order::{masks_after_child, masks_from_data, LexNodeIter},
     node::{
-        DATA_BIT_TO_PREFIX, Key, MultiBitNode, child_bit, child_cover_mask, data_bit,
-        data_cover_mask, extend_repr,
+        child_bit, child_cover_mask, data_bit, data_cover_mask, extend_repr, Key, MultiBitNode,
+        DATA_BIT_TO_PREFIX,
     },
     prefix::mask_from_prefix_len,
+    Prefix,
 };
 
 // ============================================================================
@@ -1431,8 +1431,10 @@ impl<T: Clone> Clone for Table<T> {
                 let count = source.data_bitmap.count_ones() as usize;
                 // SAFETY: this live node owns `count` initialized values packed
                 // contiguously at data_idx, with no mutable borrows during cloning.
-                let data_idx =
-                    unsafe { x.cells.alloc_clone_from(&self.cells, source.data_idx, count) };
+                let data_idx = unsafe {
+                    x.cells
+                        .alloc_clone_from(&self.cells, source.data_idx, count)
+                };
                 // Publish only after the entire block succeeds. On panic, the
                 // allocator guard cleans up this block; x drops earlier blocks.
                 node.data_idx = data_idx;
