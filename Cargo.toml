@@ -47,6 +47,8 @@ required-features = ["ipnet", "serde"]
 
 [features]
 default = ["ipnet"]
+# Requires nightly Rust; specializes cloning for trivially clonable values.
+nightly = []
 serde = ["dep:serde", "ipnet/serde", "ipnetwork/serde", "cidr/serde"]
 ipnetwork = ["dep:ipnetwork"]
 ipnet = ["dep:ipnet"]

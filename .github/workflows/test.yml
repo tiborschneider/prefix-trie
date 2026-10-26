@@ -28,9 +28,9 @@ jobs:
     - name: Install cargo-hack
       run: cargo install cargo-hack
     - name: Run tests
-      run: cargo hack --feature-powerset test --verbose --lib --release
+      run: cargo hack --feature-powerset ${{ matrix.toolchain != 'nightly' && '--exclude-features nightly' || '' }} test --verbose --lib --release
     - name: Run doctests
-      run: cargo hack --feature-powerset test --verbose --doc
+      run: cargo hack --feature-powerset ${{ matrix.toolchain != 'nightly' && '--exclude-features nightly' || '' }} test --verbose --doc
 
   fmt:
     runs-on: ubuntu-latest
@@ -58,7 +58,7 @@ jobs:
     - name: Install cargo-hack
       run: cargo install cargo-hack
     - name: Run clippy
-      run: cargo hack --feature-powerset clippy --verbose
+      run: cargo hack --feature-powerset --exclude-features nightly clippy --verbose
 
   msrv:
     runs-on: ubuntu-latest

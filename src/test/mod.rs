@@ -814,6 +814,39 @@ mod t {
 }
 
 #[test]
+fn clone_memcpy_preserves_values_and_independence() {
+    let mut source = PrefixMap::new();
+    for i in 0u32..6 {
+        source.insert((i << 27, 5u8), i);
+    }
+    source.insert((0, 0), 100);
+    source.insert((0, 1), 101);
+    source.insert((0, 2), 102);
+    // Leave freed blocks and padding in both arenas before copying.
+    source.remove(&(0, 1));
+    source.remove(&(0, 5));
+    source.remove(&(1 << 27, 5));
+    assert!(source.check_memory_alloc());
+
+    let mut copied = source.clone_memcpy();
+    assert_eq!(copied, source);
+    assert!(copied.check_memory_alloc());
+
+    copied.insert((0, 0), 200);
+    copied.insert((7 << 27, 5), 7);
+    assert_eq!(source.get(&(0, 0)), Some(&100));
+    assert_eq!(source.get(&(7 << 27, 5)), None);
+    source.remove(&(0, 2));
+    assert_eq!(copied.get(&(0, 2)), Some(&102));
+    assert!(source.check_memory_alloc());
+    assert!(copied.check_memory_alloc());
+
+    drop(source);
+    assert_eq!(copied.get(&(0, 0)), Some(&200));
+    assert!(copied.check_memory_alloc());
+}
+
+#[test]
 fn clone_panic_cleans_up_multiple_nodes() {
     use std::{
         cell::{Cell, RefCell},

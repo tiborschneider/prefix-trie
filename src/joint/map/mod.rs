@@ -49,6 +49,20 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
         }
     }
 
+    /// Clone the map by copying nodes and values in bulk instead of cloning each value.
+    ///
+    /// Requires `Copy`. With `nightly` enabled, [`clone`](Clone::clone) already does this, so
+    /// calling this method explicitly is unnecessary.
+    pub fn clone_memcpy(&self) -> Self
+    where
+        T: Copy
+    {
+        Self {
+            t1: self.t1.clone_memcpy(),
+            t2: self.t2.clone_memcpy(),
+        }
+    }
+
     /// Returns the number of entries stored in the map.
     ///
     /// This is the number of stored prefixes, not the number of addresses they cover (see

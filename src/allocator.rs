@@ -172,6 +172,25 @@ impl<T> CellAllocator<T> {
         }
     }
 
+    /// Safety: bitwise duplication of `T` must produce an independently valid value. I.e., T must
+    /// be either `Copy` or `TrivialClone`.
+    pub(crate) unsafe fn clone_memcpy_unchecked(&self) -> Self {
+        // SAFETY: shared access to the source buffer; no mutable slots are borrowed.
+        let source = unsafe { &*self.data.get() };
+        let mut data: Vec<MaybeUninit<T>> = Vec::with_capacity(source.len());
+        // SAFETY: the buffers are disjoint and have space for source.len() slots.
+        // Copy/TrivialClone permits duplicating initialized values; MaybeUninit
+        // also permits copying padding and free slots without reading them as T.
+        unsafe {
+            std::ptr::copy_nonoverlapping(source.as_ptr(), data.as_mut_ptr(), source.len());
+            data.set_len(source.len());
+        }
+        Self {
+            data: UnsafeCell::new(data),
+            free_lists: self.free_lists.clone(),
+        }
+    }
+
     /// Reserve space for additional cells without changing which slots are initialized.
     pub(crate) fn reserve(&mut self, additional: usize) {
         self.data.get_mut().reserve(additional);

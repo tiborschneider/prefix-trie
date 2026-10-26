@@ -2,6 +2,7 @@
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_notable_trait, doc_cfg))]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(feature = "nightly", feature(min_specialization, trivial_clone))]
 
 //! # Prefix-Trie
 //!
