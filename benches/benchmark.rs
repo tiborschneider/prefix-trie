@@ -5,7 +5,8 @@ use common::*;
 const ITERS: usize = 100_000;
 
 use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion, Throughput,
+    criterion_group, criterion_main, measurement::WallTime, BatchSize, BenchmarkGroup, Criterion,
+    Throughput,
 };
 use ipnet::{Ipv4Net, Ipv6Net};
 use prefix_trie::{Prefix, PrefixMap, PrefixSet};
@@ -152,38 +153,61 @@ pub fn bgp_lpm_random_ipv6(c: &mut Criterion) {
     bgp_lpm_random_for::<Ipv6Net>(c, "bgp-lpm-random-ipv6");
 }
 
-/// Whole-table traversals of `PrefixMap`: `clone`, `cover` of random prefixes, and `iter`.
+fn bench_clone_one<P, M>(group: &mut BenchmarkGroup<'_, WallTime>, setup: &[Insn<P>])
+where
+    P: BenchPrefix,
+    M: BenchTraverse<P>,
+{
+    let mut map = M::new_empty();
+    map.run(setup);
+    group.bench_function(M::NAME, |b| {
+        // Drop each copy outside the timed region. Keep only one copy at a time
+        // because cloning a full BGP table can allocate a large amount of memory.
+        b.iter_batched(
+            || (),
+            |()| std::hint::black_box(&map).clone_map(),
+            BatchSize::PerIteration,
+        )
+    });
+}
+
+fn bench_iter_one<P, M>(group: &mut BenchmarkGroup<'_, WallTime>, setup: &[Insn<P>])
+where
+    P: BenchPrefix,
+    M: BenchTraverse<P>,
+{
+    let mut map = M::new_empty();
+    map.run(setup);
+    group.bench_function(M::NAME, |b| {
+        b.iter(|| std::hint::black_box(&map).consume_entries())
+    });
+}
+
+/// Whole-table copying and native entry traversal for all four maps.
+/// TreeBitMap is rebuilt for the clone benchmark; the others use `Clone`.
+/// Iteration consumes each entry, without sorting unordered map output.
 fn bgp_traverse_for<P>(c: &mut Criterion, family: &str)
 where
     P: BenchPrefix,
 {
     let addrs = P::ris_peer_initial_state(0, SortingOrder::Random);
-    let mut map = PrefixMap::<P, u32>::new_empty();
-    map.run(&fill_table(0, &addrs));
-    let mut rng = StdRng::seed_from_u64(0);
-    let queries: Vec<P> = (0..ITERS)
-        .map(|_| *addrs.iter().choose(&mut rng).unwrap())
-        .collect();
+    let setup = fill_table(0, &addrs);
+    let len = addrs.iter().collect::<HashSet<_>>().len() as u64;
 
     let mut group = c.benchmark_group(format!("bgp-clone-{family}"));
-    group.throughput(Throughput::Elements(map.len() as u64));
-    group.bench_function("PrefixMap", |b| b.iter(|| map.clone()));
-    group.finish();
-
-    let mut group = c.benchmark_group(format!("bgp-cover-{family}"));
-    group.throughput(Throughput::Elements(queries.len() as u64));
-    group.bench_function("PrefixMap", |b| {
-        b.iter(|| {
-            for q in &queries {
-                std::hint::black_box(map.cover(q).count());
-            }
-        })
-    });
+    group.throughput(Throughput::Elements(len));
+    bench_clone_one::<P, PrefixMap<P, u32>>(&mut group, &setup);
+    bench_clone_one::<P, P::IpLookupTable>(&mut group, &setup);
+    bench_clone_one::<P, HashMap<P, u32>>(&mut group, &setup);
+    bench_clone_one::<P, BTreeMap<P, u32>>(&mut group, &setup);
     group.finish();
 
     let mut group = c.benchmark_group(format!("bgp-iter-{family}"));
-    group.throughput(Throughput::Elements(map.len() as u64));
-    group.bench_function("PrefixMap", |b| b.iter(|| map.iter().count()));
+    group.throughput(Throughput::Elements(len));
+    bench_iter_one::<P, PrefixMap<P, u32>>(&mut group, &setup);
+    bench_iter_one::<P, P::IpLookupTable>(&mut group, &setup);
+    bench_iter_one::<P, HashMap<P, u32>>(&mut group, &setup);
+    bench_iter_one::<P, BTreeMap<P, u32>>(&mut group, &setup);
     group.finish();
 }
 

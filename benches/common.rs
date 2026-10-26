@@ -78,7 +78,7 @@ pub enum SortingOrder {
 
 pub trait DataSampler: Prefix + Sized + Copy {
     /// Associated Type to achieve the type bounds on the prefix.
-    type IpLookupTable: BenchMap<Self> + BenchLpm<Self>;
+    type IpLookupTable: BenchMap<Self> + BenchLpm<Self> + BenchTraverse<Self>;
 
     fn ris_peer_initial_state(seed: u64, order: SortingOrder) -> Vec<Self>;
     fn ris_peer_mutations(seed: u64) -> Vec<Insn<Self>>;
@@ -282,6 +282,77 @@ impl BenchLpm<Ipv4Net> for IpLookupTable<Ipv4Addr, u32> {
 impl BenchLpm<Ipv6Net> for IpLookupTable<Ipv6Addr, u32> {
     fn longest_match(&self, addr: Ipv6Net) -> Option<u32> {
         self.longest_match(addr.addr()).map(|(_, _, v)| *v)
+    }
+}
+
+/// Whole-map copying and native entry traversal, without imposing a common iteration order.
+/// TreeBitMap is copied by rebuilding because it does not implement `Clone`.
+pub trait BenchTraverse<P: Prefix + Copy>: BenchMap<P> {
+    fn clone_map(&self) -> Self;
+    fn consume_entries(&self);
+}
+
+fn consume_iter(iter: impl Iterator) {
+    iter.for_each(|entry| {
+        std::hint::black_box(entry);
+    });
+}
+
+impl<P: Prefix + Copy> BenchTraverse<P> for PrefixMap<P, u32> {
+    fn clone_map(&self) -> Self {
+        self.clone()
+    }
+
+    fn consume_entries(&self) {
+        consume_iter(self.iter());
+    }
+}
+
+impl<P: Prefix + Copy + Hash + Eq> BenchTraverse<P> for HashMap<P, u32> {
+    fn clone_map(&self) -> Self {
+        self.clone()
+    }
+
+    fn consume_entries(&self) {
+        consume_iter(self.iter());
+    }
+}
+
+impl<P: Prefix + Copy + Ord> BenchTraverse<P> for BTreeMap<P, u32> {
+    fn clone_map(&self) -> Self {
+        self.clone()
+    }
+
+    fn consume_entries(&self) {
+        consume_iter(self.iter());
+    }
+}
+
+impl BenchTraverse<Ipv4Net> for IpLookupTable<Ipv4Addr, u32> {
+    fn clone_map(&self) -> Self {
+        let mut copy = Self::new();
+        for (addr, len, value) in self.iter() {
+            copy.insert(addr, len, *value);
+        }
+        copy
+    }
+
+    fn consume_entries(&self) {
+        consume_iter(self.iter());
+    }
+}
+
+impl BenchTraverse<Ipv6Net> for IpLookupTable<Ipv6Addr, u32> {
+    fn clone_map(&self) -> Self {
+        let mut copy = Self::new();
+        for (addr, len, value) in self.iter() {
+            copy.insert(addr, len, *value);
+        }
+        copy
+    }
+
+    fn consume_entries(&self) {
+        consume_iter(self.iter());
     }
 }
 
