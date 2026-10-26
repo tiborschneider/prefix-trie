@@ -3,17 +3,17 @@
 use num_traits::{CheckedAdd, One, Zero};
 
 use crate::{
+    Prefix,
     aggregate::member_coverage,
     allocator::{
-        AllocIdx, CellAllocator, Loc, NodeAllocator, RawPtr, DATA_COUNT_TO_TIER, DATA_SPACING,
+        AllocIdx, CellAllocator, DATA_COUNT_TO_TIER, DATA_SPACING, Loc, NodeAllocator, RawPtr,
     },
-    lex_order::{masks_after_child, masks_from_data, LexNodeIter},
+    lex_order::{LexNodeIter, masks_after_child, masks_from_data},
     node::{
-        child_bit, child_cover_mask, data_bit, data_cover_mask, extend_repr, Key, MultiBitNode,
-        DATA_BIT_TO_PREFIX,
+        DATA_BIT_TO_PREFIX, Key, MultiBitNode, child_bit, child_cover_mask, data_bit,
+        data_cover_mask, extend_repr,
     },
     prefix::mask_from_prefix_len,
-    Prefix,
 };
 
 // ============================================================================
@@ -1404,8 +1404,28 @@ impl<T> Table<T> {
     }
 }
 
-impl<T: Clone> Clone for Table<T> {
-    fn clone(&self) -> Self {
+impl<T> Table<T> {
+    /// Safety: bitwise duplication of `T` must produce an independently valid value. I.e., T must
+    /// be either `Copy` or `TrivialClone`.
+    unsafe fn clone_memcpy_unchecked(&self) -> Self {
+        Self {
+            nodes: self.nodes.clone(),
+            cells: self.cells.clone_memcpy_unchecked(),
+        }
+    }
+}
+
+impl<T: Copy> Table<T> {
+    pub(crate) fn clone_memcpy(&self) -> Self {
+        // Safety: T is Copy.
+        unsafe { self.clone_memcpy_unchecked() }
+    }
+}
+
+impl<T: Clone> Table<T> {
+    /// Slow version of clone that calls `clone` on each element. This operation remains safe even
+    /// if `T::clone` panics.
+    fn clone_slow(&self) -> Self {
         let mut x = Self {
             nodes: self.nodes.clone(),
             cells: Default::default(),
@@ -1443,6 +1463,43 @@ impl<T: Clone> Clone for Table<T> {
         }
 
         x
+    }
+}
+
+// Hide unstable syntax from stable builds, as hashbrown's default_fn! does.
+#[cfg(feature = "nightly")]
+macro_rules! default_fn {
+    ($($tt:tt)*) => { default $($tt)* };
+}
+
+#[cfg(not(feature = "nightly"))]
+macro_rules! default_fn {
+    ($($tt:tt)*) => { $($tt)* };
+}
+
+trait TableClone {
+    fn clone_spec(&self) -> Self;
+}
+
+impl<T: Clone> TableClone for Table<T> {
+    default_fn! {
+        fn clone_spec(&self) -> Self {
+            self.clone_slow()
+        }
+    }
+}
+
+#[cfg(feature = "nightly")]
+impl<T: std::clone::TrivialClone> TableClone for Table<T> {
+    fn clone_spec(&self) -> Self {
+        // Safety: T is TrivialClone
+        unsafe { self.clone_memcpy_unchecked() }
+    }
+}
+
+impl<T: Clone> Clone for Table<T> {
+    fn clone(&self) -> Self {
+        self.clone_spec()
     }
 }
 

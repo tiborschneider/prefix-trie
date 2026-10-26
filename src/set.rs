@@ -17,8 +17,13 @@ use super::{
 ///
 /// You can perform union, intersection, and difference operations by creating a view with
 /// [`AsView`].
-#[derive(Clone)]
 pub struct PrefixSet<P>(pub(crate) PrefixMap<P, ()>);
+
+impl<P: Prefix> Clone for PrefixSet<P> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone_memcpy())
+    }
+}
 
 impl<P: Prefix> PrefixSet<P> {
     /// Create a new, empty prefix set.
