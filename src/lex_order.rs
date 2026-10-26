@@ -22,8 +22,7 @@ pub(crate) enum Slot {
 }
 
 /// Mapping from the lexicographic iteration position to the data / child cell.
-pub(crate) const LEX_ORDER: [Slot; NUM_DATA + NUM_CHILDREN] =
-    array_const_fn_init![const_lex_iter; 63];
+const LEX_ORDER: [Slot; NUM_DATA + NUM_CHILDREN] = array_const_fn_init![const_lex_iter; 63];
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 const fn const_lex_iter(i: usize) -> Slot {
@@ -106,12 +105,12 @@ fn to_lex(data_bitmap: u32, child_bitmap: u32) -> u64 {
 /// order. `Ok(bit)` denotes data and `Err(bit)` denotes a child. Either end can be consumed
 /// without visiting absent slots, and each occupied slot is yielded at most once.
 #[derive(Clone, Default)]
-pub(crate) struct LexSlots {
+pub(crate) struct LexSlotIter {
     // Bit positions are indices into LEX_ORDER, not raw data/child bitmap positions.
     remaining: u64,
 }
 
-impl LexSlots {
+impl LexSlotIter {
     /// Construct from occupancy bitmaps containing only valid data/child bits.
     #[inline]
     pub(crate) fn new(data_bitmap: u32, child_bitmap: u32) -> Self {
@@ -122,12 +121,12 @@ impl LexSlots {
 
     /// Retain only the supplied valid data/child bits; never restore consumed slots.
     #[inline]
-    pub(crate) fn apply_masks(&mut self, data_bitmap: u32, child_bitmap: u32) {
-        self.remaining &= to_lex(data_bitmap, child_bitmap);
+    pub(crate) fn apply_masks(&mut self, data_mask: u32, child_mask: u32) {
+        self.remaining &= to_lex(data_mask, child_mask);
     }
 }
 
-impl Iterator for LexSlots {
+impl Iterator for LexSlotIter {
     type Item = Slot;
 
     #[inline]
@@ -146,7 +145,7 @@ impl Iterator for LexSlots {
     }
 }
 
-impl DoubleEndedIterator for LexSlots {
+impl DoubleEndedIterator for LexSlotIter {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
@@ -158,44 +157,44 @@ impl DoubleEndedIterator for LexSlots {
     }
 }
 
-impl ExactSizeIterator for LexSlots {
+impl ExactSizeIterator for LexSlotIter {
     fn len(&self) -> usize {
         self.remaining.count_ones() as usize
     }
 }
 
-impl std::iter::FusedIterator for LexSlots {}
+impl std::iter::FusedIterator for LexSlotIter {}
 
-/// Map-specific wrapper resolving ordered slots against an original node snapshot.
+/// Wraps [`LexSlotIter`] with the node information to compute the popcount.
 #[derive(Clone)]
-pub(crate) struct MaskedLexIter<R> {
+pub(crate) struct LexNodeIter<R> {
     loc: Loc,
     depth: u32,
     key: R,
     // Original (unmasked) node: kept for correct POPCNT slot computation.
     node: MultiBitNode,
-    slots: LexSlots,
+    slots: LexSlotIter,
 }
 
-impl<R: Key> Default for MaskedLexIter<R> {
+impl<R: Key> Default for LexNodeIter<R> {
     fn default() -> Self {
         Self {
             loc: Loc::root(),
             depth: Default::default(),
             key: R::zero(),
             node: Default::default(),
-            slots: LexSlots::default(),
+            slots: LexSlotIter::default(),
         }
     }
 }
 
-impl<R> MaskedLexIter<R> {
+impl<R> LexNodeIter<R> {
     pub(crate) fn new(loc: Loc, depth: u32, key: R, node: MultiBitNode) -> Self {
         Self {
             loc,
             depth,
             key,
-            slots: LexSlots::new(node.data_bitmap, node.child_bitmap),
+            slots: LexSlotIter::new(node.data_bitmap, node.child_bitmap),
             node,
         }
     }
@@ -220,7 +219,7 @@ impl<R> MaskedLexIter<R> {
     }
 }
 
-impl<R: Key> Iterator for MaskedLexIter<R> {
+impl<R: Key> Iterator for LexNodeIter<R> {
     type Item = LexIterElem<R>;
 
     #[inline]
@@ -246,13 +245,13 @@ impl<R: Key> Iterator for MaskedLexIter<R> {
 
 /// Returns `(data_mask, child_mask)` of all entries at or after `data_bit` in lex order.
 #[inline(always)]
-pub(crate) fn lex_after_data(data_bit: u32) -> (u32, u32) {
+pub(crate) fn masks_from_data(data_bit: u32) -> (u32, u32) {
     LEX_AFTER_DATA[data_bit as usize]
 }
 
 /// Returns `(data_mask, child_mask)` of all entries strictly after `child_bit` in lex order.
 #[inline(always)]
-pub(crate) fn lex_after_child(child_bit: u32) -> (u32, u32) {
+pub(crate) fn masks_after_child(child_bit: u32) -> (u32, u32) {
     LEX_AFTER_CHILD[child_bit as usize]
 }
 

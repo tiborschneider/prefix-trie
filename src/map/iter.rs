@@ -7,7 +7,7 @@ use crate::{
     {
         PrefixMap,
         allocator::{Loc, RawPtr},
-        lex_order::{LexIterElem, MaskedLexIter},
+        lex_order::{LexIterElem, LexNodeIter},
         node::child_bit,
         table::{DataIdx, K, Table},
     },
@@ -16,7 +16,7 @@ use crate::{
 /// An iterator over all entries of a [`PrefixMap`] in lexicographic order.
 pub struct Iter<'a, P: Prefix, T> {
     table: Option<&'a Table<T>>,
-    stack: Vec<MaskedLexIter<P::R>>,
+    stack: Vec<LexNodeIter<P::R>>,
 }
 
 impl<P: Prefix, T> Clone for Iter<'_, P, T> {
@@ -46,7 +46,7 @@ impl<'a, P: Prefix, T> Iter<'a, P, T> {
         Self::at_node(table, lex)
     }
 
-    pub(crate) fn at_node(table: &'a Table<T>, lex: MaskedLexIter<P::R>) -> Self {
+    pub(crate) fn at_node(table: &'a Table<T>, lex: LexNodeIter<P::R>) -> Self {
         let stack = vec![lex];
         Self {
             table: Some(table),
@@ -54,7 +54,7 @@ impl<'a, P: Prefix, T> Iter<'a, P, T> {
         }
     }
 
-    pub(crate) fn from_stack(table: &'a Table<T>, stack: Vec<MaskedLexIter<P::R>>) -> Self {
+    pub(crate) fn from_stack(table: &'a Table<T>, stack: Vec<LexNodeIter<P::R>>) -> Self {
         Self {
             table: Some(table),
             stack,
@@ -167,7 +167,7 @@ pub struct IterMut<'a, P: Prefix, T> {
     // 1. This structure must be created using a mutable reference to the table (see Self::new).
     // 2. The tree cannot have cycles (ensured by the way we create the tree.)
     table: Option<(&'a Table<T>, RawPtr<T>)>,
-    stack: Vec<MaskedLexIter<P::R>>,
+    stack: Vec<LexNodeIter<P::R>>,
 }
 
 impl<P: Prefix, T> Default for IterMut<'_, P, T> {
@@ -188,7 +188,7 @@ impl<'a, P: Prefix, T> IterMut<'a, P, T> {
         Self::at_node(table, lex)
     }
 
-    pub(crate) fn at_node(table: &'a mut Table<T>, lex: MaskedLexIter<P::R>) -> Self {
+    pub(crate) fn at_node(table: &'a mut Table<T>, lex: LexNodeIter<P::R>) -> Self {
         let ptr = table.raw_cells();
         Self {
             table: Some((table, ptr)),
@@ -196,7 +196,7 @@ impl<'a, P: Prefix, T> IterMut<'a, P, T> {
         }
     }
 
-    pub(crate) fn from_stack(table: &'a mut Table<T>, stack: Vec<MaskedLexIter<P::R>>) -> Self {
+    pub(crate) fn from_stack(table: &'a mut Table<T>, stack: Vec<LexNodeIter<P::R>>) -> Self {
         let ptr = table.raw_cells();
         Self {
             table: Some((table, ptr)),
@@ -259,7 +259,7 @@ impl<'a, P: Prefix, T> Iterator for ValuesMut<'a, P, T> {
 #[derive(Clone)]
 pub struct IntoIter<P: Prefix, T> {
     table: Table<T>,
-    stack: Vec<MaskedLexIter<P::R>>,
+    stack: Vec<LexNodeIter<P::R>>,
 }
 
 impl<P: Prefix, T> IntoIter<P, T> {
@@ -271,7 +271,7 @@ impl<P: Prefix, T> IntoIter<P, T> {
         Self::at_node(table, lex)
     }
 
-    pub(crate) fn at_node(table: Table<T>, lex: MaskedLexIter<P::R>) -> Self {
+    pub(crate) fn at_node(table: Table<T>, lex: LexNodeIter<P::R>) -> Self {
         let stack = vec![lex];
         Self { table, stack }
     }
@@ -475,7 +475,7 @@ where
 pub(crate) fn lpm_children_iter_start<P: Prefix, T>(
     table: &Table<T>,
     prefix: &P,
-) -> MaskedLexIter<P::R> {
+) -> LexNodeIter<P::R> {
     let key = prefix.repr();
     let prefix_len = prefix.prefix_len() as u32;
     table.lex_iter_at(key, prefix_len)

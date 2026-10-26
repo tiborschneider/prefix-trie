@@ -22,7 +22,7 @@ use crate::{
     Prefix,
     aggregate::{fold_coverage, member_coverage},
     allocator::compute_slot,
-    lex_order::{LexSlots, Slot, lex_after_child, lex_after_data},
+    lex_order::{LexSlotIter, Slot, masks_after_child, masks_from_data},
     node::{
         DATA_BIT_TO_PREFIX, Key, child_bit, child_cover_mask, child_cover_mask_for_bit, data_bit,
         data_cover_mask, data_lpm_mask, extend_repr,
@@ -1197,7 +1197,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
             if prefix_len < depth + K {
                 // Target falls within this node as a data slot.
                 let data_bit = data_bit(key, prefix_len);
-                let (data_mask, child_mask) = lex_after_data(data_bit);
+                let (data_mask, child_mask) = masks_from_data(data_bit);
                 let data_mask = if inclusive {
                     data_mask
                 } else {
@@ -1210,7 +1210,7 @@ impl<P: Prefix, T: Archive> ArchivedPrefixMap<P, T> {
 
             // Target is deeper; follow the child pointer.
             let child_bit = child_bit(depth, key);
-            let (data_mask, child_mask) = lex_after_child(child_bit);
+            let (data_mask, child_mask) = masks_after_child(child_bit);
             lex.apply_masks(data_mask, child_mask);
             stack.push(lex);
 
@@ -1378,7 +1378,7 @@ impl Loc {
 }
 
 pub(super) struct MaskedLexIter<'a, R> {
-    slots: LexSlots,
+    slots: LexSlotIter,
     depth: u32,
     key: R,
     // Original (unmasked) node: kept for correct POPCNT slot computation.
@@ -1408,7 +1408,7 @@ impl<'a, R> MaskedLexIter<'a, R> {
     {
         let node = &map.nodes[loc.idx()];
         Self {
-            slots: LexSlots::new(node.data_bitmap(), node.child_bitmap()),
+            slots: LexSlotIter::new(node.data_bitmap(), node.child_bitmap()),
             depth,
             key,
             node,

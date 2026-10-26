@@ -6,7 +6,7 @@ use crate::{
     Prefix,
     aggregate::member_coverage,
     allocator::{AllocIdx, CellAllocator, Loc, NodeAllocator, RawPtr},
-    lex_order::{MaskedLexIter, lex_after_child, lex_after_data},
+    lex_order::{LexNodeIter, masks_after_child, masks_from_data},
     node::{
         DATA_BIT_TO_PREFIX, Key, MultiBitNode, child_bit, child_cover_mask, data_bit,
         data_cover_mask, extend_repr,
@@ -824,9 +824,9 @@ impl<T> Table<T> {
     }
 
     // Create a lex iterator at a specific location
-    pub(crate) fn lex_iter_at<R: Key>(&self, key: R, prefix_len: u32) -> MaskedLexIter<R> {
+    pub(crate) fn lex_iter_at<R: Key>(&self, key: R, prefix_len: u32) -> LexNodeIter<R> {
         let Some((loc, depth)) = self.find_loc(key, prefix_len) else {
-            return MaskedLexIter::default();
+            return LexNodeIter::default();
         };
         // SAFETY: `find_loc` traversed from `Loc::root()` to `loc`; since the traversal
         // completed without structural mutations, `loc` is a valid, live node location.
@@ -875,8 +875,8 @@ impl<T> Table<T> {
     /// `loc` must be a valid, live node location: the `AllocIdx` inside `loc` must still point
     /// into the active node allocation (i.e. no tier upgrade/downgrade of `loc`'s parent has
     /// occurred since `loc` was obtained).
-    pub(crate) unsafe fn lex_iter<R: Key>(&self, loc: Loc, depth: u32, key: R) -> MaskedLexIter<R> {
-        MaskedLexIter::new(loc, depth, key, *self.node(loc))
+    pub(crate) unsafe fn lex_iter<R: Key>(&self, loc: Loc, depth: u32, key: R) -> LexNodeIter<R> {
+        LexNodeIter::new(loc, depth, key, *self.node(loc))
     }
 
     /// Build an iterator stack positioned at a given prefix in lex order.
@@ -889,7 +889,7 @@ impl<T> Table<T> {
         key: R,
         prefix_len: u32,
         inclusive: bool,
-    ) -> Vec<MaskedLexIter<R>> {
+    ) -> Vec<LexNodeIter<R>> {
         let mut stack = Vec::new();
         let mut loc = Loc::root();
         let mut depth = 0u32;
@@ -902,7 +902,7 @@ impl<T> Table<T> {
             if prefix_len < depth + K {
                 // Target falls within this node as a data slot.
                 let data_bit = data_bit(key, prefix_len);
-                let (data_mask, child_mask) = lex_after_data(data_bit);
+                let (data_mask, child_mask) = masks_from_data(data_bit);
                 let data_mask = if inclusive {
                     data_mask
                 } else {
@@ -915,7 +915,7 @@ impl<T> Table<T> {
 
             // Target is deeper; follow the child pointer.
             let child_bit = child_bit(depth, key);
-            let (data_mask, child_mask) = lex_after_child(child_bit);
+            let (data_mask, child_mask) = masks_after_child(child_bit);
             lex.apply_masks(data_mask, child_mask);
             stack.push(lex);
 

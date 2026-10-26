@@ -6,7 +6,7 @@
 
 use crate::{
     Prefix,
-    lex_order::{LexSlots, Slot, lex_after_child, lex_after_data},
+    lex_order::{LexSlotIter, Slot, masks_after_child, masks_from_data},
     node::{child_bit, data_bit},
     prefix::mask_from_prefix_len,
 };
@@ -97,7 +97,7 @@ fn expand_node_masked<'a, V: TrieView<'a>>(
     let effective_data = view.data_bitmap() & data_mask;
     let effective_children = view.child_bitmap() & child_mask;
 
-    for elem in LexSlots::new(effective_data, effective_children).rev() {
+    for elem in LexSlotIter::new(effective_data, effective_children).rev() {
         match elem {
             Slot::Data(data_bit) => {
                 let prefix = reconstruct_prefix::<V::P>(view.depth(), view.key(), data_bit as u32);
@@ -160,7 +160,7 @@ fn build_iter_from_stack<'a, V: TrieView<'a>>(
         if target_len < current.depth() + K {
             // Target falls within this node as a data slot.
             let db = data_bit(target_key, target_len);
-            let (data_mask, child_mask) = lex_after_data(db);
+            let (data_mask, child_mask) = masks_from_data(db);
             let data_mask = if inclusive {
                 data_mask
             } else {
@@ -172,7 +172,7 @@ fn build_iter_from_stack<'a, V: TrieView<'a>>(
 
         // Target is deeper; follow the child pointer.
         let cb = child_bit(current.depth(), target_key);
-        let (data_mask, child_mask) = lex_after_child(cb);
+        let (data_mask, child_mask) = masks_after_child(cb);
 
         let has_child = (current.child_bitmap() >> cb) & 1 == 1;
         let child = if has_child {
