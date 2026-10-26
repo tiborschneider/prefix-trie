@@ -95,9 +95,10 @@ fn to_lex_part(mut bitmap: u32, positions: &[u8]) -> u64 {
     mask
 }
 
-/// Convert both occupancy bitmaps into `LEX_ORDER` positions.
+/// Convert both occupancy bitmaps into `LEX_ORDER` positions, ignoring unused data bits.
 #[inline(always)]
 fn to_lex(data_bitmap: u32, child_bitmap: u32) -> u64 {
+    let data_bitmap = data_bitmap & ((1u64 << NUM_DATA) - 1) as u32;
     to_lex_part(data_bitmap, &DATA_LEX_POS) | to_lex_part(child_bitmap, &CHILD_LEX_POS)
 }
 
