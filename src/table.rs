@@ -1185,6 +1185,7 @@ impl<T> Table<T> {
     /// - referenced by a live node (via `data_idx` or `children_idx`), or
     /// - recorded in a free list.
     ///
+    /// Unused node slots must equal `MultiBitNode::default()`.
     /// This function returns true if the memory allocation is correct.
     #[cfg(test)]
     pub(crate) fn check_memory_alloc(&self) -> bool {
@@ -1217,6 +1218,7 @@ impl<T> Table<T> {
         // false = unaccounted, true = accounted (referenced or free)
         let mut cell_acc = vec![false; cell_len];
         let mut node_acc = vec![false; node_len];
+        let mut node_live = vec![false; node_len];
 
         // Root node lives at flat index 0 and is never returned by alloc().
         node_acc[0] = true;
@@ -1225,6 +1227,7 @@ impl<T> Table<T> {
         let mut stack = vec![Loc::root()];
         while let Some(loc) = stack.pop() {
             let node = *self.node(loc);
+            node_live[loc.idx.as_usize() + loc.slot as usize] = true;
 
             // -- data allocation --
             if node.data_bitmap != 0 {
@@ -1322,6 +1325,14 @@ impl<T> Table<T> {
                 acc,
                 "node slot {i} is leaked (neither referenced by any live node nor in any free list)"
             );
+            if !node_live[i] {
+                let node = self.nodes[Loc::at_slot(AllocIdx::from_usize(i), 0)];
+                assert_soft!(
+                    correct,
+                    node == Default::default(),
+                    "unused node slot {i} is not reset: {node:?}"
+                );
+            }
         }
 
         correct
@@ -1360,10 +1371,8 @@ impl<T> Table<T> {
 
             // create the children
             let num_children = child_bitmap.count_ones() as usize;
-            // Safety: these nodes will be overwritten once we get to them in the queue. They will
-            // all end up on the queue (see the last line in the loop)
             let children_idx = if num_children > 0 {
-                unsafe { table.nodes.alloc(num_children) }
+                table.nodes.alloc(num_children)
             } else {
                 AllocIdx::empty()
             };
@@ -1403,43 +1412,31 @@ impl<T: Clone> Clone for Table<T> {
         };
 
         // The cloned node allocator initially contains data_idx values that point into `self`.
-        // Clear live data metadata first so `x` can be dropped safely if T::clone panics below.
+        // Clear data metadata first so `x` can be dropped safely if T::clone panics below.
         // Also sum live blocks' tier capacities to reserve the value buffer once.
         let mut capacity = 0;
-        let mut stack = vec![Loc::root()];
-        while let Some(loc) = stack.pop() {
-            let node = self.nodes[loc];
-            x.nodes[loc].data_bitmap = 0;
-            x.nodes[loc].data_idx = AllocIdx::empty();
-            if std::mem::size_of::<T>() != 0 && node.data_bitmap != 0 && !node.data_idx.is_empty() {
+        for node in x.nodes.iter_mut() {
+            if std::mem::size_of::<T>() != 0 && node.data_bitmap != 0 {
                 let count = node.data_bitmap.count_ones() as usize;
                 capacity += DATA_SPACING[DATA_COUNT_TO_TIER[count] as usize];
             }
-            if node.child_bitmap != 0 {
-                stack.extend(node.child_locs());
-            }
+            node.data_bitmap = 0;
+            node.data_idx = AllocIdx::empty();
         }
         x.cells.reserve(capacity);
 
-        // Clone only live nodes reachable from root via DFS. Freed nodes in the flat
-        // array may have stale data_bitmap/data_idx from tier upgrades; visiting them
-        // would allocate cells that are never freed, causing a memory leak.
-        let mut stack = vec![Loc::root()];
-        while let Some(loc) = stack.pop() {
-            let node = self.nodes[loc];
-            if node.data_bitmap != 0 && !node.data_idx.is_empty() {
-                let count = node.data_bitmap.count_ones() as usize;
+        // Unused slots are default nodes, so a flat scan visits each live value block once.
+        for (source, node) in self.nodes.iter().zip(x.nodes.iter_mut()) {
+            if source.data_bitmap != 0 {
+                let count = source.data_bitmap.count_ones() as usize;
                 // SAFETY: this live node owns `count` initialized values packed
                 // contiguously at data_idx, with no mutable borrows during cloning.
                 let data_idx =
-                    unsafe { x.cells.alloc_clone_from(&self.cells, node.data_idx, count) };
+                    unsafe { x.cells.alloc_clone_from(&self.cells, source.data_idx, count) };
                 // Publish only after the entire block succeeds. On panic, the
                 // allocator guard cleans up this block; x drops earlier blocks.
-                x.nodes[loc].data_idx = data_idx;
-                x.nodes[loc].data_bitmap = node.data_bitmap;
-            }
-            if node.child_bitmap != 0 {
-                stack.extend(node.child_locs());
+                node.data_idx = data_idx;
+                node.data_bitmap = source.data_bitmap;
             }
         }
 

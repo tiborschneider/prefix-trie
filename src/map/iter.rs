@@ -291,7 +291,7 @@ impl<P: Prefix, T> Iterator for IntoIter<P, T> {
             match next {
                 LexIterElem::Data(idx) => {
                     // SAFETY: IntoIter owns the table; no external mutations possible.
-                    // `take()` clears the bitmap bit, so the MaskedLexIter snapshot may
+                    // `take()` clears the bitmap bit, so the LexNodeIter snapshot may
                     // yield already-taken bits; `resolve_mut` re-checks and returns None.
                     let Some(r) = (unsafe { idx.resolve_mut(&mut self.table) }) else {
                         continue;

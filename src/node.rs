@@ -13,7 +13,7 @@ pub(crate) trait Key: Unsigned + PrimInt + Zero + One + CheckedShr {}
 impl<R: Unsigned + PrimInt + Zero + One + CheckedShr> Key for R {}
 
 /// A single node for the dense TreeBitMap
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq)]
 pub(crate) struct MultiBitNode {
     pub(super) data_bitmap: u32,
     pub(super) child_bitmap: u32,

@@ -566,6 +566,11 @@ impl<T> CellAllocator<T> {
     }
 }
 
+/// Cache-efficient storage for node metadata. Root is always at index 0.
+///
+/// *Invariant*: Every unused slot, including free blocks and allocation padding, always equal
+/// `MultiBitNode::default()`: zero bitmaps and empty indices. Note, that resetting metadata does
+/// not drop values or free descendants; callers must first transfer or dispose of their ownership.
 #[derive(Clone)]
 pub(crate) struct NodeAllocator {
     data: Vec<MultiBitNode>,
@@ -599,6 +604,14 @@ impl IndexMut<Loc> for NodeAllocator {
 }
 
 impl NodeAllocator {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &MultiBitNode> {
+        self.data.iter()
+    }
+
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut MultiBitNode> {
+        self.data.iter_mut()
+    }
+
     pub(crate) fn mem_size(&self) -> usize {
         self.data.capacity() * std::mem::size_of::<MultiBitNode>()
             + self
@@ -620,11 +633,7 @@ impl NodeAllocator {
     }
 
     /// Allocate a new group of nodes with given capacity tier.
-    ///
-    /// Safety: For the free-list path, returned slots may contain stale node metadata
-    /// (e.g. old `data_idx`/`data_bitmap`). Callers must overwrite all used slots before
-    /// they become reachable through normal tree traversal.
-    pub(crate) unsafe fn alloc(&mut self, count: usize) -> AllocIdx {
+    pub(crate) fn alloc(&mut self, count: usize) -> AllocIdx {
         debug_assert!(count > 0);
         let tier = CHILD_COUNT_TO_TIER[count.min(32)] as usize;
         let cap = CHILD_SPACING[tier];
@@ -642,7 +651,10 @@ impl NodeAllocator {
     pub(crate) fn free(&mut self, idx: AllocIdx, count: usize) {
         debug_assert!(!idx.is_empty());
         let tier = CHILD_COUNT_TO_TIER[count.min(32)] as usize;
-        self.free_lists[tier].push(idx.as_usize() as u32);
+        let start = idx.as_usize();
+        // Padding is already default; only the used slots need resetting.
+        self.data[start..start + count].fill(MultiBitNode::default());
+        self.free_lists[tier].push(start as u32);
     }
 
     /// Insert a new element at the given bit for the given node, and update the data in the node.
@@ -657,10 +669,7 @@ impl NodeAllocator {
         let (new_idx, phys_slot) = if node_snapshot.children_idx.is_empty() {
             // new allocation
             debug_assert!(node_snapshot.child_bitmap == 0);
-            // SAFETY: we immediately populate the data with an empty element.
-            let idx = unsafe { self.alloc(1) };
-            self.data[idx.0 as usize] = MultiBitNode::default();
-            (idx, 0)
+            (self.alloc(1), 0)
         } else {
             // update / re-allocate
             let count = node_snapshot.child_bitmap.count_ones() as usize;
@@ -688,9 +697,7 @@ impl NodeAllocator {
 
         if new_tier > old_tier {
             // Tier upgrade
-            // SAFETY: We immediately populate all used nodes accordingly. Any unused node will
-            // eventually be populated in this funtion (if no tier upgrade), where it is gonna be reset.
-            let new_idx = unsafe { self.alloc(count + 1) };
+            let new_idx = self.alloc(count + 1);
             let old_start = idx.as_usize();
             let new_start = new_idx.as_usize();
 
@@ -698,8 +705,6 @@ impl NodeAllocator {
             for i in 0..phys_slot {
                 self.data[new_start + i] = self.data[old_start + i];
             }
-            // New slot is default-initialized
-            self.data[new_start + phys_slot] = MultiBitNode::default();
             // Copy elements after phys_slot (shifted by 1)
             for i in phys_slot..count {
                 self.data[new_start + i + 1] = self.data[old_start + i];
@@ -712,6 +717,7 @@ impl NodeAllocator {
             for i in (phys_slot..count).rev() {
                 self.data[idx.as_usize() + i + 1] = self.data[idx.as_usize() + i];
             }
+            // shifting requires resetting the node.
             self.data[idx.as_usize() + phys_slot] = MultiBitNode::default();
             idx
         }
@@ -752,9 +758,7 @@ impl NodeAllocator {
 
             if new_tier < old_tier {
                 // Tier downgrade
-                // SAFETY: Right after allocation, we immediately populate the content with the old
-                // content from the previous table.
-                let new_idx = unsafe { self.alloc(new_count) };
+                let new_idx = self.alloc(new_count);
                 let old_start = idx.as_usize();
                 let new_start = new_idx.as_usize();
                 for i in 0..new_count {
@@ -763,6 +767,8 @@ impl NodeAllocator {
                 self.free(idx, count);
                 new_idx
             } else {
+                // Reset the vacated trailing slot to keep padding default.
+                self.data[idx.as_usize() + new_count] = MultiBitNode::default();
                 idx
             }
         } else {
@@ -948,7 +954,7 @@ mod tests {
     fn test_cell_allocator_clone_panic_cleans_up() {
         use std::{
             cell::{Cell, RefCell},
-            panic::{catch_unwind, AssertUnwindSafe},
+            panic::{AssertUnwindSafe, catch_unwind},
             rc::Rc,
         };
 
@@ -1310,10 +1316,10 @@ mod tests {
     #[test]
     fn test_node_allocator_free_list_reuse() {
         let mut alloc = NodeAllocator::default();
-        let idx1 = unsafe { alloc.alloc(2) };
+        let idx1 = alloc.alloc(2);
         alloc.free(idx1, 2);
 
-        let idx2 = unsafe { alloc.alloc(2) };
+        let idx2 = alloc.alloc(2);
         // Should reuse
         assert_eq!(idx1, idx2);
     }
@@ -1322,7 +1328,7 @@ mod tests {
     fn test_node_allocator_insert_slot_same_tier() {
         let mut alloc = NodeAllocator::default();
         // Allocate 4 nodes (tier 2, capacity 4)
-        let idx = unsafe { alloc.alloc(4) };
+        let idx = alloc.alloc(4);
 
         // Insert at count=3 -> count=4, stays in tier 2
         let new_idx = alloc.insert_slot(idx, 3, 0);
@@ -1332,7 +1338,7 @@ mod tests {
     #[test]
     fn test_node_allocator_insert_slot_with_upgrade() {
         let mut alloc = NodeAllocator::default();
-        let idx = unsafe { alloc.alloc(1) };
+        let idx = alloc.alloc(1);
 
         let new_idx = alloc.insert_slot(idx, 1, 0);
         assert_ne!(new_idx, idx);
@@ -1341,7 +1347,7 @@ mod tests {
     #[test]
     fn test_node_allocator_remove_slot_no_downgrade() {
         let mut alloc = NodeAllocator::default();
-        let idx = unsafe { alloc.alloc(4) };
+        let idx = alloc.alloc(4);
 
         let new_idx = alloc.remove_slot(idx, 1, 4);
         assert_eq!(new_idx, idx);
@@ -1350,7 +1356,7 @@ mod tests {
     #[test]
     fn test_node_allocator_remove_slot_with_downgrade() {
         let mut alloc = NodeAllocator::default();
-        let idx = unsafe { alloc.alloc(2) };
+        let idx = alloc.alloc(2);
 
         let new_idx = alloc.remove_slot(idx, 1, 2);
         assert_ne!(new_idx, idx);
@@ -1359,7 +1365,7 @@ mod tests {
     #[test]
     fn test_node_allocator_remove_slot_to_empty() {
         let mut alloc = NodeAllocator::default();
-        let idx = unsafe { alloc.alloc(1) };
+        let idx = alloc.alloc(1);
 
         let new_idx = alloc.remove_slot(idx, 0, 1);
         assert!(new_idx.is_empty());
@@ -1368,7 +1374,7 @@ mod tests {
     #[test]
     fn test_node_allocator_clear() {
         let mut alloc = NodeAllocator::default();
-        let _ = unsafe { alloc.alloc(5) };
+        let _ = alloc.alloc(5);
         alloc.clear();
 
         // After clear, should reset to initial state with just root
@@ -1499,7 +1505,7 @@ mod tests {
         let mut alloc = NodeAllocator::default();
 
         // Start with 1 node, set value at slot 0
-        let idx1 = unsafe { alloc.alloc(1) };
+        let idx1 = alloc.alloc(1);
         let loc = Loc {
             idx: idx1,
             bit: 0,
