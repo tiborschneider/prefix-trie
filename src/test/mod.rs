@@ -812,3 +812,181 @@ mod t {
     #[instantiate_tests(<cidr::Ipv6Inet>)]
     mod ipv6inet {}
 }
+
+#[test]
+fn clone_panic_cleans_up_multiple_nodes() {
+    use std::{
+        cell::{Cell, RefCell},
+        panic::{AssertUnwindSafe, catch_unwind},
+        rc::Rc,
+    };
+
+    struct State {
+        panic_at: usize,
+        attempts: Cell<usize>,
+        clone_drops: RefCell<[usize; 6]>,
+        source_drops: RefCell<[usize; 6]>,
+    }
+
+    struct Value {
+        id: usize,
+        is_clone: bool,
+        state: Rc<State>,
+    }
+
+    impl Clone for Value {
+        fn clone(&self) -> Self {
+            let attempt = self.state.attempts.get();
+            self.state.attempts.set(attempt + 1);
+            assert_ne!(attempt, self.state.panic_at, "intentional clone panic");
+            Self {
+                id: self.id,
+                is_clone: true,
+                state: self.state.clone(),
+            }
+        }
+    }
+
+    impl Drop for Value {
+        fn drop(&mut self) {
+            let drops = if self.is_clone {
+                &self.state.clone_drops
+            } else {
+                &self.state.source_drops
+            };
+            drops.borrow_mut()[self.id] += 1;
+        }
+    }
+
+    // With K=5, lengths 0/1/2 occupy the root block and 5/6/7 occupy
+    // a single child block. Each block is cloned in increasing prefix length.
+    let prefixes = [(0u32, 0u8), (0, 1), (0, 2), (0, 5), (0, 6), (0, 7)];
+    for panic_at in 0..prefixes.len() {
+        let state = Rc::new(State {
+            panic_at,
+            attempts: Cell::new(0),
+            clone_drops: RefCell::new([0; 6]),
+            source_drops: RefCell::new([0; 6]),
+        });
+        let mut map = PrefixMap::new();
+        for (id, prefix) in prefixes.into_iter().enumerate() {
+            map.insert(
+                prefix,
+                Value {
+                    id,
+                    is_clone: false,
+                    state: state.clone(),
+                },
+            );
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| map.clone()));
+        assert!(result.is_err());
+        assert_eq!(state.attempts.get(), panic_at + 1);
+        for id in 0..prefixes.len() {
+            assert_eq!(
+                state.clone_drops.borrow()[id],
+                (id < panic_at) as usize,
+                "panic at {panic_at}, value {id}",
+            );
+        }
+        assert_eq!(*state.source_drops.borrow(), [0; 6]);
+
+        // The failed clone must leave the source intact and independently droppable.
+        assert_eq!(map.len(), prefixes.len());
+        for (id, prefix) in prefixes.into_iter().enumerate() {
+            let value = map.get(&prefix).unwrap();
+            assert_eq!(value.id, id);
+            assert!(!value.is_clone);
+        }
+        drop(map);
+        assert_eq!(*state.source_drops.borrow(), [1; 6]);
+        for id in 0..prefixes.len() {
+            assert_eq!(state.clone_drops.borrow()[id], (id < panic_at) as usize);
+        }
+    }
+}
+
+#[test]
+fn clone_zero_sized_values_counts_clones_and_drops() {
+    use std::{
+        cell::RefCell,
+        panic::{AssertUnwindSafe, catch_unwind},
+    };
+
+    #[derive(Default)]
+    struct State {
+        panic_at: usize,
+        attempts: usize,
+        drops: usize,
+    }
+
+    // A ZST cannot hold a counter reference. Thread-local state keeps counters
+    // isolated from other tests without giving Value any storage.
+    thread_local! {
+        static STATE: RefCell<State> = RefCell::new(State::default());
+    }
+
+    struct Value;
+
+    impl Clone for Value {
+        fn clone(&self) -> Self {
+            STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                let attempt = state.attempts;
+                state.attempts += 1;
+                assert_ne!(attempt, state.panic_at, "intentional ZST clone panic");
+            });
+            Self
+        }
+    }
+
+    impl Drop for Value {
+        fn drop(&mut self) {
+            STATE.with(|state| state.borrow_mut().drops += 1);
+        }
+    }
+
+    assert_eq!(std::mem::size_of::<Value>(), 0);
+    // Three values in each of two blocks, all sharing the allocator's ZST region.
+    let prefixes = [(0u32, 0u8), (0, 1), (0, 2), (0, 5), (0, 6), (0, 7)];
+    // The final iteration succeeds: no seventh clone is attempted.
+    for panic_at in 0..=prefixes.len() {
+        STATE.with(|state| {
+            *state.borrow_mut() = State {
+                panic_at,
+                ..State::default()
+            };
+        });
+        let mut source = PrefixMap::new();
+        for prefix in prefixes {
+            source.insert(prefix, Value);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| source.clone()));
+        match result {
+            Ok(cloned) => {
+                assert_eq!(panic_at, prefixes.len());
+                assert_eq!(cloned.len(), prefixes.len());
+                STATE.with(|state| {
+                    assert_eq!(state.borrow().attempts, prefixes.len());
+                    assert_eq!(state.borrow().drops, 0);
+                });
+                drop(cloned);
+            }
+            Err(_) => {
+                assert!(panic_at < prefixes.len());
+                STATE.with(|state| assert_eq!(state.borrow().attempts, panic_at + 1));
+            }
+        }
+        // Completed blocks and the partial block together own exactly panic_at
+        // successful clones (or all six when cloning succeeds).
+        STATE.with(|state| assert_eq!(state.borrow().drops, panic_at));
+        assert_eq!(source.len(), prefixes.len());
+        for prefix in prefixes {
+            assert!(source.get(&prefix).is_some());
+        }
+        drop(source);
+        STATE.with(|state| assert_eq!(state.borrow().drops, panic_at + prefixes.len()));
+    }
+}

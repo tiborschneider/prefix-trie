@@ -5,7 +5,9 @@ use num_traits::{CheckedAdd, One, Zero};
 use crate::{
     Prefix,
     aggregate::member_coverage,
-    allocator::{AllocIdx, CellAllocator, Loc, NodeAllocator, RawPtr},
+    allocator::{
+        AllocIdx, CellAllocator, DATA_COUNT_TO_TIER, DATA_SPACING, Loc, NodeAllocator, RawPtr,
+    },
     lex_order::{LexNodeIter, masks_after_child, masks_from_data},
     node::{
         DATA_BIT_TO_PREFIX, Key, MultiBitNode, child_bit, child_cover_mask, data_bit,
@@ -1402,15 +1404,22 @@ impl<T: Clone> Clone for Table<T> {
 
         // The cloned node allocator initially contains data_idx values that point into `self`.
         // Clear live data metadata first so `x` can be dropped safely if T::clone panics below.
+        // Also sum live blocks' tier capacities to reserve the value buffer once.
+        let mut capacity = 0;
         let mut stack = vec![Loc::root()];
         while let Some(loc) = stack.pop() {
             let node = self.nodes[loc];
             x.nodes[loc].data_bitmap = 0;
             x.nodes[loc].data_idx = AllocIdx::empty();
+            if std::mem::size_of::<T>() != 0 && node.data_bitmap != 0 && !node.data_idx.is_empty() {
+                let count = node.data_bitmap.count_ones() as usize;
+                capacity += DATA_SPACING[DATA_COUNT_TO_TIER[count] as usize];
+            }
             if node.child_bitmap != 0 {
                 stack.extend(node.child_locs());
             }
         }
+        x.cells.reserve(capacity);
 
         // Clone only live nodes reachable from root via DFS. Freed nodes in the flat
         // array may have stale data_bitmap/data_idx from tier upgrades; visiting them
@@ -1420,14 +1429,14 @@ impl<T: Clone> Clone for Table<T> {
             let node = self.nodes[loc];
             if node.data_bitmap != 0 && !node.data_idx.is_empty() {
                 let count = node.data_bitmap.count_ones() as usize;
-                let data_idx = x.cells.alloc(count);
+                // SAFETY: this live node owns `count` initialized values packed
+                // contiguously at data_idx, with no mutable borrows during cloning.
+                let data_idx =
+                    unsafe { x.cells.alloc_clone_from(&self.cells, node.data_idx, count) };
+                // Publish only after the entire block succeeds. On panic, the
+                // allocator guard cleans up this block; x drops earlier blocks.
                 x.nodes[loc].data_idx = data_idx;
-                for data_loc in node.data_locs() {
-                    // SAFETY: `data_loc` from source's live bitmap; entry is initialized.
-                    let val = unsafe { self.cells.get(data_loc) }.clone();
-                    unsafe { x.cells.write_at(data_idx, data_loc.slot, val) };
-                    x.nodes[loc].set_data_bit(data_loc.bit);
-                }
+                x.nodes[loc].data_bitmap = node.data_bitmap;
             }
             if node.child_bitmap != 0 {
                 stack.extend(node.child_locs());

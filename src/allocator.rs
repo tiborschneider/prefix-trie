@@ -1,6 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    mem::{replace, MaybeUninit},
+    mem::{MaybeUninit, replace},
     ops::{Index, IndexMut},
 };
 
@@ -172,6 +172,11 @@ impl<T> CellAllocator<T> {
         }
     }
 
+    /// Reserve space for additional cells without changing which slots are initialized.
+    pub(crate) fn reserve(&mut self, additional: usize) {
+        self.data.get_mut().reserve(additional);
+    }
+
     pub(crate) fn raw_ptr(&mut self) -> RawPtr<T> {
         self.data.get_mut().as_mut_ptr()
     }
@@ -281,6 +286,94 @@ impl<T> CellAllocator<T> {
             data.extend((0..cap).map(|_| MaybeUninit::uninit()));
             AllocIdx::from_usize(start)
         }
+    }
+
+    /// Clone a packed block directly into a fresh allocation. If cloning panics,
+    /// drop the initialized prefix and return the allocation to the free list.
+    ///
+    /// Reimplements the initialization-guard approach of std's
+    /// `[MaybeUninit<T>]::write_clone_of_slice` (stable since Rust 1.93), combining
+    /// partial-value cleanup and allocation reclamation in a single guard.
+    /// Like std's loop, this can be optimized into memcpy for trivial clones.
+    /// Source: https://doc.rust-lang.org/1.93.0/src/core/mem/maybe_uninit.rs.html
+    /// TODO: Use the std method once MSRV reaches 1.93, retaining allocation cleanup.
+    ///
+    /// # Safety
+    /// `source_idx` must identify `count` initialized, contiguous source values,
+    /// with no live mutable references to them. `count` must be in 1..=NUM_DATA.
+    pub(crate) unsafe fn alloc_clone_from(
+        &mut self,
+        source: &Self,
+        source_idx: AllocIdx,
+        count: usize,
+    ) -> AllocIdx
+    where
+        T: Clone,
+    {
+        debug_assert!((1..=NUM_DATA).contains(&count));
+
+        /// Owns the destination block until every value has been cloned successfully.
+        /// If cloning panics, drops only the initialized prefix and returns the block
+        /// to the allocator; uninitialized slots are never read or dropped. On success,
+        /// the guard is forgotten, transferring ownership of the full block to the caller.
+        struct CloneGuard<'a, T> {
+            allocator: &'a mut CellAllocator<T>,
+            idx: AllocIdx,
+            count: usize,
+            initialized: usize,
+        }
+
+        impl<T> Drop for CloneGuard<'_, T> {
+            fn drop(&mut self) {
+                // SAFETY: the allocation stays live and cannot be reallocated while
+                // this guard holds exclusive access. Only the initialized prefix
+                // contains T values; the remainder must not be read or dropped.
+                unsafe {
+                    let ptr = self
+                        .allocator
+                        .data
+                        .get_mut()
+                        .as_mut_ptr()
+                        .add(self.idx.as_usize())
+                        .cast::<T>();
+                    std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(
+                        ptr,
+                        self.initialized,
+                    ));
+                }
+                self.allocator.free(self.idx, self.count);
+            }
+        }
+
+        // access the original data to clone
+        // SAFETY: shared access to the backing vector; the caller guarantees that
+        // the selected slots are initialized and not mutably borrowed.
+        let source_data = unsafe { &*source.data.get() };
+        let source_slots = &source_data[source_idx.as_usize()..][..count];
+        // SAFETY: MaybeUninit<T> has T's layout, and every selected slot is initialized.
+        let src = unsafe { std::slice::from_raw_parts(source_slots.as_ptr().cast::<T>(), count) };
+
+        // allocate memory
+        let idx = self.alloc(count);
+        let base = idx.as_usize();
+        // create a guard that will cleanup the allocations if T::clone panics.
+        let mut guard = CloneGuard {
+            allocator: self,
+            idx,
+            count,
+            initialized: 0,
+        };
+
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..count {
+            guard.allocator.data.get_mut()[base + i].write(src[i].clone());
+            guard.initialized += 1;
+        }
+
+        // Transfer ownership of the fully initialized block to the caller. The
+        // guard owns only a borrow and must no longer drop values or free the block.
+        std::mem::forget(guard);
+        idx
     }
 
     /// Allocate a new group of given capacity tier. Returns AllocIdx to the start of the group.
@@ -849,6 +942,114 @@ mod tests {
             0,
             "ZST cell allocator must not consume heap memory"
         );
+    }
+
+    #[test]
+    fn test_cell_allocator_clone_panic_cleans_up() {
+        use std::{
+            cell::{Cell, RefCell},
+            panic::{catch_unwind, AssertUnwindSafe},
+            rc::Rc,
+        };
+
+        struct Value {
+            id: usize,
+            panic_at: usize,
+            is_clone: bool,
+            clone_drops: Rc<RefCell<Vec<usize>>>,
+            source_drops: Rc<Cell<usize>>,
+        }
+
+        impl Clone for Value {
+            fn clone(&self) -> Self {
+                if self.id == self.panic_at {
+                    panic!("intentional clone panic at {}", self.id);
+                }
+                Self {
+                    id: self.id,
+                    panic_at: self.panic_at,
+                    is_clone: true,
+                    clone_drops: self.clone_drops.clone(),
+                    source_drops: self.source_drops.clone(),
+                }
+            }
+        }
+
+        impl Drop for Value {
+            fn drop(&mut self) {
+                if self.is_clone {
+                    self.clone_drops.borrow_mut().push(self.id);
+                } else {
+                    self.source_drops.set(self.source_drops.get() + 1);
+                }
+            }
+        }
+
+        // Five values use an eight-slot allocation: padding must not be dropped.
+        const COUNT: usize = 5;
+        for panic_at in 0..COUNT {
+            let clone_drops = Rc::new(RefCell::new(Vec::new()));
+            let source_drops = Rc::new(Cell::new(0));
+            let mut source = CellAllocator::default();
+            let source_idx = source.alloc(COUNT);
+            for id in 0..COUNT {
+                // SAFETY: each reserved slot is written exactly once.
+                unsafe {
+                    source.write_at(
+                        source_idx,
+                        id as u32,
+                        Value {
+                            id,
+                            panic_at,
+                            is_clone: false,
+                            clone_drops: clone_drops.clone(),
+                            source_drops: source_drops.clone(),
+                        },
+                    );
+                }
+            }
+
+            let mut destination = CellAllocator::default();
+            // Make the cloned block start at a nonzero offset.
+            let padding_idx = destination.alloc(1);
+            let expected_idx = AllocIdx::from_usize(1);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                // SAFETY: the source block contains COUNT initialized values,
+                // and none of them are mutably borrowed.
+                unsafe { destination.alloc_clone_from(&source, source_idx, COUNT) }
+            }));
+            assert!(result.is_err());
+            assert_eq!(*clone_drops.borrow(), (0..panic_at).collect::<Vec<_>>());
+            assert_eq!(source_drops.get(), 0);
+
+            // The failed block must be returned to the correct free list.
+            let tier = DATA_COUNT_TO_TIER[COUNT] as usize;
+            assert_eq!(
+                destination.free_lists[tier],
+                vec![expected_idx.as_usize() as u32]
+            );
+            let len = destination.data.get_mut().len();
+            let reused_idx = destination.alloc(COUNT);
+            assert_eq!(reused_idx, expected_idx);
+            assert_eq!(destination.data.get_mut().len(), len);
+            destination.free(reused_idx, COUNT);
+            destination.free(padding_idx, 1);
+
+            // Source values remain initialized and unchanged. CellAllocator does
+            // not drop values itself, so explicitly clean up these originals.
+            for id in 0..COUNT {
+                let slot = &mut source.data.get_mut()[source_idx.as_usize() + id];
+                // SAFETY: this source slot was initialized above and never moved
+                // or dropped by cloning. Drop it exactly once after inspection.
+                unsafe {
+                    assert_eq!(slot.assume_init_ref().id, id);
+                    slot.assume_init_drop();
+                }
+            }
+            source.free(source_idx, COUNT);
+            assert_eq!(source_drops.get(), COUNT);
+            assert_eq!(*clone_drops.borrow(), (0..panic_at).collect::<Vec<_>>());
+        }
     }
 
     #[test]
