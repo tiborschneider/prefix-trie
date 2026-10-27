@@ -124,7 +124,13 @@ and examples.
 
 [`ip_network_table-deps-treebitmap`](https://crates.io/crates/ip_network_table-deps-treebitmap) 
 provides the same data structure (in the following called `TreeBitMap`) and uses a similar 
-algorithm. The following table compares the performance and memory of the two libraries, and 
+algorithm. Besides better performance than the `TreeBitMap`, `prefix-trie` includes a `PrefixSet` 
+analogous to `std::collections::HashSet`. Set operations are exposed through composable trie views, 
+so operations such as union, intersection, difference, covering union, and covering difference can 
+be combined without building temporary maps. `prefix-trie` has an interface similar to 
+`std::collections`, and its longest-prefix matching is not limited to individual host addresses.
+
+The following table compares the performance and memory of the two libraries, and 
 relates them to the `HashMap` and `BTreeMap` of the standard library. Throughput is reported 
 relative to `HashMap` (1.00x = HashMap speed), with absolute throughput in parentheses. **Bold** 
 marks the fastest implementation per row. See `benches/benchmark.rs` for details.
@@ -133,41 +139,127 @@ All benchmarks use IPv4 prefixes from a RIPE RIS peer snapshot (1,042,024 IPv4 p
 246,174 IPv6 prefixes). See `benches/benchmark.rs` and `benches/memory.rs` for details. The 
 benchmark results below were obtained on an AMD EPYC server.
 
-| Benchmark          | `HashMap`             | `PrefixMap`           | `TreeBitMap`        | `BTreeMap`         |
-|--------------------|-----------------------|-----------------------|---------------------|--------------------|
-| *Lookup*           |                       |                       |                     |                    |
-| -> Random access   |                       |                       |                     |                    |
-| ---> IPv4          |   1.00x (7.4 Mops)    | **1.92x (14.2 Mops)** |   1.15x (8.5 Mops)  |   0.46x (3.4 Mops) |
-| ---> IPv6          | **1.00x (11.0 Mops)** |   0.97x (10.7 Mops)   |   0.58x (6.4 Mops)  |   0.45x (4.9 Mops) |
-| -> RIS updates     |                       |                       |                     |                    |
-| ---> IPv4          |   1.00x (17.5 Mops)   | **1.69x (29.5 Mops)** |   0.78x (13.7 Mops) |   0.47x (8.2 Mops) |
-| ---> IPv6          | **1.00x (24.8 Mops)** |   0.63x (15.7 Mops)   |   0.33x (8.2 Mops)  |   0.32x (7.9 Mops) |
-| *Insert & Remove*  |                       |                       |                     |                    |
-| -> Random access   |                       |                       |                     |                    |
-| ---> IPv4          |   1.00x (7.4 Mops)    | **1.04x (7.7 Mops)**  |   0.89x (6.6 Mops)  |   0.43x (3.2 Mops) |
-| ---> IPv6          | **1.00x (10.8 Mops)** |   0.48x (5.2 Mops)    |   0.44x (4.7 Mops)  |   0.39x (4.3 Mops) |
-| -> RIS updates     |                       |                       |                     |                    |
-| ---> IPv4          | **1.00x (17.1 Mops)** |   0.88x (15.0 Mops)   |   0.71x (12.2 Mops) |   0.47x (8.0 Mops) |
-| ---> IPv6          | **1.00x (25.0 Mops)** |   0.33x (8.3 Mops)    |   0.29x (7.3 Mops)  |   0.31x (7.7 Mops) |
-| *Create*           |                       |                       |                     |                    |
-| -> Random order    |                       |                       |                     |                    |
-| ---> IPv4          |   1.00x (7.8 Mops)    | **1.13x (8.8 Mops)**  |   0.95x (7.4 Mops)  |   0.55x (4.3 Mops) |
-| ---> IPv6          | **1.00x (11.4 Mops)** |   0.52x (5.9 Mops)    |   0.43x (4.9 Mops)  |   0.42x (4.8 Mops) |
-| -> Sorted order    |                       |                       |                     |                    |
-| ---> IPv4          |   1.00x (10.3 Mops)   | **1.45x (14.9 Mops)** |   1.04x (10.7 Mops) |   0.85x (8.8 Mops) |
-| ---> IPv6          | **1.00x (11.7 Mops)** |   0.70x (8.2 Mops)    |   0.55x (6.5 Mops)  |   0.51x (6.0 Mops) |
-| -> Scattered order |                       |                       |                     |                    |
-| ---> IPv4          |   1.00x (10.3 Mops)   | **1.02x (10.5 Mops)** |   0.76x (7.8 Mops)  |   0.34x (3.4 Mops) |
-| ---> IPv6          | **1.00x (11.6 Mops)** |   0.59x (6.9 Mops)    |   0.47x (5.5 Mops)  |   0.46x (5.4 Mops) |
-| **Memory**         |                       |                       |                     |                    |
-| -> IPv4            | 26.0 mB               | 12.0 mB (set: 4.0 mB) | **11.0 mB**         | 16.4 mB            |
-| -> IPv6            | 12.5 mB               |  6.0 mB (set: 4.0 mB) |  **4.3 mB**         |  8.1 mB            |
+### Lookup
 
-Besides better performance than the `TreeBitMap`, `prefix-trie` includes a `PrefixSet` analogous 
-to `std::collections::HashSet`. Set operations are exposed through composable trie views, so 
-operations such as union, intersection, difference, covering union, and covering difference can 
-be combined without building temporary maps. `prefix-trie` has an interface similar to 
-`std::collections`, and its longest-prefix matching is not limited to individual host addresses.
+Exact lookup of a prefix, i.e. retrieving the value stored for a whole
+prefix. Throughput is reported relative to `HashMap` (1.00x = HashMap
+speed), with absolute throughput in parentheses. Benchmarked with two
+workloads: prefixes drawn at random from the RIS initial state, and
+prefixes observed in RIS routing-table updates.
+
+| Benchmark       | `HashMap`               | `PrefixMap`             | `TreeBitMap`          | `BTreeMap`           |
+|-----------------|-------------------------|-------------------------|-----------------------|----------------------|
+| *Random access* |                         |                         |                       |                      |
+| --> IPv4        |   1.00x (6.5 Mops/s)    | **1.86x (12.1 Mops/s)** |   1.22x (7.9 Mops/s)  |   0.48x (3.1 Mops/s) |
+| --> IPv6        |   1.00x (9.4 Mops/s)    | **1.06x (10.0 Mops/s)** |   0.67x (6.4 Mops/s)  |   0.51x (4.8 Mops/s) |
+| *RIS updates*   |                         |                         |                       |                      |
+| --> IPv4        |   1.00x (15.1 Mops/s)   | **1.82x (27.6 Mops/s)** |   0.88x (13.3 Mops/s) |   0.52x (7.9 Mops/s) |
+| --> IPv6        | **1.00x (22.0 Mops/s)** |   0.70x (15.5 Mops/s)   |   0.37x (8.1 Mops/s)  |   0.42x (9.3 Mops/s) |
+
+### Insert & Remove
+
+Applying a stream of insertions and removals to a pre-filled table.
+Throughput is reported relative to `HashMap` (1.00x = HashMap speed),
+with absolute throughput in parentheses. Benchmarked with two
+workloads: random insert/remove pairs on prefixes drawn from the RIS
+initial state, and the mutation stream observed from a RIS peer.
+
+| Benchmark       | `HashMap`               | `PrefixMap`            | `TreeBitMap`          | `BTreeMap`           |
+|-----------------|-------------------------|------------------------|-----------------------|----------------------|
+| *Random access* |                         |                        |                       |                      |
+| --> IPv4        |   1.00x (6.3 Mops/s)    | **1.07x (6.8 Mops/s)** |   1.04x (6.6 Mops/s)  |   0.44x (2.8 Mops/s) |
+| --> IPv6        | **1.00x (9.5 Mops/s)**  |   0.51x (4.8 Mops/s)   |   0.51x (4.8 Mops/s)  |   0.46x (4.4 Mops/s) |
+| *RIS updates*   |                         |                        |                       |                      |
+| --> IPv4        | **1.00x (14.8 Mops/s)** |   0.91x (13.4 Mops/s)  |   0.85x (12.5 Mops/s) |   0.51x (7.5 Mops/s) |
+| --> IPv6        | **1.00x (22.4 Mops/s)** |   0.37x (8.2 Mops/s)   |   0.33x (7.5 Mops/s)  |   0.40x (9.0 Mops/s) |
+
+### Create
+
+Building a table from scratch from the prefixes of the RIS initial
+state. Throughput is reported relative to `HashMap` (1.00x = HashMap
+speed), with absolute throughput in parentheses. Benchmarked with three
+insertion orders: random, sorted (lexicographic), and scattered
+(reversed-bit).
+
+| Benchmark         | `HashMap`               | `PrefixMap`             | `TreeBitMap`          | `BTreeMap`           |
+|-------------------|-------------------------|-------------------------|-----------------------|----------------------|
+| *Random order*    |                         |                         |                       |                      |
+| --> IPv4          | **1.00x (9.3 Mops/s)**  |   0.85x (7.9 Mops/s)    |   0.79x (7.3 Mops/s)  |   0.42x (3.9 Mops/s) |
+| --> IPv6          | **1.00x (10.8 Mops/s)** |   0.53x (5.7 Mops/s)    |   0.46x (5.0 Mops/s)  |   0.44x (4.8 Mops/s) |
+| *Sorted order*    |                         |                         |                       |                      |
+| --> IPv4          |   1.00x (9.2 Mops/s)    | **1.45x (13.4 Mops/s)** |   1.22x (11.2 Mops/s) |   0.91x (8.4 Mops/s) |
+| --> IPv6          | **1.00x (10.8 Mops/s)** |   0.72x (7.8 Mops/s)    |   0.61x (6.6 Mops/s)  |   0.68x (7.4 Mops/s) |
+| *Scattered order* |                         |                         |                       |                      |
+| --> IPv4          |   1.00x (9.2 Mops/s)    | **1.04x (9.6 Mops/s)**  |   0.81x (7.5 Mops/s)  |   0.33x (3.0 Mops/s) |
+| --> IPv6          | **1.00x (10.9 Mops/s)** |   0.61x (6.6 Mops/s)    |   0.52x (5.7 Mops/s)  |   0.51x (5.6 Mops/s) |
+
+### Longest-prefix match
+
+Lookup of the longest matching prefix for random host addresses, each
+drawn inside one of the prefixes of the RIS initial state, so that every
+lookup has a match at some depth. `HashMap` and `BTreeMap` are omitted,
+since they do not support longest-prefix match; throughput is reported
+relative to `TreeBitMap` (1.00x = TreeBitMap speed), with absolute
+throughput in parentheses.
+
+| Benchmark | `PrefixMap`              | `TreeBitMap`          |
+|-----------|--------------------------|-----------------------|
+| IPv4      | **1.36x (22.9 Mops/s)**  |   1.00x (16.8 Mops/s) |
+| IPv6      | **1.14x (104.7 Mops/s)** |   1.00x (91.9 Mops/s) |
+
+### Clone
+
+Copying an entire routing table built from the RIS initial state.
+TrivialClone uses `u32` values; NonTrivialClone uses a wrapper whose
+clone passes the value through `black_box`. `PrefixMap` uses its bulk
+clone specialization for `u32` only with the `nightly` feature.
+Throughput is measured in elements per second relative to `HashMap`
+(1.00x = HashMap speed), with absolute throughput in parentheses.
+elem/s is the number of elements in the table divided by the time to
+copy it, not the number of whole-table copies per second.
+
+| Benchmark         | `HashMap`                 | `PrefixMap`               | `TreeBitMap`            | `BTreeMap`             |
+|-------------------|---------------------------|---------------------------|-------------------------|------------------------|
+| *TrivialClone*    |                           |                           |                         |                        |
+| --> IPv4          |   1.00x (361.9 Melem/s)   | **2.64x (953.9 Melem/s)** |   0.02x (6.1 Melem/s) † |   0.09x (32.9 Melem/s) |
+| --> IPv6          |   1.00x (122.7 Melem/s)   | **12.76x (1.6 Gelem/s)**  |   0.03x (3.3 Melem/s) † |   0.35x (43.4 Melem/s) |
+| *NonTrivialClone* |                           |                           |                         |                        |
+| --> IPv4          | **1.00x (182.8 Melem/s)** |   0.67x (122.8 Melem/s)   |   0.03x (6.1 Melem/s) † |   0.16x (29.1 Melem/s) |
+| --> IPv6          | **1.00x (102.7 Melem/s)** |   0.92x (94.0 Melem/s)    |   0.03x (3.3 Melem/s) † |   0.44x (44.8 Melem/s) |
+
+† `TreeBitMap` does not implement `Clone`; it is copied by iterating the source table and rebuilding the copy.
+
+### Iteration
+
+Traversing and consuming all elements of a table built from the RIS
+initial state, without sorting the output of the unordered maps.
+Throughput is measured in elements per second and reported relative to
+`HashMap` (1.00x = HashMap speed), with absolute throughput in parentheses.
+
+| Benchmark | `HashMap`                 | `PrefixMap`              | `TreeBitMap`           | `BTreeMap`                |
+|-----------|---------------------------|--------------------------|------------------------|---------------------------|
+| IPv4      | **1.00x (430.0 Melem/s)** |   0.16x (68.1 Melem/s) † |   0.04x (15.4 Melem/s) |   0.12x (53.7 Melem/s) ‡  |
+| IPv6      | **1.00x (418.7 Melem/s)** |   0.08x (32.1 Melem/s) † |   0.02x (7.5 Melem/s)  |   0.44x (182.6 Melem/s) ‡ |
+
+† `PrefixMap` yields entries in lexicographic prefix order.
+‡ `BTreeMap` yields entries in key order (the prefix type's `Ord` ordering).
+
+### Aggregation
+
+Aggregating the whole table built from the RIS initial state with
+optimal routing table construction: `set` is the bitmap-only
+`PrefixSet::aggregate` (drop + merge), `map` the value-aware
+`PrefixMap::aggregate`, and `ortc` `PrefixMap::aggregate_fill_default`.
+Each prefix is assigned a next hop from 1..=32 (emulating 32
+interfaces), so the ORTC actually merges. Reported as absolute time per
+full-table aggregation; the three variants perform different operations
+and are not directly comparable.
+
+| Benchmark | `set`   | `map`    | `ortc`   |
+|-----------|---------|----------|----------|
+| IPv4      |   26 ms |   464 ms |   498 ms |
+| IPv6      |   14 ms |   215 ms |   241 ms |
+
 
 ## Migrate to version 0.9
 
