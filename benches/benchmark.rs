@@ -153,10 +153,11 @@ pub fn bgp_lpm_random_ipv6(c: &mut Criterion) {
     bgp_lpm_random_for::<Ipv6Net>(c, "bgp-lpm-random-ipv6");
 }
 
-fn bench_clone_one<P, M>(group: &mut BenchmarkGroup<'_, WallTime>, setup: &[Insn<P>])
+fn bench_clone_one<P, T, M>(group: &mut BenchmarkGroup<'_, WallTime>, setup: &[Insn<P>])
 where
     P: BenchPrefix,
-    M: BenchTraverse<P>,
+    T: BenchValue,
+    M: BenchTraverse<P, T>,
 {
     let mut map = M::new_empty();
     map.run(setup);
@@ -196,10 +197,18 @@ where
 
     let mut group = c.benchmark_group(format!("bgp-clone-{family}"));
     group.throughput(Throughput::Elements(len));
-    bench_clone_one::<P, PrefixMap<P, u32>>(&mut group, &setup);
-    bench_clone_one::<P, P::IpLookupTable>(&mut group, &setup);
-    bench_clone_one::<P, HashMap<P, u32>>(&mut group, &setup);
-    bench_clone_one::<P, BTreeMap<P, u32>>(&mut group, &setup);
+    bench_clone_one::<P, u32, PrefixMap<P, u32>>(&mut group, &setup);
+    bench_clone_one::<P, u32, P::IpLookupTable>(&mut group, &setup);
+    bench_clone_one::<P, u32, HashMap<P, u32>>(&mut group, &setup);
+    bench_clone_one::<P, u32, BTreeMap<P, u32>>(&mut group, &setup);
+    group.finish();
+
+    let mut group = c.benchmark_group(format!("bgp-clone-nontrivial-{family}"));
+    group.throughput(Throughput::Elements(len));
+    bench_clone_one::<P, NonTrivialClone, PrefixMap<P, NonTrivialClone>>(&mut group, &setup);
+    bench_clone_one::<P, NonTrivialClone, P::TraverseTable<NonTrivialClone>>(&mut group, &setup);
+    bench_clone_one::<P, NonTrivialClone, HashMap<P, NonTrivialClone>>(&mut group, &setup);
+    bench_clone_one::<P, NonTrivialClone, BTreeMap<P, NonTrivialClone>>(&mut group, &setup);
     group.finish();
 
     let mut group = c.benchmark_group(format!("bgp-iter-{family}"));

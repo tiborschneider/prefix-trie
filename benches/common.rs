@@ -44,7 +44,7 @@ pub enum Insn<P> {
 
 impl<P: Prefix + Copy> Insn<P> {
     #[inline(always)]
-    pub fn execute<M: BenchMap<P>>(&self, map: &mut M) -> Option<u32> {
+    pub fn execute<T: BenchValue, M: BenchMap<P, T>>(&self, map: &mut M) -> Option<u32> {
         match self {
             Insn::Insert(p, v) => {
                 map.insert(*p, *v);
@@ -79,6 +79,7 @@ pub enum SortingOrder {
 pub trait DataSampler: Prefix + Sized + Copy {
     /// Associated Type to achieve the type bounds on the prefix.
     type IpLookupTable: BenchMap<Self> + BenchLpm<Self> + BenchTraverse<Self>;
+    type TraverseTable<T: BenchValue>: BenchTraverse<Self, T>;
 
     fn ris_peer_initial_state(seed: u64, order: SortingOrder) -> Vec<Self>;
     fn ris_peer_mutations(seed: u64) -> Vec<Insn<Self>>;
@@ -140,6 +141,7 @@ fn parquet_reader(filename: &str) -> SerializedFileReader<File> {
 
 impl DataSampler for Ipv4Net {
     type IpLookupTable = IpLookupTable<Ipv4Addr, u32>;
+    type TraverseTable<T: BenchValue> = IpLookupTable<Ipv4Addr, T>;
 
     fn ris_peer_initial_state(seed: u64, order: SortingOrder) -> Vec<Ipv4Net> {
         let reader = parquet_reader(PEER_INITIAL_STATE_IPV4_PARQUET);
@@ -184,6 +186,7 @@ impl DataSampler for Ipv4Net {
 
 impl DataSampler for Ipv6Net {
     type IpLookupTable = IpLookupTable<Ipv6Addr, u32>;
+    type TraverseTable<T: BenchValue> = IpLookupTable<Ipv6Addr, T>;
 
     fn ris_peer_initial_state(seed: u64, order: SortingOrder) -> Vec<Ipv6Net> {
         let reader = parquet_reader(PEER_INITIAL_STATE_IPV6_PARQUET);
@@ -226,7 +229,38 @@ impl DataSampler for Ipv6Net {
     }
 }
 
-pub trait BenchMap<P: Prefix + Copy> {
+/// Value whose clone is observable and cannot use trivial-clone specialization.
+pub struct NonTrivialClone(pub u32);
+
+impl Clone for NonTrivialClone {
+    fn clone(&self) -> Self {
+        Self(std::hint::black_box(self.0))
+    }
+}
+
+impl From<u32> for NonTrivialClone {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl BenchValue for NonTrivialClone {
+    fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
+
+pub trait BenchValue: Clone + From<u32> {
+    fn as_u32(&self) -> u32;
+}
+
+impl BenchValue for u32 {
+    fn as_u32(&self) -> u32 {
+        *self
+    }
+}
+
+pub trait BenchMap<P: Prefix + Copy, T: BenchValue = u32> {
     const NAME: &'static str;
     fn new_empty() -> Self;
     fn insert(&mut self, prefix: P, val: u32);
@@ -242,7 +276,7 @@ pub trait BenchMap<P: Prefix + Copy> {
     }
 }
 
-impl<P: Prefix + Copy> BenchMap<P> for PrefixMap<P, u32> {
+impl<P: Prefix + Copy, T: BenchValue> BenchMap<P, T> for PrefixMap<P, T> {
     const NAME: &'static str = "PrefixMap";
 
     fn new_empty() -> Self {
@@ -250,15 +284,15 @@ impl<P: Prefix + Copy> BenchMap<P> for PrefixMap<P, u32> {
     }
 
     fn insert(&mut self, prefix: P, val: u32) {
-        self.insert(prefix, val);
+        self.insert(prefix, T::from(val));
     }
 
     fn remove(&mut self, prefix: P) -> Option<u32> {
-        self.remove(&prefix)
+        self.remove(&prefix).map(|v| v.as_u32())
     }
 
     fn exact_match(&self, prefix: P) -> Option<u32> {
-        self.get(&prefix).copied()
+        self.get(&prefix).map(|v| v.as_u32())
     }
 }
 
@@ -287,7 +321,7 @@ impl BenchLpm<Ipv6Net> for IpLookupTable<Ipv6Addr, u32> {
 
 /// Whole-map copying and native entry traversal, without imposing a common iteration order.
 /// TreeBitMap is copied by rebuilding because it does not implement `Clone`.
-pub trait BenchTraverse<P: Prefix + Copy>: BenchMap<P> {
+pub trait BenchTraverse<P: Prefix + Copy, T: BenchValue = u32>: BenchMap<P, T> {
     fn clone_map(&self) -> Self;
     fn consume_entries(&self);
 }
@@ -298,7 +332,7 @@ fn consume_iter(iter: impl Iterator) {
     });
 }
 
-impl<P: Prefix + Copy> BenchTraverse<P> for PrefixMap<P, u32> {
+impl<P: Prefix + Copy, T: BenchValue> BenchTraverse<P, T> for PrefixMap<P, T> {
     fn clone_map(&self) -> Self {
         self.clone()
     }
@@ -308,7 +342,7 @@ impl<P: Prefix + Copy> BenchTraverse<P> for PrefixMap<P, u32> {
     }
 }
 
-impl<P: Prefix + Copy + Hash + Eq> BenchTraverse<P> for HashMap<P, u32> {
+impl<P: Prefix + Copy + Hash + Eq, T: BenchValue> BenchTraverse<P, T> for HashMap<P, T> {
     fn clone_map(&self) -> Self {
         self.clone()
     }
@@ -318,7 +352,7 @@ impl<P: Prefix + Copy + Hash + Eq> BenchTraverse<P> for HashMap<P, u32> {
     }
 }
 
-impl<P: Prefix + Copy + Ord> BenchTraverse<P> for BTreeMap<P, u32> {
+impl<P: Prefix + Copy + Ord, T: BenchValue> BenchTraverse<P, T> for BTreeMap<P, T> {
     fn clone_map(&self) -> Self {
         self.clone()
     }
@@ -328,11 +362,11 @@ impl<P: Prefix + Copy + Ord> BenchTraverse<P> for BTreeMap<P, u32> {
     }
 }
 
-impl BenchTraverse<Ipv4Net> for IpLookupTable<Ipv4Addr, u32> {
+impl<T: BenchValue> BenchTraverse<Ipv4Net, T> for IpLookupTable<Ipv4Addr, T> {
     fn clone_map(&self) -> Self {
         let mut copy = Self::new();
         for (addr, len, value) in self.iter() {
-            copy.insert(addr, len, *value);
+            copy.insert(addr, len, value.clone());
         }
         copy
     }
@@ -342,11 +376,11 @@ impl BenchTraverse<Ipv4Net> for IpLookupTable<Ipv4Addr, u32> {
     }
 }
 
-impl BenchTraverse<Ipv6Net> for IpLookupTable<Ipv6Addr, u32> {
+impl<T: BenchValue> BenchTraverse<Ipv6Net, T> for IpLookupTable<Ipv6Addr, T> {
     fn clone_map(&self) -> Self {
         let mut copy = Self::new();
         for (addr, len, value) in self.iter() {
-            copy.insert(addr, len, *value);
+            copy.insert(addr, len, value.clone());
         }
         copy
     }
@@ -356,7 +390,7 @@ impl BenchTraverse<Ipv6Net> for IpLookupTable<Ipv6Addr, u32> {
     }
 }
 
-impl<P: Prefix + Copy + Hash + Eq> BenchMap<P> for HashMap<P, u32> {
+impl<P: Prefix + Copy + Hash + Eq, T: BenchValue> BenchMap<P, T> for HashMap<P, T> {
     const NAME: &'static str = "HashMap";
 
     fn new_empty() -> Self {
@@ -364,19 +398,19 @@ impl<P: Prefix + Copy + Hash + Eq> BenchMap<P> for HashMap<P, u32> {
     }
 
     fn insert(&mut self, prefix: P, val: u32) {
-        self.insert(prefix, val);
+        self.insert(prefix, T::from(val));
     }
 
     fn remove(&mut self, prefix: P) -> Option<u32> {
-        self.remove(&prefix)
+        self.remove(&prefix).map(|v| v.as_u32())
     }
 
     fn exact_match(&self, prefix: P) -> Option<u32> {
-        self.get(&prefix).copied()
+        self.get(&prefix).map(|v| v.as_u32())
     }
 }
 
-impl<P: Prefix + Copy + Ord + Eq> BenchMap<P> for BTreeMap<P, u32> {
+impl<P: Prefix + Copy + Ord + Eq, T: BenchValue> BenchMap<P, T> for BTreeMap<P, T> {
     const NAME: &'static str = "BTreeMap";
 
     fn new_empty() -> Self {
@@ -384,19 +418,19 @@ impl<P: Prefix + Copy + Ord + Eq> BenchMap<P> for BTreeMap<P, u32> {
     }
 
     fn insert(&mut self, prefix: P, val: u32) {
-        self.insert(prefix, val);
+        self.insert(prefix, T::from(val));
     }
 
     fn remove(&mut self, prefix: P) -> Option<u32> {
-        self.remove(&prefix)
+        self.remove(&prefix).map(|v| v.as_u32())
     }
 
     fn exact_match(&self, prefix: P) -> Option<u32> {
-        self.get(&prefix).copied()
+        self.get(&prefix).map(|v| v.as_u32())
     }
 }
 
-impl BenchMap<Ipv4Net> for IpLookupTable<Ipv4Addr, u32> {
+impl<T: BenchValue> BenchMap<Ipv4Net, T> for IpLookupTable<Ipv4Addr, T> {
     const NAME: &'static str = "TreeBitMap";
 
     fn new_empty() -> Self {
@@ -404,20 +438,21 @@ impl BenchMap<Ipv4Net> for IpLookupTable<Ipv4Addr, u32> {
     }
 
     fn insert(&mut self, prefix: Ipv4Net, val: u32) {
-        self.insert(prefix.addr(), prefix.prefix_len() as u32, val);
+        self.insert(prefix.addr(), prefix.prefix_len() as u32, T::from(val));
     }
 
     fn remove(&mut self, prefix: Ipv4Net) -> Option<u32> {
         self.remove(prefix.addr(), prefix.prefix_len() as u32)
+            .map(|v| v.as_u32())
     }
 
     fn exact_match(&self, prefix: Ipv4Net) -> Option<u32> {
         self.exact_match(prefix.addr(), prefix.prefix_len() as u32)
-            .copied()
+            .map(|v| v.as_u32())
     }
 }
 
-impl BenchMap<Ipv6Net> for IpLookupTable<Ipv6Addr, u32> {
+impl<T: BenchValue> BenchMap<Ipv6Net, T> for IpLookupTable<Ipv6Addr, T> {
     const NAME: &'static str = "TreeBitMap";
 
     fn new_empty() -> Self {
@@ -425,15 +460,16 @@ impl BenchMap<Ipv6Net> for IpLookupTable<Ipv6Addr, u32> {
     }
 
     fn insert(&mut self, prefix: Ipv6Net, val: u32) {
-        self.insert(prefix.addr(), prefix.prefix_len() as u32, val);
+        self.insert(prefix.addr(), prefix.prefix_len() as u32, T::from(val));
     }
 
     fn remove(&mut self, prefix: Ipv6Net) -> Option<u32> {
         self.remove(prefix.addr(), prefix.prefix_len() as u32)
+            .map(|v| v.as_u32())
     }
 
     fn exact_match(&self, prefix: Ipv6Net) -> Option<u32> {
         self.exact_match(prefix.addr(), prefix.prefix_len() as u32)
-            .copied()
+            .map(|v| v.as_u32())
     }
 }
