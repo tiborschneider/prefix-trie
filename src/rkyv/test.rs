@@ -213,7 +213,36 @@ mod set {
 
 mod joint {
     use super::*;
-    type P = JointTestPrefix;
+    type P = (bool, TestPrefix);
+
+    impl JointPrefix for P {
+        type P1 = TestPrefix;
+        type P2 = TestPrefix;
+
+        fn p1_or_p2(self) -> either::Either<Self::P1, Self::P2> {
+            if self.0 {
+                either::Left(self.1)
+            } else {
+                either::Right(self.1)
+            }
+        }
+
+        fn p1_or_p2_ref(&self) -> either::Either<&Self::P1, &Self::P2> {
+            if self.0 {
+                either::Left(&self.1)
+            } else {
+                either::Right(&self.1)
+            }
+        }
+
+        fn from_p1(p: &Self::P1) -> Self {
+            (true, *p)
+        }
+
+        fn from_p2(p: &Self::P2) -> Self {
+            (false, *p)
+        }
+    }
 
     mod map {
         use super::*;
@@ -412,7 +441,6 @@ mod helper {
     }
 
     impl_into_native!(TestPrefix);
-    impl_into_native!(JointTestPrefix);
     impl_into_native!(usize);
     impl_into_native!(bool);
     impl_into_native!(u32);
@@ -452,7 +480,6 @@ mod helper {
     }
 
     impl_into_owned!(TestPrefix);
-    impl_into_owned!(JointTestPrefix);
     impl_into_owned!(usize);
     impl_into_owned!(bool);
     impl_into_owned!(u32);
