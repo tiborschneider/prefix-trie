@@ -1,6 +1,7 @@
 //! Module that contains the implementation for the iterators
 
 use num_traits::Zero;
+use smallvec::SmallVec;
 
 use crate::{
     Prefix,
@@ -375,7 +376,8 @@ where
 pub struct Cover<'a, P: Prefix, T> {
     table: &'a Table<T>,
     next_loc: Option<Loc>,
-    lpm_elements: Vec<DataIdx>,
+    // At most K covering prefixes can match within one node
+    lpm_elements: SmallVec<[DataIdx; K as usize]>,
     key: P::R,
     prefix_len: u32,
     depth: u32,
@@ -385,7 +387,7 @@ impl<'a, P: Prefix, T> Cover<'a, P, T> {
     pub(crate) fn new(table: &'a PrefixMap<P, T>, prefix: &P) -> Self {
         let key = prefix.repr();
         let prefix_len = prefix.prefix_len() as u32;
-        let lpm_elements = Vec::new();
+        let lpm_elements = SmallVec::new();
         let next_loc = Some(Loc::root());
         Self {
             table: &table.table,
@@ -479,4 +481,33 @@ pub(crate) fn lpm_children_iter_start<P: Prefix, T>(
     let key = prefix.repr();
     let prefix_len = prefix.prefix_len() as u32;
     table.lex_iter_at(key, prefix_len)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check_cover_stays_inline<P: Prefix>(key: P::R) {
+        let mut map = PrefixMap::<P, ()>::new();
+
+        // Fill every prefix level to exercise the maximum ancestors per node
+        for len in 0..=P::num_bits() as u8 {
+            map.insert(P::from_repr_len(key, len), ());
+        }
+
+        // Query the full address to traverse every populated node
+        let query = P::from_repr_len(key, P::num_bits() as u8);
+        let mut cover = map.cover(&query);
+
+        // Check that every batch uses inline storage
+        while cover.next().is_some() {
+            assert!(!cover.lpm_elements.spilled());
+        }
+    }
+
+    #[test]
+    fn cover_stays_inline() {
+        check_cover_stays_inline::<(u32, u8)>(u32::MAX);
+        check_cover_stays_inline::<(u128, u8)>(u128::MAX);
+    }
 }
