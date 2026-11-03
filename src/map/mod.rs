@@ -12,11 +12,35 @@ pub use iter::*;
 use super::table::{Location, Table, K};
 
 /// Prefix map implemented as a TreeBitMap.
-#[derive(Clone)]
 pub struct PrefixMap<P, T> {
     table: Table<T>,
     pub(crate) count: usize,
     marker: PhantomData<P>,
+}
+
+impl<P, T: Clone> Clone for PrefixMap<P, T> {
+    fn clone(&self) -> Self {
+        Self {
+            table: self.table.clone(),
+            count: self.count,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<P, T: Copy> PrefixMap<P, T> {
+    /// Clone the map by copying nodes and values in bulk instead of cloning each value.
+    /// Free slots are copied as well.
+    ///
+    /// Requires `Copy`. With `nightly` enabled, [`clone`](Clone::clone) will call this function
+    /// automatically if `T` implements `TrivialClone`.
+    pub fn clone_memcpy(&self) -> Self {
+        Self {
+            table: self.table.clone_memcpy(),
+            count: self.count,
+            marker: PhantomData,
+        }
+    }
 }
 
 impl<P: Prefix + PartialEq, T: PartialEq> PartialEq for PrefixMap<P, T> {
@@ -52,22 +76,6 @@ where
         Self {
             table,
             count,
-            marker: PhantomData,
-        }
-    }
-
-    /// Clone the map by copying nodes and values in bulk instead of cloning each value.
-    /// Free slots are copied as well.
-    ///
-    /// Requires `Copy`. With `nightly` enabled, [`clone`](Clone::clone) will call this function
-    /// automatically if `T` implements `TrivialClone`.
-    pub fn clone_memcpy(&self) -> Self
-    where
-        T: Copy,
-    {
-        Self {
-            table: self.table.clone_memcpy(),
-            count: self.count,
             marker: PhantomData,
         }
     }
