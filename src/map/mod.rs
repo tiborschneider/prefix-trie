@@ -59,8 +59,8 @@ where
     /// Clone the map by copying nodes and values in bulk instead of cloning each value.
     /// Free slots are copied as well.
     ///
-    /// Requires `Copy`. With `nightly` enabled, [`clone`](Clone::clone) already does this, so
-    /// calling this method explicitly is unnecessary.
+    /// Requires `Copy`. With `nightly` enabled, [`clone`](Clone::clone) will call this function
+    /// automatically if `T` implements `TrivialClone`.
     pub fn clone_memcpy(&self) -> Self
     where
         T: Copy,

@@ -51,11 +51,11 @@ impl<P: JointPrefix, T> JointPrefixMap<P, T> {
 
     /// Clone the map by copying nodes and values in bulk instead of cloning each value.
     ///
-    /// Requires `Copy`. With `nightly` enabled, [`clone`](Clone::clone) already does this, so
-    /// calling this method explicitly is unnecessary.
+    /// Requires `Copy`. With `nightly` enabled, [`clone`](Clone::clone) will call this function
+    /// automatically if `T` implements `TrivialClone`.
     pub fn clone_memcpy(&self) -> Self
     where
-        T: Copy
+        T: Copy,
     {
         Self {
             t1: self.t1.clone_memcpy(),

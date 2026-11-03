@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Parse criterion JSON output and produce a markdown summary.
 
-Run benchmarks first with: cargo bench --features ipnet
+Run benchmarks first with: cargo bench --features ipnet,nightly
 Then run this script to generate the results tables.
 
 Each measurement kind gets its own section: a description of the experiment
@@ -343,7 +343,7 @@ def render_section(section):
 def main():
     if not os.path.isdir(CRITERION_DIR):
         print(f"No criterion output found at {CRITERION_DIR}", file=sys.stderr)
-        print("Run benchmarks first: cargo bench --features ipnet", file=sys.stderr)
+        print("Run benchmarks first: cargo bench --features ipnet,nightly", file=sys.stderr)
         sys.exit(1)
 
     print("Collecting results from criterion JSON output...\n")

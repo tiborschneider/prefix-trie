@@ -3,17 +3,17 @@
 use num_traits::{CheckedAdd, One, Zero};
 
 use crate::{
-    Prefix,
     aggregate::member_coverage,
     allocator::{
-        AllocIdx, CellAllocator, DATA_COUNT_TO_TIER, DATA_SPACING, Loc, NodeAllocator, RawPtr,
+        AllocIdx, CellAllocator, Loc, NodeAllocator, RawPtr, DATA_COUNT_TO_TIER, DATA_SPACING,
     },
-    lex_order::{LexNodeIter, masks_after_child, masks_from_data},
+    lex_order::{masks_after_child, masks_from_data, LexNodeIter},
     node::{
-        DATA_BIT_TO_PREFIX, Key, MultiBitNode, child_bit, child_cover_mask, data_bit,
-        data_cover_mask, extend_repr,
+        child_bit, child_cover_mask, data_bit, data_cover_mask, extend_repr, Key, MultiBitNode,
+        DATA_BIT_TO_PREFIX,
     },
     prefix::mask_from_prefix_len,
+    Prefix,
 };
 
 // ============================================================================
