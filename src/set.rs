@@ -19,7 +19,7 @@ use super::{
 /// [`AsView`].
 pub struct PrefixSet<P>(pub(crate) PrefixMap<P, ()>);
 
-impl<P: Prefix> Clone for PrefixSet<P> {
+impl<P> Clone for PrefixSet<P> {
     fn clone(&self) -> Self {
         Self(self.0.clone_memcpy())
     }

@@ -9,7 +9,7 @@ mod test;
 use either::{Left, Right};
 
 /// A Joint prefix map, implemented as two separate prefix trees.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "serde",
@@ -26,6 +26,15 @@ where
     pub t1: PrefixMap<P::P1, T>,
     /// PrefixMap that corresponds to the second prefix type
     pub t2: PrefixMap<P::P2, T>,
+}
+
+impl<P: JointPrefix, T: Clone> Clone for JointPrefixMap<P, T> {
+    fn clone(&self) -> Self {
+        Self {
+            t1: self.t1.clone(),
+            t2: self.t2.clone(),
+        }
+    }
 }
 
 impl<P, T> Default for JointPrefixMap<P, T>

@@ -12,7 +12,7 @@ use super::{map::CoverKeys, JointPrefix};
 ///
 /// Access the individual sets `self.t1` and `self.t2` to perform set operations (using
 /// [`crate::AsView`]).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "serde",
@@ -26,6 +26,15 @@ pub struct JointPrefixSet<P: JointPrefix> {
     pub t1: PrefixSet<P::P1>,
     /// PrefixSet that corresponds to the second prefix type
     pub t2: PrefixSet<P::P2>,
+}
+
+impl<P: JointPrefix> Clone for JointPrefixSet<P> {
+    fn clone(&self) -> Self {
+        Self {
+            t1: self.t1.clone(),
+            t2: self.t2.clone(),
+        }
+    }
 }
 
 impl<P: JointPrefix> JointPrefixSet<P> {
